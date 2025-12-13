@@ -75,7 +75,7 @@ fn parse_line(line_number: usize, _line: &str) -> Option<CombatEvent> {
     Some(event)
 }
 
-pub fn parse_timestamp(input: &str) -> Option<(&str, Timestamp)> {
+fn parse_timestamp(input: &str) -> Option<(&str, Timestamp)> {
     let b = input.as_bytes();
     if b.len() < 14 || b[0] != b'[' || b[3] != b':' || b[6] != b':' || b[9] != b'.' || b[13] != b']'
     {
@@ -98,11 +98,7 @@ pub fn parse_timestamp(input: &str) -> Option<(&str, Timestamp)> {
     ))
 }
 
-// [Dread Master Bestia {3273941900591104}:5320000112163|(137.28,-120.98,-8.85,81.28)|(0/19129210)]
-// [@Galen Ayder#690129185314118|(-4700.43,-4750.48,710.03,-0.71)|(1/414851)]
-// [@Jerran Zeva#689501114780828/Raina Temple {493328533553152}:87481369009487|(4749.87,4694.53,710.05,0.00)|(288866/288866)]
-
-pub fn parse_entity(input: &str) -> Option<(&str, Entity)> {
+fn parse_entity(input: &str) -> Option<(&str, Entity)> {
     let bytes = input.as_bytes();
     let segment_start_pos = memchr(b'[', bytes)?;
     let segment_end_pos = memchr(b']', bytes)?;
@@ -146,7 +142,7 @@ pub fn parse_entity(input: &str) -> Option<(&str, Entity)> {
     ))
 }
 
-pub fn parse_entity_health(input: &str) -> Option<(i32, i32)> {
+fn parse_entity_health(input: &str) -> Option<(i32, i32)> {
     let bytes = input.as_bytes();
     let health_start_pos = memchr(b'(', bytes);
     let health_delim_pos = memchr(b'/', bytes);
@@ -158,7 +154,7 @@ pub fn parse_entity_health(input: &str) -> Option<(i32, i32)> {
     Some((current_health, health_end_pos))
 }
 
-pub fn parse_entity_name_id(input: &str) -> Option<(&str, i64, i64, EntityType)> {
+fn parse_entity_name_id(input: &str) -> Option<(&str, i64, i64, EntityType)> {
     let bytes = input.as_bytes();
 
     let end_brack_pos = memchr(b'}', bytes);
@@ -196,7 +192,7 @@ pub fn parse_entity_name_id(input: &str) -> Option<(&str, i64, i64, EntityType)>
     Some((npc_name, npc_char_id, npc_log_id, EntityType::Npc))
 }
 
-pub fn parse_action(input: &str) -> Option<(&str, Action)> {
+fn parse_action(input: &str) -> Option<(&str, Action)> {
     let bytes = input.as_bytes();
 
     let segment_start_pos = memchr(b'[', bytes)?;
@@ -226,7 +222,7 @@ pub fn parse_action(input: &str) -> Option<(&str, Action)> {
     ))
 }
 
-pub fn parse_effect(input: &str) -> Option<(&str, Effect)> {
+fn parse_effect(input: &str) -> Option<(&str, Effect)> {
     let bytes = input.as_bytes();
     let segment_start_pos = memchr(b'[', bytes)?;
     let segment_end_pos = memchr(b']', bytes)?;
