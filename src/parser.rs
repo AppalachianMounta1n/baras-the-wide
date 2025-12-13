@@ -63,7 +63,7 @@ fn parse_line(line_number: usize, _line: &str) -> Option<CombatEvent> {
     let effect_segment = &_line[brackets[4] + 1..end_brackets[4]];
     let details_segment = &_line[end_brackets[4] + 1..];
 
-    let ts = parse_timestamp(time_segment)?;
+    let timestamp = parse_timestamp(time_segment)?;
     let source_entity = parse_entity(source_entity_segment)?;
     let target_entity = parse_entity(target_entity_segment)?;
     let action = parse_action(action_segment)?;
@@ -79,7 +79,7 @@ fn parse_line(line_number: usize, _line: &str) -> Option<CombatEvent> {
 
     let event = CombatEvent {
         line_number,
-        timestamp: ts,
+        timestamp,
         source_entity,
         target_entity,
         action,
