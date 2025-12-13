@@ -1,10 +1,9 @@
-use crate::event_models::{CombatEvent, Entity, EntityType, Timestamp};
+use crate::event_models::*;
 use memchr::memchr;
 use memchr::memchr_iter;
 use memmap2::Mmap;
 use rayon::prelude::*;
 use std::fs::File;
-use std::io::pipe;
 use std::option::Option;
 use std::path::Path;
 
@@ -51,19 +50,24 @@ pub fn parse_log_file<P: AsRef<Path>>(path: P) -> std::io::Result<Vec<CombatEven
 fn parse_line(line_number: usize, _line: &str) -> Option<CombatEvent> {
     let (_remaining, ts) = parse_timestamp(_line)?;
     let (_remaining, source_entity) = parse_entity(_remaining)?;
-    // println!("{_remaining}");
     let (_remaining, target_entity) = parse_entity(_remaining)?;
+
+    let (_remaining, action) = parse_action(_remaining)?;
 
     let target_entity = if target_entity.entity_type == EntityType::SelfReference {
         source_entity.clone()
     } else {
         target_entity
     };
+
+    let (_remaining, effect) = parse_effect(_remaining)?;
     let event = CombatEvent {
         line_number,
         timestamp: ts,
         source_entity,
         target_entity,
+        action,
+        effect,
         ..Default::default()
     };
 
@@ -189,4 +193,127 @@ pub fn parse_entity_name_id(input: &str) -> Option<(&str, i64, i64, EntityType)>
     let npc_log_id = parse_i64!(&input[end_brack_pos? + 2..]);
 
     Some((npc_name, npc_char_id, npc_log_id, EntityType::Npc))
+}
+
+pub fn parse_action(input: &str) -> Option<(&str, Action)> {
+    let bytes = input.as_bytes();
+
+    let segment_start_pos = memchr(b'[', bytes)?;
+    let segment_end_pos = memchr(b']', bytes)?;
+    let end_brack_pos = memchr(b'}', bytes);
+    let start_brack_pos = memchr(b'{', bytes);
+    if segment_end_pos <= 2 {
+        return Some((
+            &input[segment_end_pos + 1..],
+            Action {
+                ..Default::default()
+            },
+        ));
+    }
+
+    let action_name = input[segment_start_pos + 1..start_brack_pos?]
+        .trim()
+        .to_string();
+    let action_id = parse_i64!(input[start_brack_pos? + 1..end_brack_pos?]);
+
+    Some((
+        &input[segment_end_pos + 1..],
+        Action {
+            name: action_name,
+            action_id,
+        },
+    ))
+}
+
+pub fn parse_effect(input: &str) -> Option<(&str, Effect)> {
+    let bytes = input.as_bytes();
+    let segment_start_pos = memchr(b'[', bytes)?;
+    let segment_end_pos = memchr(b']', bytes)?;
+    let segment = &input[segment_start_pos + 1..segment_end_pos];
+
+    let effect = if segment.starts_with("DisciplineChanged") {
+        parse_discipline_changed(segment)?
+    } else if segment.starts_with("AreaEntered") {
+        parse_area_entered(segment)?
+    } else {
+        parse_standard_effect(segment)?
+    };
+
+    Some((&input[segment_end_pos + 1..], effect))
+}
+
+fn parse_discipline_changed(segment: &str) -> Option<Effect> {
+    let bytes = segment.as_bytes();
+    let brackets: Vec<usize> = memchr_iter(b'{', bytes).collect();
+    let end_brackets: Vec<usize> = memchr_iter(b'}', bytes).collect();
+    let slash_pos = memchr(b'/', bytes)?;
+
+    let type_id = parse_i64!(&segment[brackets[0] + 1..end_brackets[0]]);
+    let class_name = segment[end_brackets[0] + 2..brackets[1] - 1]
+        .trim()
+        .to_string();
+    let class_id = parse_i64!(&segment[brackets[1] + 1..end_brackets[1]]);
+    let discipline_name = segment[slash_pos + 1..brackets[2] - 1].trim().to_string();
+    let discipline_id = parse_i64!(&segment[brackets[2] + 1..end_brackets[2]]);
+
+    Some(Effect::DisciplineChanged {
+        type_id,
+        class_name,
+        class_id,
+        discipline_name,
+        discipline_id,
+    })
+}
+
+fn parse_area_entered(segment: &str) -> Option<Effect> {
+    let bytes = segment.as_bytes();
+    let brackets: Vec<usize> = memchr_iter(b'{', bytes).collect();
+    let end_brackets: Vec<usize> = memchr_iter(b'}', bytes).collect();
+
+    if brackets.len() < 2 || end_brackets.len() < 2 {
+        return Some(Effect::Empty);
+    }
+
+    let type_id = parse_i64!(&segment[brackets[0] + 1..end_brackets[0]]);
+    let area_name = segment[end_brackets[0] + 2..brackets[1] - 1]
+        .trim()
+        .to_string();
+    let area_id = parse_i64!(&segment[brackets[1] + 1..end_brackets[1]]);
+
+    // Difficulty is optional - check if there's a third bracket pair
+    let (difficulty, difficulty_id) = if brackets.len() >= 3 && end_brackets.len() >= 3 {
+        let diff_name = segment[end_brackets[1] + 1..brackets[2] - 1]
+            .trim()
+            .to_string();
+        let diff_id = parse_i64!(&segment[brackets[2] + 1..end_brackets[2]]);
+        (Some(diff_name), Some(diff_id))
+    } else {
+        (None, None)
+    };
+
+    Some(Effect::AreaEntered {
+        type_id,
+        area_name,
+        area_id,
+        difficulty,
+        difficulty_id,
+    })
+}
+fn parse_standard_effect(segment: &str) -> Option<Effect> {
+    let bytes = segment.as_bytes();
+    let brackets: Vec<usize> = memchr_iter(b'{', bytes).collect();
+    let end_brackets: Vec<usize> = memchr_iter(b'}', bytes).collect();
+
+    if brackets.len() < 2 {
+        return Some(Effect::Empty);
+    }
+
+    Some(Effect::Standard {
+        type_name: segment[..brackets[0]].trim().to_string(),
+        type_id: parse_i64!(&segment[brackets[0] + 1..end_brackets[0]]),
+        name: segment[end_brackets[0] + 2..brackets[1] - 1]
+            .trim()
+            .to_string(),
+        id: parse_i64!(&segment[brackets[1] + 1..end_brackets[1]]),
+    })
 }
