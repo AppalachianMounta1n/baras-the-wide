@@ -39,45 +39,35 @@ pub struct CombatEvent {
     pub target_entity: Entity,
     pub action: Action,
     pub effect: Effect,
-    pub charges: Option<i64>,
-    pub damage: Option<i64>,
-    pub effective_damage: Option<i64>,
-    pub damage_type_id: Option<String>,
-    pub is_critical: Option<bool>,
-    pub is_reflected: Option<bool>,
-    pub threat: Option<f64>,
-    pub reduction_class_id: Option<String>,
-    pub damage_reduced: Option<String>,
-    pub reduction_type_id: Option<String>,
-    pub heal: Option<i64>,
-    pub effective_heal: Option<i64>,
+    pub details: Details,
 }
 
 #[derive(Debug, Clone, Default)]
-pub enum Effect {
-    #[default]
-    Empty,
+pub struct Effect {
+    pub type_name: String,
+    pub type_id: i64,
+    pub name: String,
+    pub id: i64,
+    pub difficulty_name: Option<String>,
+    pub difficulty_id: Option<i64>,
+    pub discipline_name: Option<String>,
+    pub discipline_id: Option<i64>,
+}
 
-    Standard {
-        type_name: String,
-        type_id: i64,
-        name: String,
-        id: i64,
-    },
-
-    DisciplineChanged {
-        type_id: i64,
-        class_name: String,
-        class_id: i64,
-        discipline_name: String,
-        discipline_id: i64,
-    },
-
-    AreaEntered {
-        type_id: i64,
-        area_name: String,
-        area_id: i64,
-        difficulty: Option<String>,
-        difficulty_id: Option<i64>,
-    },
+#[derive(Debug, Clone, Default)]
+pub struct Details {
+    pub dmg_amount: i32,
+    pub is_crit: bool,
+    pub is_reflect: bool,
+    pub dmg_effective: i32,
+    pub dmg_type: String,
+    pub dmg_type_id: i64,
+    pub avoid_type: Option<String>,
+    pub dmg_absorbed: Option<i32>,
+    pub threat: f32,
+    pub heal_amount: i32,
+    pub heal_effective: i32,
+    pub charges: i32,
+    pub ability_id: i64,
+    pub spend: f32,
 }
