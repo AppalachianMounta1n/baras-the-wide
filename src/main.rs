@@ -60,20 +60,24 @@ async fn respond(line: &str, state: Arc<RwLock<AppState>>) -> Result<bool, Strin
 
     match &cli.command {
         Some(Commands::ParseFile { path }) => {
+            let mut s = state.write().await;
+            s.set_active_file(path);
             let timer = Instant::now();
-            let (events, end_pos) = read_log_file(path).expect("failed to parse log file {path}");
+            let active_path = s.active_file.as_ref().expect("a");
+            let (events, end_pos) =
+                read_log_file(active_path).expect("failed to parse log file {path}");
             let ms = timer.elapsed().as_millis();
             {
-                let mut s = state.write().await;
                 println!("parsed {} events in {}ms", events.len(), ms);
                 s.current_byte = Some(end_pos);
                 s.events = events.clone();
             }
 
             let state_clone = Arc::clone(&state);
-            let path_clone = path.clone();
+            let resolved_path = s.active_file.clone().expect("invalid file path");
+            drop(s);
             tokio::spawn(async move {
-                tail_log_file(&path_clone, state_clone).await.ok();
+                tail_log_file(resolved_path, state_clone).await.ok();
             });
 
             println!("tailing started");

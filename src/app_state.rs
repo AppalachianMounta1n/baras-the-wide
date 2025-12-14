@@ -1,6 +1,6 @@
 use crate::CombatEvent;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Default)]
 pub struct AppState {
@@ -19,6 +19,19 @@ impl AppState {
             config,
             active_file: None,
         }
+    }
+
+    pub fn set_active_file(&mut self, path: &str) -> PathBuf {
+        let given_path = Path::new(path);
+
+        let resolved = if given_path.is_relative() {
+            Path::new(&self.config.log_directory).join(given_path)
+        } else {
+            given_path.to_path_buf()
+        };
+
+        self.active_file = Some(resolved.clone());
+        resolved
     }
 }
 

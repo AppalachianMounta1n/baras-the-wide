@@ -63,6 +63,7 @@ impl EncounterBuilder {
 
             // PostCombat: collect damage within threshold, finalize on CombatEnter or timeout
             (CombatState::PostCombat { exit_time }, effect_id::ENTERCOMBAT) => {
+                println!("{}", exit_time);
                 self.finalize_current();
                 // Start new encounter
                 let mut enc = Encounter::new();
