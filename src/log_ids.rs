@@ -1,0 +1,26 @@
+// this is exhaustive
+pub mod effect_type_id {
+    pub const APPLYEFFECT: i64 = 836045448945477;
+    pub const AREAENTERED: i64 = 836045448953664;
+    pub const DISCIPLINECHANGED: i64 = 836045448953665;
+    pub const EVENT: i64 = 836045448945472;
+    pub const MODIFYCHARGES: i64 = 836045448953666;
+    pub const REMOVEEFFECT: i64 = 836045448945478;
+    pub const RESTORE: i64 = 836045448945476;
+    pub const SPEND: i64 = 836045448945473;
+}
+
+// common ones only, not exhaustive
+pub mod effect_id {
+    pub const ABILITYACTIVATE: i64 = 836045448945479;
+    pub const ABILITYCANCEL: i64 = 836045448945481;
+    pub const ABILITYDEACTIVATE: i64 = 836045448945480;
+    pub const ABILITYINTERRUPT: i64 = 836045448945482;
+    pub const DAMAGE: i64 = 836045448945501;
+    pub const ENTERCOMBAT: i64 = 836045448945489;
+    pub const EXITCOMBAT: i64 = 836045448945490;
+    pub const FAILEDEFFECT: i64 = 836045448945499;
+    pub const HEAL: i64 = 836045448945500;
+    pub const TARGETCLEARED: i64 = 836045448953669;
+    pub const TARGETSET: i64 = 836045448953668;
+}

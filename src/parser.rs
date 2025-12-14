@@ -1,4 +1,5 @@
 use crate::event_models::*;
+use crate::log_ids::{effect_id, effect_type_id};
 use memchr::memchr;
 use memchr::memchr_iter;
 
@@ -40,7 +41,7 @@ pub fn parse_line(line_number: u64, _line: &str) -> Option<CombatEvent> {
     };
 
     let effect = parse_effect(effect_segment)?;
-    let details = parse_details(details_segment, &effect.effect_name)?;
+    let details = parse_details(details_segment, effect.effect_id)?;
 
     let event = CombatEvent {
         line_number,
@@ -197,22 +198,23 @@ fn parse_effect(segment: &str) -> Option<Effect> {
     let effect_name = segment[end_braces[0] + 2..braces[1] - 1].trim().to_string();
     let effect_id = parse_i64!(&segment[braces[1] + 1..end_braces[1]]);
 
-    let (difficulty_name, difficulty_id) = if type_name == "AreaEntered" && braces.len() == 3 {
-        (
-            segment[end_braces[1] + 1..braces[2]].trim().to_string(),
-            parse_i64!(segment[braces[2] + 1..end_braces[2]]),
-        )
-    } else {
-        ("".to_string(), 0)
-    };
+    let (difficulty_name, difficulty_id) =
+        if type_id == effect_type_id::AREAENTERED && braces.len() == 3 {
+            (
+                segment[end_braces[1] + 1..braces[2]].trim().to_string(),
+                parse_i64!(segment[braces[2] + 1..end_braces[2]]),
+            )
+        } else {
+            (String::new(), 0)
+        };
 
-    let (discipline_name, discipline_id) = if type_name == "DisciplineChanged" {
+    let (discipline_name, discipline_id) = if type_id == effect_type_id::DISCIPLINECHANGED {
         (
             segment[slash? + 1..braces[2]].trim().to_string(),
             parse_i64!(segment[braces[2] + 1..end_braces[2]]),
         )
     } else {
-        ("".to_string(), 0)
+        (String::new(), 0)
     };
 
     Some(Effect {
@@ -227,20 +229,20 @@ fn parse_effect(segment: &str) -> Option<Effect> {
     })
 }
 
-fn parse_details(segment: &str, effect_name: &str) -> Option<Details> {
-    if effect_name == "Damage" {
-        return parse_dmg_details(segment);
-    } else if effect_name == "Heal" {
-        return parse_heal_details(segment);
-    } else if (effect_name == "ModifyCharges" || effect_name == "ApplyEffect")
-        && memchr(b'(', segment.as_bytes()).is_some()
-    {
-        return parse_charges(segment);
+fn parse_details(segment: &str, effect_id: i64) -> Option<Details> {
+    match effect_id {
+        effect_id::DAMAGE => parse_dmg_details(segment),
+        effect_id::HEAL => parse_heal_details(segment),
+        _ => {
+            if memchr(b'(', segment.as_bytes()).is_some() {
+                parse_charges(segment)
+            } else {
+                Some(Details {
+                    ..Default::default()
+                })
+            }
+        }
     }
-
-    Some(Details {
-        ..Default::default()
-    })
 }
 
 fn parse_dmg_details(segment: &str) -> Option<Details> {
