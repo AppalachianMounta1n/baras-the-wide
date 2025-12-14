@@ -1,8 +1,7 @@
+use clap::{Parser, Subcommand};
 use std::time::Instant;
 
-use clap::{Parser, Subcommand};
-
-use baras::parse_log_file;
+use baras::reader::{read_log_file, tail_log_file};
 
 #[derive(Parser)]
 #[command(version, about = "test")]
@@ -18,21 +17,27 @@ enum Commands {
         #[arg(short, long)]
         path: String,
     },
+    TailFile {
+        #[arg(short, long)]
+        path: String,
+    },
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
 
     match &cli.command {
         Some(Commands::ParseFile { path }) => {
-            if !path.is_empty() {
-                let timer = Instant::now();
-                let data = parse_log_file(path).expect("failed to parse log file {path}");
-                let ms = timer.elapsed().as_millis();
-                println!("parsed {} events in {}ms", data.len(), ms);
-            } else {
-                println!("invalid path");
-            }
+            let timer = Instant::now();
+            let data = read_log_file(path).expect("failed to parse log file {path}");
+            let ms = timer.elapsed().as_millis();
+            println!("parsed {} events in {}ms", data.0.len(), ms);
+        }
+        Some(Commands::TailFile { path }) => {
+            tail_log_file(path, 1)
+                .await
+                .expect("failed to tail log file");
         }
         None => {}
     }

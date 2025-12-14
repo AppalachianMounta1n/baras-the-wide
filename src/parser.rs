@@ -1,11 +1,6 @@
 use crate::event_models::*;
 use memchr::memchr;
 use memchr::memchr_iter;
-use memmap2::Mmap;
-use rayon::prelude::*;
-use std::fs::File;
-use std::option::Option;
-use std::path::Path;
 
 #[cfg(test)]
 mod tests;
@@ -20,37 +15,8 @@ macro_rules! parse_i32 {
         $s.parse::<i32>().unwrap_or_default()
     };
 }
-pub fn parse_log_file<P: AsRef<Path>>(path: P) -> std::io::Result<Vec<CombatEvent>> {
-    let file = File::open(path)?;
-    let mmap = unsafe { Mmap::map(&file)? };
-    let bytes = mmap.as_ref();
 
-    // Find all line boundaries
-    let mut line_ranges: Vec<(usize, usize)> = Vec::new();
-    let mut start = 0;
-    for end in memchr_iter(b'\n', bytes) {
-        if end > start {
-            line_ranges.push((start, end));
-        }
-        start = end + 1;
-    }
-    if start < bytes.len() {
-        line_ranges.push((start, bytes.len()));
-    }
-
-    let events: Vec<CombatEvent> = line_ranges
-        .par_iter()
-        .enumerate()
-        .filter_map(|(idx, &(start, end))| {
-            let line = unsafe { std::str::from_utf8_unchecked(&bytes[start..end]) };
-            parse_line(idx + 1, line)
-        })
-        .collect();
-
-    Ok(events)
-}
-
-fn parse_line(line_number: usize, _line: &str) -> Option<CombatEvent> {
+pub fn parse_line(line_number: usize, _line: &str) -> Option<CombatEvent> {
     let b = _line.as_bytes();
     let brackets: Vec<usize> = memchr_iter(b'[', b).collect();
     let end_brackets: Vec<usize> = memchr_iter(b']', b).collect();
