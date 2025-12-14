@@ -16,7 +16,7 @@ macro_rules! parse_i32 {
     };
 }
 
-pub fn parse_line(line_number: usize, _line: &str) -> Option<CombatEvent> {
+pub fn parse_line(line_number: u64, _line: &str) -> Option<CombatEvent> {
     let b = _line.as_bytes();
     let brackets: Vec<usize> = memchr_iter(b'[', b).collect();
     let end_brackets: Vec<usize> = memchr_iter(b']', b).collect();

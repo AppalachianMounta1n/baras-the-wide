@@ -8,6 +8,7 @@ use std::io::SeekFrom;
 use std::path::Path;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
+use tokio::sync::mpsc;
 use tokio::time::{Duration, sleep};
 
 pub fn read_log_file<P: AsRef<Path>>(path: P) -> Result<(Vec<CombatEvent>, u64)> {
@@ -34,16 +35,22 @@ pub fn read_log_file<P: AsRef<Path>>(path: P) -> Result<(Vec<CombatEvent>, u64)>
         .enumerate()
         .filter_map(|(idx, &(start, end))| {
             let line = unsafe { std::str::from_utf8_unchecked(&bytes[start..end]) };
-            parse_line(idx + 1, line)
+            parse_line(idx as u64 + 1, line)
         })
         .collect();
 
     Ok((events, end_pos))
 }
 
-pub async fn tail_log_file<P: AsRef<Path>>(path: P, start_byte: u64) -> Result<()> {
+pub async fn tail_log_file<P: AsRef<Path>>(
+    path: P,
+    start_index: u64,
+    start_byte: u64,
+    tx: mpsc::Sender<CombatEvent>,
+) -> Result<()> {
     let file = File::open(&path).await?;
     let mut reader = BufReader::new(file);
+    let mut idx = start_index;
 
     reader.seek(SeekFrom::Start(start_byte)).await?;
 
@@ -56,7 +63,11 @@ pub async fn tail_log_file<P: AsRef<Path>>(path: P, start_byte: u64) -> Result<(
                 sleep(Duration::from_millis(100)).await;
             }
             Ok(_) => {
-                print!("{}", line);
+                idx += 1;
+                if let Some(parsed_event) = parse_line(idx, &line) {
+                    tx.send(parsed_event).await.ok();
+                };
+                print!("Parsed line {}", idx);
                 line.clear();
             }
             Err(e) => {

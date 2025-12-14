@@ -33,7 +33,7 @@ pub struct Entity {
 
 #[derive(Debug, Clone, Default)]
 pub struct CombatEvent {
-    pub line_number: usize,
+    pub line_number: u64,
     pub timestamp: Timestamp,
     pub source_entity: Entity,
     pub target_entity: Entity,
