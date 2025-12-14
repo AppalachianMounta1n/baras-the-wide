@@ -1,12 +1,20 @@
 use clap::{Parser, Subcommand};
 use std::io::Write;
 use std::time::Instant;
-use tokio::sync::mpsc;
 
+use baras::CombatEvent;
 use baras::reader::{read_log_file, tail_log_file};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+struct AppState {
+    events: Vec<CombatEvent>,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
+    let state = Arc::new(RwLock::new(AppState { events: vec![] }));
+
     loop {
         let line = readline()?;
         let line = line.trim();
@@ -14,7 +22,7 @@ async fn main() -> Result<(), String> {
             continue;
         }
 
-        match respond(line) {
+        match respond(line, Arc::clone(&state)).await {
             Ok(quit) => {
                 if quit {
                     break;
@@ -30,7 +38,7 @@ async fn main() -> Result<(), String> {
     Ok(())
 }
 
-fn respond(line: &str) -> Result<bool, String> {
+async fn respond(line: &str, state: Arc<RwLock<AppState>>) -> Result<bool, String> {
     let mut args = shlex::split(line).ok_or("error: Invalid quoting")?;
     args.insert(0, "baras".to_string());
     let cli = Cli::try_parse_from(args).map_err(|e| e.to_string())?;
@@ -38,11 +46,17 @@ fn respond(line: &str) -> Result<bool, String> {
         Some(Commands::ParseFile { path }) => {
             let timer = Instant::now();
             let data = read_log_file(path).expect("failed to parse log file {path}");
+            {
+                let mut s = state.write().await;
+                s.events = data.0.clone();
+            }
+
             let ms = timer.elapsed().as_millis();
             println!("parsed {} events in {}ms", data.0.len(), ms);
         }
-        Some(Commands::TailFile { path: _ }) => {
-            println!("a");
+        Some(Commands::Stats) => {
+            let s = state.read().await;
+            println!("total events: {}", s.events.len());
         }
         Some(Commands::Exit) => {
             write!(std::io::stdout(), "quitting...").map_err(|e| e.to_string())?;
@@ -55,7 +69,7 @@ fn respond(line: &str) -> Result<bool, String> {
 }
 
 #[derive(Parser)]
-#[command(version, about = "test")]
+#[command(version, about = "cli")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -63,15 +77,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// test command
     ParseFile {
         #[arg(short, long)]
         path: String,
     },
-    TailFile {
-        #[arg(short, long)]
-        path: String,
-    },
+    Stats,
     Exit,
 }
 fn readline() -> Result<String, String> {

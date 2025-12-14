@@ -1,3 +1,4 @@
+pub mod app_state;
 pub mod event_models;
 pub mod parser;
 pub mod reader;
