@@ -63,11 +63,15 @@ pub async fn tail_log_file<P: AsRef<Path>>(path: P, state: Arc<RwLock<AppState>>
                 continue;
             }
             Ok(_) => {
-                if let Some(event) = parse_line(line_number, &line) {
-                    state.write().await.process_event(event);
+                // Only process if line is complete (ends with newline)
+                if line.ends_with("\r\n") {
+                    if let Some(event) = parse_line(line_number, &line) {
+                        state.write().await.process_event(event);
+                    }
+                    line.clear();
+                    line_number += 1;
                 }
-                line.clear();
-                line_number += 1;
+                // Otherwise keep partial data, next read_line will append to it
             }
             Err(_) => break,
         }

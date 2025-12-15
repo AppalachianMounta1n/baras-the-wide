@@ -2,7 +2,7 @@ use crate::{
     CombatEvent,
     log_ids::{effect_id, effect_type_id},
 };
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use time::{Date, PrimitiveDateTime, Time};
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -23,6 +23,8 @@ pub struct PlayerInfo {
     pub class_name: String,
     pub discipline_id: i64,
     pub discipline_name: String,
+    pub is_dead: bool,
+    pub death_time: Option<Time>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -39,8 +41,10 @@ pub struct Encounter {
     pub events: Vec<CombatEvent>,
     pub enter_combat_time: Option<Time>,
     pub exit_combat_time: Option<Time>,
+    pub last_combat_activity_time: Option<Time>,
     // Summary fields populated on state transitions
-    pub participant_ids: Vec<i64>, // unique source/target log_ids (NPCs)
+    pub players: HashMap<i64, PlayerInfo>,
+    pub all_players_dead: bool,
 }
 
 impl Encounter {
@@ -51,7 +55,9 @@ impl Encounter {
             events: Vec::new(),
             enter_combat_time: None,
             exit_combat_time: None,
-            participant_ids: Vec::new(),
+            last_combat_activity_time: None,
+            players: HashMap::new(),
+            all_players_dead: false,
         }
     }
 
@@ -69,6 +75,9 @@ impl Encounter {
             }
             _ => None,
         }
+    }
+    pub fn check_all_players_dead(&mut self) {
+        self.all_players_dead = !self.players.is_empty() && self.players.values().all(|p| p.is_dead)
     }
 }
 
@@ -110,22 +119,73 @@ impl SessionCache {
     pub fn process_event(&mut self, event: CombatEvent) {
         // 1. Update player info on DisciplineChanged
         // Allow first event to initialize player, subsequent ones must match player id
-        if event.effect.type_id == effect_type_id::DISCIPLINECHANGED
-            && (!self.player_initialized || event.source_entity.log_id == self.player.id)
-        {
-            self.update_player_from_event(&event);
+        if event.effect.type_id == effect_type_id::DISCIPLINECHANGED {
+            if !self.player_initialized || event.source_entity.log_id == self.player.id {
+                self.update_primary_player(&event);
+            }
+            self.add_player_to_encounter(&event);
         }
-
+        if event.effect.effect_id == effect_id::DEATH {
+            self.update_player_death_state(&event);
+            let enc = self
+                .current_encounter_mut()
+                .expect("tried to call invalid enc");
+            enc.check_all_players_dead();
+        } else if event.effect.effect_id == effect_id::REVIVED {
+            self.update_player_revive_state(&event);
+            let enc = self
+                .current_encounter_mut()
+                .expect("tried to call invalid enc");
+            enc.check_all_players_dead();
+        }
         // 2. Update area on AreaEntered
         if event.effect.type_id == effect_type_id::AREAENTERED {
             self.update_area_from_event(&event);
         }
-
         // 3. Route event to appropriate encounter
         self.route_event_to_encounter(event);
     }
 
-    fn update_player_from_event(&mut self, event: &CombatEvent) {
+    pub fn add_player_to_encounter(&mut self, event: &CombatEvent) {
+        let enc = self
+            .current_encounter_mut()
+            .expect("attempting to add players to non-existant encounter");
+
+        enc.players
+            .entry(event.source_entity.log_id)
+            .or_insert(PlayerInfo {
+                id: event.source_entity.log_id,
+                name: event.source_entity.name.clone(),
+                class_id: event.effect.effect_id,
+                class_name: event.effect.effect_name.clone(),
+                discipline_id: event.effect.discipline_id,
+                discipline_name: event.effect.discipline_name.clone(),
+                is_dead: false,
+                death_time: None,
+            });
+    }
+
+    pub fn update_player_death_state(&mut self, event: &CombatEvent) {
+        let enc = self
+            .current_encounter_mut()
+            .expect("attempting to update death state in non-existent encounter");
+        if let Some(player) = enc.players.get_mut(&event.target_entity.log_id) {
+            player.is_dead = true;
+            player.death_time = Some(event.timestamp);
+        }
+    }
+
+    pub fn update_player_revive_state(&mut self, event: &CombatEvent) {
+        let enc = self
+            .current_encounter_mut()
+            .expect("attempting to update revive state in non-existent encounter");
+        if let Some(player) = enc.players.get_mut(&event.source_entity.log_id) {
+            player.is_dead = false;
+            player.death_time = None;
+        }
+    }
+
+    fn update_primary_player(&mut self, event: &CombatEvent) {
         // First DisciplineChanged sets player identity, subsequent ones update discipline
         if !self.player_initialized {
             self.player.name = event.source_entity.name.clone();
@@ -148,6 +208,7 @@ impl SessionCache {
 
     fn route_event_to_encounter(&mut self, event: CombatEvent) {
         let effect_id = event.effect.effect_id;
+        let effect_type_id = event.effect.type_id;
         let timestamp = event.timestamp;
 
         // Get current encounter state
@@ -155,6 +216,8 @@ impl SessionCache {
             .current_encounter()
             .map(|e| e.state.clone())
             .unwrap_or_default();
+
+        // detect events that influence player info
 
         match current_state {
             EncounterState::NotStarted => {
@@ -177,7 +240,43 @@ impl SessionCache {
             }
 
             EncounterState::InCombat => {
-                if effect_id == effect_id::EXITCOMBAT {
+                let enc_ref = self
+                    .current_encounter()
+                    .expect("failed to get current encounter");
+
+                // timeout combat if >120 seconds have passed since a heal or damage observed
+                if let Some(enc) = self.current_encounter()
+                    && let Some(last_activity) = enc.last_combat_activity_time
+                {
+                    let elapsed = timestamp.duration_since(last_activity).whole_seconds();
+                    if elapsed >= 120 {
+                        // End combat at last_activity_time, not current timestamp
+                        if let Some(enc) = self.current_encounter_mut() {
+                            enc.exit_combat_time = Some(last_activity);
+                            enc.state = EncounterState::PostCombat {
+                                exit_time: last_activity,
+                            };
+                        }
+                        self.finalize_and_start_new();
+                        // Re-process this event in the new encounter
+                        self.route_event_to_encounter(event);
+                        return;
+                    }
+                }
+                // if this happens something has gone wrong. terminate encounter immediately and
+                // start another
+                if effect_id == effect_id::ENTERCOMBAT {
+                    if let Some(enc) = self.current_encounter_mut() {
+                        enc.exit_combat_time = Some(timestamp);
+                        enc.state = EncounterState::PostCombat {
+                            exit_time: timestamp,
+                        };
+                        self.finalize_and_start_new();
+                        //reroute event to new encounter
+                        self.route_event_to_encounter(event);
+                    }
+                    // ExitCombat event recorded or all players in the encounter are dead
+                } else if effect_id == effect_id::EXITCOMBAT || enc_ref.all_players_dead {
                     // Transition to PostCombat
                     if let Some(enc) = self.current_encounter_mut() {
                         enc.exit_combat_time = Some(timestamp);
@@ -186,10 +285,22 @@ impl SessionCache {
                         };
                         enc.events.push(event);
                     }
+                //always terminate combat on area entered
+                } else if effect_type_id == effect_type_id::AREAENTERED {
+                    if let Some(enc) = self.current_encounter_mut() {
+                        enc.exit_combat_time = Some(timestamp);
+                        enc.state = EncounterState::PostCombat {
+                            exit_time: timestamp,
+                        };
+                        self.finalize_and_start_new();
+                    }
                 } else {
                     // Collect all events during combat
                     if let Some(enc) = self.current_encounter_mut() {
                         enc.events.push(event);
+                        if effect_id == effect_id::DAMAGE || effect_id == effect_id::HEAL {
+                            enc.last_combat_activity_time = Some(timestamp);
+                        }
                     }
                 }
             }
@@ -336,8 +447,20 @@ impl SessionCache {
                     .map(|ms| format!("{}ms", ms))
                     .unwrap_or_else(|| "N/A".to_string())
             );
+            println!("    All Players Dead: {}", enc.all_players_dead);
             println!("    Event count: {}", enc.events.len());
-            println!("    Participant IDs: {:?}", enc.participant_ids);
+            println!("    Players ({}):", enc.players.len());
+            for (id, player) in &enc.players {
+                println!(
+                    "      [{}] alive={}, death_time={}",
+                    id,
+                    !player.is_dead,
+                    player
+                        .death_time
+                        .map(|t| t.to_string())
+                        .unwrap_or_else(|| "N/A".to_string())
+                );
+            }
         }
     }
 }
