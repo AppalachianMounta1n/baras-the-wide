@@ -1,9 +1,10 @@
-use std::time::Instant;
-
 use crate::app_state::AppState;
+use crate::directory_watcher;
 use crate::reader::Reader;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::RwLock;
 
 pub async fn parse_file(path: &str, state: Arc<RwLock<AppState>>) {
@@ -143,7 +144,11 @@ pub async fn delete_old_files(state: Arc<RwLock<AppState>>, days: u32) {
         return;
     }
 
-    println!("Deleting {} files older than {} days...", files_to_delete.len(), days);
+    println!(
+        "Deleting {} files older than {} days...",
+        files_to_delete.len(),
+        days
+    );
 
     let mut deleted = 0;
     for path in &files_to_delete {
@@ -198,4 +203,39 @@ pub async fn clean_empty_files(state: Arc<RwLock<AppState>>) {
     }
 
     println!("Deleted {} empty files", deleted);
+}
+
+pub async fn set_directory(new_directory: &str, state: Arc<RwLock<AppState>>) {
+    // update state
+    let filepath = PathBuf::from(&new_directory);
+    if !(filepath.exists() && filepath.is_dir()) {
+        println!("Update failed. Invalid directory name given.");
+        return;
+    }
+
+    {
+        let mut s = state.write().await;
+        if new_directory == s.config.log_directory {
+            println!("Log directory already configured to {}", new_directory);
+            return;
+        }
+
+        if let Some(log_tail) = &mut s.log_tail_task {
+            log_tail.abort();
+        }
+        if let Some(directory_watcher) = &mut s.watcher_task {
+            directory_watcher.abort();
+        }
+        if let Some(file_index) = &mut s.file_index {
+            file_index.empty_files();
+        }
+        s.session_cache = None;
+        s.config.log_directory = new_directory.to_string();
+        s.active_file = None;
+    }
+
+    //initiate new watcher task
+    if let Some(handle) = directory_watcher::init_watcher(Arc::clone(&state)).await {
+        state.write().await.watcher_task = Some(handle);
+    }
 }

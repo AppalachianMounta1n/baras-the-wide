@@ -8,6 +8,7 @@ pub mod log_ids;
 pub mod parser;
 pub mod reader;
 pub mod repl;
+pub mod session_cache;
 
 pub use combat_event::CombatEvent;
 pub use parser::parse_line;
