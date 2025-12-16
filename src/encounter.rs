@@ -1,4 +1,6 @@
 use crate::CombatEvent;
+use crate::Entity;
+use crate::EntityType;
 use hashbrown::HashMap;
 use time::Time;
 
@@ -25,6 +27,18 @@ pub struct PlayerInfo {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct NpcInfo {
+    pub name: String,
+    pub entity_type: EntityType,
+    pub display_name: Option<String>,
+    pub log_id: i64,
+    pub class_id: i64,
+    pub is_dead: bool,
+    pub first_seen_at: Option<Time>,
+    pub death_time: Option<Time>,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct AreaInfo {
     pub area_name: String,
     pub area_id: i64,
@@ -41,6 +55,7 @@ pub struct Encounter {
     pub last_combat_activity_time: Option<Time>,
     // Summary fields populated on state transitions
     pub players: HashMap<i64, PlayerInfo>,
+    pub npcs: HashMap<i64, NpcInfo>,
     pub all_players_dead: bool,
 }
 
@@ -54,7 +69,60 @@ impl Encounter {
             exit_combat_time: None,
             last_combat_activity_time: None,
             players: HashMap::new(),
+            npcs: HashMap::new(),
             all_players_dead: false,
+        }
+    }
+
+    pub fn set_entity_death(&mut self, entity_id: i64, entity_type: &EntityType, timestamp: Time) {
+        match entity_type {
+            EntityType::Player => {
+                if let Some(player) = self.players.get_mut(&entity_id) {
+                    player.is_dead = true;
+                    player.death_time = Some(timestamp);
+                }
+            }
+            EntityType::Npc | EntityType::Companion => {
+                if let Some(npc) = self.npcs.get_mut(&entity_id) {
+                    npc.is_dead = true;
+                    npc.death_time = Some(timestamp);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn set_entity_alive(&mut self, entity_id: i64, entity_type: &EntityType) {
+        match entity_type {
+            EntityType::Player => {
+                if let Some(player) = self.players.get_mut(&entity_id) {
+                    player.is_dead = false;
+                    player.death_time = None;
+                }
+            }
+            EntityType::Npc | EntityType::Companion => {
+                if let Some(npc) = self.npcs.get_mut(&entity_id) {
+                    npc.is_dead = false;
+                    npc.death_time = None;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn track_entity(&mut self, entity: &Entity, timestamp: Time) {
+        match entity.entity_type {
+            EntityType::Npc | EntityType::Companion => {
+                self.npcs.entry(entity.log_id).or_insert_with(|| NpcInfo {
+                    name: entity.name.clone(),
+                    entity_type: entity.entity_type.clone(),
+                    log_id: entity.log_id,
+                    class_id: entity.class_id,
+                    first_seen_at: Some(timestamp),
+                    ..Default::default()
+                });
+            }
+            _ => {}
         }
     }
 

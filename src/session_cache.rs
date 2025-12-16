@@ -55,16 +55,20 @@ impl SessionCache {
             self.add_player_to_encounter(&event);
         }
         if event.effect.effect_id == effect_id::DEATH {
-            self.update_player_death_state(&event);
             let enc = self
                 .current_encounter_mut()
                 .expect("tried to call invalid enc");
+            enc.set_entity_death(
+                event.target_entity.log_id,
+                &event.target_entity.entity_type,
+                event.timestamp,
+            );
             enc.check_all_players_dead();
         } else if event.effect.effect_id == effect_id::REVIVED {
-            self.update_player_revive_state(&event);
             let enc = self
                 .current_encounter_mut()
                 .expect("tried to call invalid enc");
+            enc.set_entity_alive(event.source_entity.log_id, &event.source_entity.entity_type);
             enc.check_all_players_dead();
         }
         // 2. Update area on AreaEntered
@@ -92,26 +96,6 @@ impl SessionCache {
                 is_dead: false,
                 death_time: None,
             });
-    }
-
-    pub fn update_player_death_state(&mut self, event: &CombatEvent) {
-        let enc = self
-            .current_encounter_mut()
-            .expect("attempting to update death state in non-existent encounter");
-        if let Some(player) = enc.players.get_mut(&event.target_entity.log_id) {
-            player.is_dead = true;
-            player.death_time = Some(event.timestamp);
-        }
-    }
-
-    pub fn update_player_revive_state(&mut self, event: &CombatEvent) {
-        let enc = self
-            .current_encounter_mut()
-            .expect("attempting to update revive state in non-existent encounter");
-        if let Some(player) = enc.players.get_mut(&event.source_entity.log_id) {
-            player.is_dead = false;
-            player.death_time = None;
-        }
     }
 
     fn update_primary_player(&mut self, event: &CombatEvent) {
@@ -145,8 +129,6 @@ impl SessionCache {
             .current_encounter()
             .map(|e| e.state.clone())
             .unwrap_or_default();
-
-        // detect events that influence player info
 
         match current_state {
             EncounterState::NotStarted => {

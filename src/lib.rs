@@ -11,4 +11,6 @@ pub mod repl;
 pub mod session_cache;
 
 pub use combat_event::CombatEvent;
+pub use combat_event::Entity;
+pub use combat_event::EntityType;
 pub use parser::parse_line;
