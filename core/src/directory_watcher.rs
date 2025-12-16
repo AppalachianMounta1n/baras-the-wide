@@ -19,7 +19,6 @@ pub enum DirectoryEvent {
 pub struct DirectoryWatcher {
     _watcher: RecommendedWatcher,
     rx: Receiver<notify::Result<Event>>,
-    dir: PathBuf,
 }
 
 impl DirectoryWatcher {
@@ -38,7 +37,6 @@ impl DirectoryWatcher {
         Ok(Self {
             _watcher: watcher,
             rx,
-            dir: path.to_path_buf(),
         })
     }
 

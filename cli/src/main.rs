@@ -52,7 +52,6 @@ enum Commands {
         #[arg(short, long)]
         path: String,
     },
-    SessionInfo,
     Exit,
     Config,
     ListFiles,
@@ -75,7 +74,6 @@ async fn respond(line: &str, state: Arc<RwLock<AppState>>) -> Result<bool, Strin
 
     match &cli.command {
         Some(Commands::ParseFile { path }) => commands::parse_file(path, Arc::clone(&state)).await,
-        Some(Commands::SessionInfo) => commands::session_info(Arc::clone(&state)).await,
         Some(Commands::Config) => commands::show_settings(Arc::clone(&state)).await,
         Some(Commands::ListFiles) => commands::list_files(Arc::clone(&state)).await,
         Some(Commands::DeleteOld { days }) => {

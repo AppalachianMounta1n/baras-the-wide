@@ -39,41 +39,6 @@ pub async fn show_settings(state: Arc<RwLock<AppState>>) {
     s.session_cache.as_ref().expect("no cache").print_metadata();
 }
 
-pub async fn session_info(state: Arc<RwLock<AppState>>) {
-    let s = state.read().await;
-
-    let enc_state = s
-        .session_cache
-        .as_ref()
-        .unwrap()
-        .current_encounter()
-        .unwrap()
-        .state
-        .clone();
-
-    println!("{:?}", enc_state);
-
-    println!(
-        "Current Player {:?}",
-        s.session_cache
-            .as_ref()
-            .expect("no session initialized")
-            .player
-            .id
-    );
-
-    println!(
-        "Current Area {}",
-        s.session_cache
-            .as_ref()
-            .expect("not sesssion")
-            .current_area
-            .area_name
-    );
-
-    println!("{}", s.session_cache.as_ref().unwrap().session_date);
-}
-
 pub async fn show_stats(state: Arc<RwLock<AppState>>) {
     let s = state.read().await;
     let enc = s

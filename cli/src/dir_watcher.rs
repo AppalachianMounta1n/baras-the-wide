@@ -69,22 +69,56 @@ async fn handle_watcher_event(event: DirectoryEvent, state: Arc<RwLock<AppState>
             println!("New log file detected: {}", path.display());
 
             // Add to index
-            {
+            let is_latest_file = {
                 let mut s = state.write().await;
                 if let Some(index) = &mut s.file_index {
                     index.add_file(&path);
+                    index.newest_file().map(|f| f.path == path).unwrap_or(false)
+                } else {
+                    false
                 }
-            }
+            };
 
-            // Parse and tail the new file
-            let path_str = path.to_string_lossy().to_string();
-            commands::parse_file(&path_str, state).await;
+            if is_latest_file {
+                let path_str = path.to_string_lossy().to_string();
+                commands::parse_file(&path_str, state.clone()).await;
+            }
         }
 
         DirectoryEvent::FileRemoved(path) => {
-            let mut s = state.write().await;
-            if let Some(index) = &mut s.file_index {
-                index.remove_file(&path);
+            let next_file = {
+                let mut s = state.write().await;
+
+                // Remove from index
+                if let Some(index) = &mut s.file_index {
+                    index.remove_file(&path);
+                }
+
+                // Check if removed file was the active file
+                let was_active = s.active_file.as_ref().map(|p| p == &path).unwrap_or(false);
+
+                if was_active {
+                    // Clear current state
+                    s.active_file = None;
+                    if let Some(tail) = s.log_tail_task.take() {
+                        tail.abort();
+                    }
+
+                    // Get newest file to switch to
+                    s.file_index
+                        .as_ref()
+                        .and_then(|idx| idx.newest_file())
+                        .map(|f| f.path.clone())
+                } else {
+                    None
+                }
+            };
+
+            // Switch to new file outside of lock
+            if let Some(new_path) = next_file {
+                println!("Active file removed, switching to: {}", new_path.display());
+                let path_str = new_path.to_string_lossy().to_string();
+                commands::parse_file(&path_str, Arc::clone(&state)).await;
             }
         }
 
