@@ -47,6 +47,43 @@ pub struct AreaInfo {
 }
 
 #[derive(Debug, Clone)]
+pub struct EntityStatistics {
+    pub entity_id: i64,
+    pub name: String,
+    pub total_damage: i64,
+    pub dps: i32,
+    pub edps: i32,
+    pub hps: i32,
+    pub ehps: i32,
+    pub dtps: i32,
+    pub abs: i32,
+    pub apm: f32,
+}
+
+#[derive(Debug, Clone, Default)]
+struct StatAccumulator {
+    damage_dealt: i64,
+    damage_dealt_effective: i64,
+    damage_received: i64,
+    damage_absorbed: i64,
+    healing_effective: i64,
+    healing_done: i64,
+    healing_received: i64,
+    hit_count: u32,
+    actions: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct EffectInstance {
+    pub effect_id: i64,
+    pub source_id: i64,
+    pub target_id: i64,
+    pub applied_at: Time,
+    pub removed_at: Option<Time>,
+    pub is_shield: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct Encounter {
     pub id: u64,
     pub state: EncounterState,
@@ -58,6 +95,7 @@ pub struct Encounter {
     pub players: HashMap<i64, PlayerInfo>,
     pub npcs: HashMap<i64, NpcInfo>,
     pub all_players_dead: bool,
+    pub effects: HashMap<i64, Vec<EffectInstance>>,
 }
 
 impl Encounter {
@@ -71,6 +109,7 @@ impl Encounter {
             last_combat_activity_time: None,
             players: HashMap::new(),
             npcs: HashMap::new(),
+            effects: HashMap::new(),
             all_players_dead: false,
         }
     }
@@ -80,6 +119,8 @@ impl Encounter {
         enc.players.insert(player.id, player);
         enc
     }
+
+    // --- Player State
 
     pub fn set_entity_death(&mut self, entity_id: i64, entity_type: &EntityType, timestamp: Time) {
         match entity_type {
@@ -157,6 +198,8 @@ impl Encounter {
         )
     }
 
+    // -- Time Utils
+
     pub fn duration_ms(&self) -> Option<i64> {
         match (self.enter_combat_time, self.exit_combat_time) {
             (Some(enter), Some(exit)) => {
@@ -192,6 +235,40 @@ impl Encounter {
         name
     }
 
+    // -- Effect Instance Handling
+
+    pub fn apply_effect(&mut self, event: &CombatEvent) {
+        self.effects
+            .entry(event.target_entity.log_id)
+            .or_default()
+            .push(EffectInstance {
+                effect_id: event.effect.effect_id,
+                source_id: event.source_entity.log_id,
+                target_id: event.target_entity.log_id,
+                applied_at: event.timestamp,
+                is_shield: false,
+                removed_at: None,
+            })
+    }
+
+    pub fn remove_effect(&mut self, event: &CombatEvent) {
+        // fail gracefully if target not present
+        let Some(effects) = self.effects.get_mut(&event.target_entity.log_id) else {
+            return;
+        };
+        for effect_instance in effects.iter_mut().rev() {
+            if effect_instance.effect_id == event.effect.effect_id
+                && effect_instance.source_id == event.source_entity.log_id
+                && effect_instance.removed_at.is_none()
+            {
+                effect_instance.removed_at = Some(event.timestamp);
+                return;
+            }
+        }
+    }
+
+    // ---- Metrics ----
+
     pub fn calculate_entity_statistics(&self) -> Option<Vec<EntityStatistics>> {
         let duration = self.duration_seconds()?;
         if duration <= 0 {
@@ -201,31 +278,24 @@ impl Encounter {
         let mut accumulators: HashMap<i64, StatAccumulator> = HashMap::new();
 
         for event in &self.events {
-            match event.effect.effect_id {
-                effect_id::DAMAGE => {
-                    // Source dealt damage
-                    let acc = accumulators.entry(event.source_entity.log_id).or_default();
-                    acc.damage_dealt += event.details.dmg_amount as i64;
-                    acc.damage_dealt_effective += event.details.dmg_effective as i64;
-                    acc.hit_count += 1;
-                    // Track crits if you have that field
-                    // if event.details.is_crit { acc.crit_count += 1; }
-
-                    // Target received damage
-                    let target_acc = accumulators.entry(event.target_entity.log_id).or_default();
-                    target_acc.damage_received += event.details.dmg_effective as i64;
-                }
-                effect_id::HEAL => {
-                    // Source did healing
-                    let acc = accumulators.entry(event.source_entity.log_id).or_default();
-                    acc.healing_done += event.details.heal_amount as i64; // adjust field name
-
-                    // Target received healing
-                    let target_acc = accumulators.entry(event.target_entity.log_id).or_default();
-                    target_acc.healing_received += event.details.heal_amount as i64;
-                }
-                _ => {}
+            // Source dealt damage
+            let acc = accumulators.entry(event.source_entity.log_id).or_default();
+            acc.damage_dealt += event.details.dmg_amount as i64;
+            acc.damage_dealt_effective += event.details.dmg_effective as i64;
+            acc.hit_count += 1;
+            acc.healing_effective += event.details.heal_effective as i64; // adjust field name
+            acc.healing_done += event.details.heal_amount as i64; // adjust field name
+            if event.effect.effect_id == effect_id::ABILITYACTIVATE
+                && event.timestamp >= self.enter_combat_time?
+                && event.timestamp <= self.exit_combat_time?
+            {
+                acc.actions += 1;
             }
+            // Target received damage
+            let target_acc = accumulators.entry(event.target_entity.log_id).or_default();
+            target_acc.damage_received += event.details.dmg_effective as i64;
+            target_acc.damage_absorbed += event.details.dmg_absorbed as i64;
+            target_acc.healing_received += event.details.heal_amount as i64;
         }
 
         let mut stats: Vec<EntityStatistics> = accumulators
@@ -236,7 +306,11 @@ impl Encounter {
                 total_damage: acc.damage_dealt,
                 dps: (acc.damage_dealt / duration) as i32,
                 edps: (acc.damage_dealt_effective / duration) as i32,
-                // Add more fields to EntityStatistics as needed
+                ehps: (acc.healing_effective / duration) as i32,
+                hps: (acc.healing_done / duration) as i32,
+                dtps: (acc.damage_received / duration) as i32,
+                abs: (acc.damage_absorbed / duration) as i32,
+                apm: (acc.actions as f32 / duration as f32) * 60.0,
             })
             .collect();
 
@@ -246,31 +320,19 @@ impl Encounter {
     pub fn show_dps(&self) {
         let stats = self.calculate_entity_statistics().unwrap_or_default();
 
+        println!("{}", self.duration_seconds().unwrap());
         for entity in stats {
             println!(
-                "      [{}: {} dps, {} edps, {} total] ",
-                entity.name, entity.dps, entity.edps, entity.total_damage
+                "      [{}: {} dps | {} edps | {} dtps || {} hps | {} ehps | {} abs | {} apm] ",
+                entity.name,
+                entity.dps,
+                entity.edps,
+                entity.dtps,
+                entity.hps,
+                entity.ehps,
+                entity.abs,
+                entity.apm
             );
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct EntityStatistics {
-    pub entity_id: i64,
-    pub name: String,
-    pub total_damage: i64,
-    pub dps: i32,
-    pub edps: i32,
-}
-
-#[derive(Debug, Clone, Default)]
-struct StatAccumulator {
-    damage_dealt: i64,
-    damage_dealt_effective: i64,
-    damage_received: i64,
-    healing_done: i64,
-    healing_received: i64,
-    hit_count: u32,
-    crit_count: u32,
 }

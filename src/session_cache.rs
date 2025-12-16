@@ -1,5 +1,5 @@
 use crate::{
-    CombatEvent,
+    combat_event::*,
     encounter::*,
     log_ids::{effect_id, effect_type_id},
 };
@@ -130,6 +130,31 @@ impl SessionCache {
             .current_encounter()
             .map(|e| e.state.clone())
             .unwrap_or_default();
+
+        // Add or update effect instances. Apply/Remove effect lines do not change the encounter
+        // state
+        match event.effect.type_id {
+            effect_type_id::APPLYEFFECT => {
+                // ignore if there is no target entity
+                if event.target_entity.entity_type == EntityType::Empty {
+                    return;
+                }
+                if let Some(enc) = self.current_encounter_mut() {
+                    enc.apply_effect(&event);
+                }
+            }
+            effect_type_id::REMOVEEFFECT => {
+                // ignore if there is no source entity
+                if event.source_entity.entity_type == EntityType::Empty {
+                    return;
+                }
+
+                if let Some(enc) = self.current_encounter_mut() {
+                    enc.remove_effect(&event);
+                }
+            }
+            _ => {}
+        }
 
         match current_state {
             EncounterState::NotStarted => {
@@ -323,7 +348,7 @@ impl SessionCache {
             .rfind(|e| e.state != EncounterState::NotStarted)
     }
 
-    // --- Utility Methods ---
+    /// --- Utility Methods ---
 
     /// Resolve a Time to full PrimitiveDateTime using session date
     /// Handles midnight rollover by checking if time < previous time
