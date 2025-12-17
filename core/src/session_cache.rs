@@ -162,6 +162,7 @@ impl SessionCache {
                     if let Some(enc) = self.current_encounter_mut() {
                         enc.state = EncounterState::InCombat;
                         enc.enter_combat_time = Some(timestamp);
+                        enc.accumulate_data(&event);
                         enc.events.push(event);
                     }
                 } else if effect_id == effect_id::DAMAGE {
@@ -173,12 +174,14 @@ impl SessionCache {
                     if should_start && let Some(enc) = self.current_encounter_mut() {
                         enc.state = EncounterState::InCombat;
                         enc.enter_combat_time = Some(timestamp);
+                        enc.accumulate_data(&event);
                         enc.events.push(event);
                     }
                     // Otherwise discard - likely trailing damage from previous encounter
                 } else {
                     // Buffer non-damage events for the upcoming encounter
                     if let Some(enc) = self.current_encounter_mut() {
+                        enc.accumulate_data(&event);
                         enc.events.push(event);
                     }
                 }
@@ -247,6 +250,7 @@ impl SessionCache {
                     // Collect all events during combat
                     if let Some(enc) = self.current_encounter_mut() {
                         enc.track_event_entities(&event);
+                        enc.accumulate_data(&event);
                         enc.events.push(event);
                         if effect_id == effect_id::DAMAGE || effect_id == effect_id::HEAL {
                             enc.last_combat_activity_time = Some(timestamp);
@@ -262,6 +266,7 @@ impl SessionCache {
                     if let Some(enc) = self.current_encounter_mut() {
                         enc.state = EncounterState::InCombat;
                         enc.enter_combat_time = Some(timestamp);
+                        enc.accumulate_data(&event);
                         enc.events.push(event);
                     }
                 } else if effect_id == effect_id::DAMAGE {
@@ -270,6 +275,7 @@ impl SessionCache {
                     if elapsed <= self.post_combat_threshold_ms as i128 {
                         // Assign to current (ending) encounter
                         if let Some(enc) = self.current_encounter_mut() {
+                            enc.accumulate_data(&event);
                             enc.events.push(event);
                         }
                     } else {
@@ -281,6 +287,7 @@ impl SessionCache {
                     // Non-damage event after combat - goes to next encounter
                     self.finalize_and_start_new();
                     if let Some(enc) = self.current_encounter_mut() {
+                        enc.accumulate_data(&event);
                         enc.events.push(event);
                     }
                 }
@@ -347,7 +354,7 @@ impl SessionCache {
             .rfind(|e| e.state != EncounterState::NotStarted)
     }
 
-    /// --- Utility Methods ---
+    // --- Utility Methods --- //
 
     /// Resolve a Time to full PrimitiveDateTime using session date
     /// Handles midnight rollover by checking if time < previous time

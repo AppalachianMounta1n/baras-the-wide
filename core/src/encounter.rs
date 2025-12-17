@@ -48,7 +48,7 @@ pub struct AreaInfo {
 }
 
 #[derive(Debug, Clone)]
-pub struct EntityStatistics {
+pub struct EntityMetrics {
     pub entity_id: i64,
     pub name: String,
     pub total_damage: i64,
@@ -63,7 +63,7 @@ pub struct EntityStatistics {
 }
 
 #[derive(Debug, Clone, Default)]
-struct StatAccumulator {
+pub struct MetricAccumulator {
     damage_dealt: i64,
     damage_dealt_effective: i64,
     damage_received: i64,
@@ -99,6 +99,7 @@ pub struct Encounter {
     pub npcs: HashMap<i64, NpcInfo>,
     pub all_players_dead: bool,
     pub effects: HashMap<i64, Vec<EffectInstance>>,
+    pub accumulated_data: HashMap<i64, MetricAccumulator>,
 }
 
 impl Encounter {
@@ -114,6 +115,7 @@ impl Encounter {
             npcs: HashMap::new(),
             effects: HashMap::new(),
             all_players_dead: false,
+            accumulated_data: HashMap::new(),
         }
     }
 
@@ -273,44 +275,29 @@ impl Encounter {
 
     // ---- Metrics ----
 
-    pub fn calculate_entity_statistics(&self) -> Option<Vec<EntityStatistics>> {
-        let duration = self.duration_seconds()?;
-        if duration <= 0 {
-            return None;
-        }
-
-        let mut accumulators: HashMap<i64, StatAccumulator> = HashMap::new();
-
-        for event in &self.events {
-            // Source dealt damage
-            let acc = accumulators.entry(event.source_entity.log_id).or_default();
-            acc.damage_dealt += event.details.dmg_amount as i64;
-            acc.damage_dealt_effective += event.details.dmg_effective as i64;
-            acc.hit_count += 1;
-            acc.healing_effective += event.details.heal_effective as i64; // adjust field name
-            acc.healing_done += event.details.heal_amount as i64; // adjust field name
+    // Read in a distinct event line and grab the numerators of various metrics for easy access
+    // when calculating
+    pub fn accumulate_data(&mut self, event: &CombatEvent) {
+        {
+            let source_accumulator = self
+                .accumulated_data
+                .entry(event.source_entity.log_id)
+                .or_default();
+            source_accumulator.damage_dealt += event.details.dmg_amount as i64;
+            source_accumulator.damage_dealt_effective += event.details.dmg_effective as i64;
+            source_accumulator.hit_count += 1;
+            source_accumulator.healing_effective += event.details.heal_effective as i64; // adjust field name
+            source_accumulator.healing_done += event.details.heal_amount as i64; // adjust field name
             if event.effect.effect_id == effect_id::ABILITYACTIVATE
-                && event.timestamp >= self.enter_combat_time?
-                && event.timestamp <= self.exit_combat_time?
+                && self.enter_combat_time.is_some_and(|t| event.timestamp >= t)
+                && self.exit_combat_time.is_none_or(|t| t >= event.timestamp)
             {
-                acc.actions += 1;
+                source_accumulator.actions += 1;
             }
-            // absorbed dmg logic
+
             if event.details.dmg_absorbed > 0
                 && (event.details.avoid_type.is_empty() || event.details.avoid_type == "shield")
             {
-                println!(
-                    "[DEBUG] Absorption: enc_id={}, target={}, mitigation={}, absorbed={}, time={}, effects_count={:?}",
-                    self.id,
-                    event.target_entity.log_id,
-                    event.details.avoid_type,
-                    event.details.dmg_absorbed,
-                    event.timestamp,
-                    self.effects
-                        .get(&event.target_entity.log_id)
-                        .map(|v| v.len())
-                );
-
                 // TODO: This code is hacky with an arbitrary time cutoff
                 if let Some(effects) = self.effects.get(&event.target_entity.log_id) {
                     let earliest_shield_effect = effects
@@ -327,24 +314,38 @@ impl Encounter {
                         })
                         .min_by_key(|e| e.applied_at);
                     if let Some(shield) = earliest_shield_effect {
-                        let shield_source_acc = accumulators.entry(shield.source_id).or_default();
+                        let shield_source_acc =
+                            self.accumulated_data.entry(shield.source_id).or_default();
                         shield_source_acc.shielding_given += event.details.dmg_absorbed as i64;
                     }
                 }
             }
-
-            // Target received damage
-            let target_acc = accumulators.entry(event.target_entity.log_id).or_default();
-            target_acc.damage_received += event.details.dmg_effective as i64;
-            target_acc.damage_absorbed += event.details.dmg_absorbed as i64;
-            target_acc.healing_received += event.details.heal_amount as i64;
         }
 
-        let mut stats: Vec<EntityStatistics> = accumulators
+        {
+            let target_accumulator = self
+                .accumulated_data
+                .entry(event.target_entity.log_id)
+                .or_default();
+            target_accumulator.damage_received += event.details.dmg_effective as i64;
+            target_accumulator.damage_absorbed += event.details.dmg_absorbed as i64;
+            target_accumulator.healing_received += event.details.heal_amount as i64;
+        }
+    }
+
+    pub fn calculuate_entity_metrics(&self) -> Option<Vec<EntityMetrics>> {
+        let duration = self.duration_seconds()?;
+        if duration <= 0 {
+            return None;
+        }
+
+        let accumulators = &self.accumulated_data;
+
+        let mut stats: Vec<EntityMetrics> = accumulators
             .into_iter()
-            .map(|(id, acc)| EntityStatistics {
-                entity_id: id,
-                name: self.get_entity_name(id).unwrap_or_default(),
+            .map(|(id, acc)| EntityMetrics {
+                entity_id: *id,
+                name: self.get_entity_name(*id).unwrap_or_default(),
                 total_damage: acc.damage_dealt,
                 dps: (acc.damage_dealt / duration) as i32,
                 edps: (acc.damage_dealt_effective / duration) as i32,
@@ -355,6 +356,7 @@ impl Encounter {
                 abs: (acc.shielding_given / duration) as i32,
                 apm: (acc.actions as f32 / duration as f32) * 60.0,
             })
+            .filter(|e| !e.name.is_empty())
             .collect();
 
         stats.sort_by(|a, b| b.dps.cmp(&a.dps));
@@ -362,9 +364,8 @@ impl Encounter {
     }
 
     pub fn show_dps(&self) {
-        let stats = self.calculate_entity_statistics().unwrap_or_default();
+        let stats = self.calculuate_entity_metrics().unwrap_or_default();
 
-        println!("{}", self.duration_seconds().unwrap());
         for entity in stats {
             println!(
                 "      [{}: {} dps | {} edps | {} total_abs || {} total heals | {} hps | {} ehps | {} abs | {} apm] ",
