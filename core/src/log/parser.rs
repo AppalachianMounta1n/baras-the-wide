@@ -1,5 +1,5 @@
-use crate::combat_event::*;
-use crate::context::intern;
+use crate::log::*;
+use crate::context::{IStr, intern};
 use crate::swtor_ids::{effect_id, effect_type_id};
 use chrono::{Days, NaiveDateTime};
 use memchr::memchr;
@@ -243,7 +243,7 @@ impl LogParser {
                 parse_i64!(segment[braces[2] + 1..end_braces[2]]),
             )
         } else {
-                (intern(""), 0)
+            (intern(""), 0)
         };
 
         Some(Effect {

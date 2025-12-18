@@ -1,7 +1,7 @@
 use chrono::NaiveDateTime;
 
 use crate::{
-    combat_event::*,
+    log::*,
     context::resolve,
     encounter::*,
     swtor_ids::{effect_id, effect_type_id},
@@ -175,7 +175,8 @@ impl SessionCache {
                     let should_start = match self.last_exit_combat_time {
                         None => true,
                         Some(last_exit) => {
-                            timestamp.signed_duration_since(last_exit).num_seconds() > COMBAT_RESTART_GAP_SECONDS
+                            timestamp.signed_duration_since(last_exit).num_seconds()
+                                > COMBAT_RESTART_GAP_SECONDS
                         }
                     };
                     if should_start && let Some(enc) = self.current_encounter_mut() {

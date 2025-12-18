@@ -18,6 +18,12 @@ pub struct CliContext {
     pub file_index: Arc<RwLock<Option<DirectoryIndex>>>,
 }
 
+impl Default for CliContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CliContext {
     pub fn new() -> Self {
         Self {

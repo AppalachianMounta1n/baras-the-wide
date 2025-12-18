@@ -4,8 +4,8 @@ use chrono::offset;
 use std::io::Write;
 use std::path::Path;
 
-use crate::dir_watcher;
 use crate::CliContext;
+use crate::dir_watcher;
 
 pub async fn parse_file(path: &str, ctx: &CliContext) {
     // Resolve the path using config

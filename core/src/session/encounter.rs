@@ -1,82 +1,18 @@
-use crate::CombatEvent;
-use crate::Entity;
-use crate::EntityType;
+use crate::log::{CombatEvent, Entity, EntityType};
 use crate::context::{resolve, IStr};
+use crate::session::effect_instance::EffectInstance;
+use crate::session::player::{NpcInfo, PlayerInfo};
 use crate::swtor_ids::effect_id;
 use crate::swtor_ids::SHIELD_EFFECT_IDS;
 use chrono::{NaiveDateTime, TimeDelta};
 use hashbrown::HashMap;
-use lasso::Spur;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum EncounterState {
     #[default]
     NotStarted,
     InCombat,
-    PostCombat {
-        exit_time: NaiveDateTime,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub struct PlayerInfo {
-    pub name: IStr,
-    pub id: i64,
-    pub class_id: i64,
-    pub class_name: String,
-    pub discipline_id: i64,
-    pub discipline_name: String,
-    pub is_dead: bool,
-    pub death_time: Option<NaiveDateTime>,
-}
-
-impl Default for PlayerInfo {
-    fn default() -> Self {
-        Self {
-            name: Spur::default(),
-            id: 0,
-            class_id: 0,
-            class_name: String::new(),
-            discipline_id: 0,
-            discipline_name: String::new(),
-            is_dead: false,
-            death_time: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct NpcInfo {
-    pub name: IStr,
-    pub entity_type: EntityType,
-    pub display_name: Option<String>,
-    pub log_id: i64,
-    pub class_id: i64,
-    pub is_dead: bool,
-    pub first_seen_at: Option<NaiveDateTime>,
-    pub death_time: Option<NaiveDateTime>,
-}
-
-impl Default for NpcInfo {
-    fn default() -> Self {
-        Self {
-            name: Spur::default(),
-            entity_type: EntityType::default(),
-            display_name: None,
-            log_id: 0,
-            class_id: 0,
-            is_dead: false,
-            first_seen_at: None,
-            death_time: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct AreaInfo {
-    pub area_name: String,
-    pub area_id: i64,
-    pub entered_at: Option<NaiveDateTime>,
+    PostCombat { exit_time: NaiveDateTime },
 }
 
 #[derive(Debug, Clone)]
@@ -109,16 +45,6 @@ pub struct MetricAccumulator {
 }
 
 #[derive(Debug, Clone)]
-pub struct EffectInstance {
-    pub effect_id: i64,
-    pub source_id: i64,
-    pub target_id: i64,
-    pub applied_at: NaiveDateTime,
-    pub removed_at: Option<NaiveDateTime>,
-    pub is_shield: bool,
-}
-
-#[derive(Debug, Clone)]
 pub struct Encounter {
     pub id: u64,
     pub state: EncounterState,
@@ -126,7 +52,6 @@ pub struct Encounter {
     pub enter_combat_time: Option<NaiveDateTime>,
     pub exit_combat_time: Option<NaiveDateTime>,
     pub last_combat_activity_time: Option<NaiveDateTime>,
-    // Summary fields populated on state transitions
     pub players: HashMap<i64, PlayerInfo>,
     pub npcs: HashMap<i64, NpcInfo>,
     pub all_players_dead: bool,
@@ -157,7 +82,7 @@ impl Encounter {
         enc
     }
 
-    // --- Player State
+    // --- Entity State ---
 
     pub fn set_entity_death(
         &mut self,
@@ -201,8 +126,10 @@ impl Encounter {
     }
 
     pub fn check_all_players_dead(&mut self) {
-        self.all_players_dead = !self.players.is_empty() && self.players.values().all(|p| p.is_dead)
+        self.all_players_dead =
+            !self.players.is_empty() && self.players.values().all(|p| p.is_dead)
     }
+
     pub fn track_event_entities(&mut self, event: &CombatEvent) {
         self.try_track_entity(&event.source_entity, event.timestamp);
         self.try_track_entity(&event.target_entity, event.timestamp);
@@ -216,13 +143,13 @@ impl Encounter {
                     .entry(entity.log_id)
                     .or_insert_with(|| PlayerInfo {
                         id: entity.log_id,
-                        name: entity.name.clone(),
+                        name: entity.name,
                         ..Default::default()
                     });
             }
             EntityType::Npc | EntityType::Companion => {
                 self.npcs.entry(entity.log_id).or_insert_with(|| NpcInfo {
-                    name: entity.name.clone(),
+                    name: entity.name,
                     entity_type: entity.entity_type.clone(),
                     log_id: entity.log_id,
                     class_id: entity.class_id,
@@ -233,6 +160,7 @@ impl Encounter {
             _ => {}
         }
     }
+
     pub fn is_active(&self) -> bool {
         matches!(
             self.state,
@@ -240,7 +168,7 @@ impl Encounter {
         )
     }
 
-    // -- Time Utils
+    // --- Time Utils ---
 
     pub fn duration_ms(&self) -> Option<i64> {
         match (self.enter_combat_time, self.exit_combat_time) {
@@ -273,7 +201,7 @@ impl Encounter {
             .or_else(|| self.npcs.get(&id).map(|e| e.name))
     }
 
-    // -- Effect Instance Handling
+    // --- Effect Instance Handling ---
 
     pub fn apply_effect(&mut self, event: &CombatEvent) {
         let is_shield = SHIELD_EFFECT_IDS.contains(&event.effect.effect_id);
@@ -291,7 +219,6 @@ impl Encounter {
     }
 
     pub fn remove_effect(&mut self, event: &CombatEvent) {
-        // fail gracefully if target not present
         let Some(effects) = self.effects.get_mut(&event.target_entity.log_id) else {
             return;
         };
@@ -306,10 +233,8 @@ impl Encounter {
         }
     }
 
-    // ---- Metrics ----
+    // --- Metrics ---
 
-    // Read in a distinct event line and grab the numerators of various metrics for easy access
-    // when calculating
     pub fn accumulate_data(&mut self, event: &CombatEvent) {
         {
             let source_accumulator = self
@@ -319,8 +244,8 @@ impl Encounter {
             source_accumulator.damage_dealt += event.details.dmg_amount as i64;
             source_accumulator.damage_dealt_effective += event.details.dmg_effective as i64;
             source_accumulator.hit_count += 1;
-            source_accumulator.healing_effective += event.details.heal_effective as i64; // adjust field name
-            source_accumulator.healing_done += event.details.heal_amount as i64; // adjust field name
+            source_accumulator.healing_effective += event.details.heal_effective as i64;
+            source_accumulator.healing_done += event.details.heal_amount as i64;
             if event.effect.effect_id == effect_id::ABILITYACTIVATE
                 && self.enter_combat_time.is_some_and(|t| event.timestamp >= t)
                 && self.exit_combat_time.is_none_or(|t| t >= event.timestamp)
@@ -329,10 +254,9 @@ impl Encounter {
             }
 
             if event.details.dmg_absorbed > 0
-                && (resolve(event.details.avoid_type).is_empty() || resolve(event.details.avoid_type) == "shield")
-            {
-                // TODO: This code is hacky with an arbitrary time cutoff
-                if let Some(effects) = self.effects.get(&event.target_entity.log_id) {
+                && (resolve(event.details.avoid_type).is_empty()
+                    || resolve(event.details.avoid_type) == "shield")
+                && let Some(effects) = self.effects.get(&event.target_entity.log_id) {
                     let earliest_shield_effect = effects
                         .iter()
                         .filter(|e| {
@@ -352,7 +276,7 @@ impl Encounter {
                         shield_source_acc.shielding_given += event.details.dmg_absorbed as i64;
                     }
                 }
-            }
+
         }
 
         {
@@ -366,7 +290,7 @@ impl Encounter {
         }
     }
 
-    pub fn calculuate_entity_metrics(&self) -> Option<Vec<EntityMetrics>> {
+    pub fn calculate_entity_metrics(&self) -> Option<Vec<EntityMetrics>> {
         let duration = self.duration_seconds()?;
         if duration <= 0 {
             return None;
@@ -375,21 +299,23 @@ impl Encounter {
         let accumulators = &self.accumulated_data;
 
         let mut stats: Vec<EntityMetrics> = accumulators
-            .into_iter()
-            .map(|(id, acc)| EntityMetrics {
-                entity_id: *id,
-                name: self.get_entity_name(*id).unwrap_or_default(),
-                total_damage: acc.damage_dealt,
-                dps: (acc.damage_dealt / duration) as i32,
-                edps: (acc.damage_dealt_effective / duration) as i32,
-                ehps: (acc.healing_effective / duration) as i32,
-                total_healing: acc.healing_done,
-                hps: (acc.healing_done / duration) as i32,
-                dtps: (acc.damage_received / duration) as i32,
-                abs: (acc.shielding_given / duration) as i32,
-                apm: (acc.actions as f32 / duration as f32) * 60.0,
+            .iter()
+            .filter_map(|(id, acc)| {
+                let name = self.get_entity_name(*id)?;
+                Some(EntityMetrics {
+                    entity_id: *id,
+                    name,
+                    total_damage: acc.damage_dealt,
+                    dps: (acc.damage_dealt / duration) as i32,
+                    edps: (acc.damage_dealt_effective / duration) as i32,
+                    ehps: (acc.healing_effective / duration) as i32,
+                    total_healing: acc.healing_done,
+                    hps: (acc.healing_done / duration) as i32,
+                    dtps: (acc.damage_received / duration) as i32,
+                    abs: (acc.shielding_given / duration) as i32,
+                    apm: (acc.actions as f32 / duration as f32) * 60.0,
+                })
             })
-            .filter(|e| e.name != Spur::default())
             .collect();
 
         stats.sort_by(|a, b| b.dps.cmp(&a.dps));
@@ -397,7 +323,7 @@ impl Encounter {
     }
 
     pub fn show_dps(&self) {
-        let stats = self.calculuate_entity_metrics().unwrap_or_default();
+        let stats = self.calculate_entity_metrics().unwrap_or_default();
 
         for entity in stats {
             println!(

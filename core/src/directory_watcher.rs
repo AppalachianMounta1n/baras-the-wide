@@ -117,8 +117,8 @@ fn is_combat_log(path: &Path) -> bool {
 }
 
 pub fn build_index(dir: &Path) -> Result<(DirectoryIndex, Option<PathBuf>), String> {
-    let index =
-        DirectoryIndex::build_index(dir).map_err(|e| format!("Failed to build file index: {}", e))?;
+    let index = DirectoryIndex::build_index(dir)
+        .map_err(|e| format!("Failed to build file index: {}", e))?;
 
     let newest = index.newest_file().map(|f| f.path.clone());
     Ok((index, newest))

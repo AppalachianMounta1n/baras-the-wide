@@ -17,7 +17,6 @@ impl ::std::default::Default for AppConfig {
             log_retention_days: 21,
         }
     }
-
 }
 
 impl AppConfig {

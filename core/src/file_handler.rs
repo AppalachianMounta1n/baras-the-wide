@@ -1,5 +1,5 @@
 use crate::context::ParsingSession;
-use crate::reader::Reader;
+use crate::log::Reader;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

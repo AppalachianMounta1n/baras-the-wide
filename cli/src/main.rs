@@ -1,7 +1,7 @@
+use baras_cli::CliContext;
 use baras_cli::commands;
 use baras_cli::dir_watcher;
 use baras_cli::readline;
-use baras_cli::CliContext;
 use clap::{Parser, Subcommand};
 use std::io::Write;
 

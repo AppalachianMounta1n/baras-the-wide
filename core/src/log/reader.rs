@@ -69,6 +69,7 @@ impl Reader {
 
     //tailing live log file always write to session cache
     pub async fn tail_log_file(self) -> Result<()> {
+        const CRLF: &str = "\r\n";
         let file = File::open(&self.path).await?;
         let mut reader = BufReader::new(file);
         let mut line_number = 0u64;
@@ -94,7 +95,7 @@ impl Reader {
                 }
                 Ok(_) => {
                     // Only process if line is complete (ends with newline)
-                    if line.ends_with("\r\n") {
+                    if line.ends_with(CRLF) {
                         if let Some(event) = parser.parse_line(line_number, &line) {
                             self.state.write().await.process_event(event);
                         }

@@ -1,5 +1,5 @@
-use crate::commands;
 use crate::CliContext;
+use crate::commands;
 use baras_core::directory_watcher::{self as core_watcher, DirectoryEvent, DirectoryWatcher};
 use std::path::PathBuf;
 use tokio::task::JoinHandle;

@@ -1,15 +1,18 @@
 pub mod context;
-pub mod combat_event;
 pub mod directory_watcher;
-pub mod encounter;
+pub mod events;
 pub mod file_handler;
-pub mod parser;
-pub mod reader;
-pub mod session_cache;
+pub mod handlers;
+pub mod log;
+pub mod session;
 pub mod swtor_ids;
 
-pub use combat_event::CombatEvent;
-pub use combat_event::Entity;
-pub use combat_event::EntityType;
-pub use parser::LogParser;
+// Legacy module - to be removed after migration
+// pub mod encounter;
+// pub mod session_cache;
+
+// Re-exports for convenience
+pub use events::{EventProcessor, GameSignal, SignalHandler};
+pub use session::{Encounter, EncounterState, SessionCache};
 pub use swtor_ids::*;
+pub use log::*;
