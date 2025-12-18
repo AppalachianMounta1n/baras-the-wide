@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 
 use baras_core::context::{resolve, AppConfig, DirectoryIndex, ParsingSession};
-use baras_core::{GameSignal, Reader, SignalHandler};
+use baras_core::{EntityType, GameSignal, Reader, SignalHandler};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared State
@@ -386,6 +386,7 @@ async fn calculate_metrics(shared: &Arc<SharedState>) -> Option<Vec<PlayerMetric
     Some(
         entity_metrics
             .into_iter()
+            .filter(|m| m.entity_type != EntityType::Npc)
             .map(|m| {
                 let name = resolve(m.name).to_string();
                 // Filter out control characters for safe display

@@ -19,6 +19,7 @@ pub enum EncounterState {
 pub struct EntityMetrics {
     pub entity_id: i64,
     pub name: IStr,
+    pub entity_type: EntityType,
     pub total_damage: i64,
     pub dps: i32,
     pub edps: i32,
@@ -200,6 +201,15 @@ impl Encounter {
             .map(|e| e.name)
             .or_else(|| self.npcs.get(&id).map(|e| e.name))
     }
+    fn get_entity_type(&self, id: i64) -> Option<EntityType> {
+        if self.players.contains_key(&id) {
+            return Some(EntityType::Player);
+        } else {
+            self.npcs
+                .get(&id)
+                .map(|e| e.entity_type.clone())
+        }
+    }
 
     // --- Effect Instance Handling ---
 
@@ -302,8 +312,10 @@ impl Encounter {
             .iter()
             .filter_map(|(id, acc)| {
                 let name = self.get_entity_name(*id)?;
+                let entity_type = self.get_entity_type(*id)?;
                 Some(EntityMetrics {
                     entity_id: *id,
+                    entity_type,
                     name,
                     total_damage: acc.damage_dealt,
                     dps: (acc.damage_dealt / duration) as i32,
