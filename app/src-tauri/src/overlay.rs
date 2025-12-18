@@ -1,13 +1,15 @@
-use std::sync::mpsc::{self, Sender};
-use std::sync::Mutex;
+use tokio::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use tauri::State;
 
+/// Type alias for shared overlay state (must match lib.rs)
+pub type SharedOverlayState = Arc<Mutex<OverlayState>>;
+
 use baras_overlay::{MeterEntry, MeterOverlay, OverlayConfig};
-use baras_overlay::renderer::colors;
 
 /// Commands sent to the overlay thread
-enum OverlayCommand {
+pub enum OverlayCommand {
     SetMoveMode(bool),
     UpdateEntries(Vec<MeterEntry>),
     Shutdown,
@@ -15,16 +17,16 @@ enum OverlayCommand {
 
 /// State managing the overlay thread
 #[derive(Debug, Default)]
-struct OverlayState {
-    tx: Option<Sender<OverlayCommand>>,
+pub struct OverlayState {
+    pub(crate) tx: Option<Sender<OverlayCommand>>,
     handle: Option<JoinHandle<()>>,
     is_running: bool,
     move_mode: bool,
 }
 
 /// Spawn the overlay on a separate thread
-fn spawn_overlay() -> (Sender<OverlayCommand>, JoinHandle<()>) {
-    let (tx, rx) = mpsc::channel::<OverlayCommand>();
+pub async fn spawn_overlay() -> (Sender<OverlayCommand>, JoinHandle<()>) {
+    let (tx, mut rx) = mpsc::channel::<OverlayCommand>(32);
 
     let handle = thread::spawn(move || {
         let config = OverlayConfig {
@@ -44,26 +46,8 @@ fn spawn_overlay() -> (Sender<OverlayCommand>, JoinHandle<()>) {
             }
         };
 
-        // Set up dummy data (16 entries for testing max capacity)
-        let dummy_entries = vec![
-            MeterEntry { name: "Player One".to_string(), value: 15234.0, max_value: 15234.0, color: colors::dps_bar_fill() },
-            MeterEntry { name: "Player Two".to_string(), value: 14100.0, max_value: 15234.0, color: colors::dps_bar_fill() },
-            MeterEntry { name: "Player Three".to_string(), value: 13200.0, max_value: 15234.0, color: colors::dps_bar_fill() },
-            MeterEntry { name: "Player Four".to_string(), value: 12500.0, max_value: 15234.0, color: colors::dps_bar_fill() },
-            MeterEntry { name: "Player Five".to_string(), value: 11800.0, max_value: 15234.0, color: colors::dps_bar_fill() },
-            MeterEntry { name: "Player Six".to_string(), value: 10900.0, max_value: 15234.0, color: colors::dps_bar_fill() },
-            MeterEntry { name: "Player Seven".to_string(), value: 10100.0, max_value: 15234.0, color: colors::dps_bar_fill() },
-            MeterEntry { name: "Player Eight".to_string(), value: 9400.0, max_value: 15234.0, color: colors::dps_bar_fill() },
-            MeterEntry { name: "Player Nine".to_string(), value: 8700.0, max_value: 15234.0, color: colors::dps_bar_fill() },
-            MeterEntry { name: "Player Ten".to_string(), value: 8000.0, max_value: 15234.0, color: colors::dps_bar_fill() },
-            MeterEntry { name: "Player Eleven".to_string(), value: 7200.0, max_value: 15234.0, color: colors::dps_bar_fill() },
-            MeterEntry { name: "Player Twelve".to_string(), value: 6500.0, max_value: 15234.0, color: colors::dps_bar_fill() },
-            MeterEntry { name: "Player Thirteen".to_string(), value: 5800.0, max_value: 15234.0, color: colors::dps_bar_fill() },
-            MeterEntry { name: "Player Fourteen".to_string(), value: 5100.0, max_value: 15234.0, color: colors::dps_bar_fill() },
-            MeterEntry { name: "Player Fifteen".to_string(), value: 4300.0, max_value: 15234.0, color: colors::dps_bar_fill() },
-            MeterEntry { name: "Player Sixteen".to_string(), value: 3500.0, max_value: 15234.0, color: colors::dps_bar_fill() },
-        ];
-        overlay.set_entries(dummy_entries);
+        // Overlay starts empty - real data comes via UpdateEntries commands
+        let mut needs_render = true; // Initial render to show empty state
 
         loop {
             // Check for commands (non-blocking)
@@ -71,9 +55,11 @@ fn spawn_overlay() -> (Sender<OverlayCommand>, JoinHandle<()>) {
                 match cmd {
                     OverlayCommand::SetMoveMode(enabled) => {
                         overlay.window_mut().set_click_through(!enabled);
+                        needs_render = true; // Mode change might affect appearance
                     }
                     OverlayCommand::UpdateEntries(entries) => {
                         overlay.set_entries(entries);
+                        needs_render = true; // New data to display
                     }
                     OverlayCommand::Shutdown => {
                         return;
@@ -81,16 +67,30 @@ fn spawn_overlay() -> (Sender<OverlayCommand>, JoinHandle<()>) {
                 }
             }
 
-            // Poll events and render
+            // Poll Wayland events (always needed for window management)
             if !overlay.poll_events() {
                 break;
             }
-            overlay.render();
 
-            // Adaptive sleep based on mode:
-            // - Interactive mode (move/resize): 1ms for responsive input
-            // - Locked mode: 16ms (~60fps) since no user interaction needed
-            let sleep_ms = if overlay.window_mut().is_interactive() { 1 } else { 16 };
+            // Check if window was resized/moved (needs re-render)
+            if overlay.window_mut().pending_size().is_some() {
+                needs_render = true;
+            }
+
+            let is_interactive = overlay.window_mut().is_interactive();
+
+            // Only render when needed:
+            // - Interactive mode: always render for smooth drag/resize
+            // - Locked mode: only render when data changed
+            if needs_render || is_interactive {
+                overlay.render();
+                needs_render = false;
+            }
+
+            // Adaptive sleep:
+            // - Interactive mode: 1ms for responsive input
+            // - Locked mode: 50ms since we're just waiting for commands
+            let sleep_ms = if is_interactive { 1 } else { 50 };
             thread::sleep(std::time::Duration::from_millis(sleep_ms));
         }
     });
@@ -99,14 +99,20 @@ fn spawn_overlay() -> (Sender<OverlayCommand>, JoinHandle<()>) {
 }
 
 #[tauri::command]
-fn show_overlay(state: State<'_, Mutex<OverlayState>>) -> Result<bool, String> {
-    let mut state = state.lock().map_err(|e| e.to_string())?;
-
-    if state.is_running {
-        return Ok(true); // Already running
+pub async fn show_overlay(state: State<'_, SharedOverlayState>) -> Result<bool, String> {
+    // Check if already running (release lock before await)
+    {
+        let state = state.lock().map_err(|e| e.to_string())?;
+        if state.is_running {
+            return Ok(true);
+        }
     }
 
-    let (tx, handle) = spawn_overlay();
+    // Spawn without holding lock
+    let (tx, handle) = spawn_overlay().await;
+
+    // Re-acquire to update state
+    let mut state = state.lock().map_err(|e| e.to_string())?;
     state.tx = Some(tx);
     state.handle = Some(handle);
     state.is_running = true;
@@ -115,21 +121,28 @@ fn show_overlay(state: State<'_, Mutex<OverlayState>>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn hide_overlay(state: State<'_, Mutex<OverlayState>>) -> Result<bool, String> {
-    let mut state = state.lock().map_err(|e| e.to_string())?;
+pub async fn hide_overlay(state: State<'_, SharedOverlayState>) -> Result<bool, String> {
+    // Extract what we need, release lock before await
+    let (tx, handle) = {
+        let mut state = state.lock().map_err(|e| e.to_string())?;
+        if !state.is_running {
+            return Ok(true);
+        }
+        (state.tx.take(), state.handle.take())
+    };
 
-    if !state.is_running {
-        return Ok(true); // Already stopped
+    // Send shutdown without holding lock
+    if let Some(tx) = tx {
+        let _ = tx.send(OverlayCommand::Shutdown).await;
     }
 
-    if let Some(tx) = state.tx.take() {
-        let _ = tx.send(OverlayCommand::Shutdown);
-    }
-
-    if let Some(handle) = state.handle.take() {
+    // Join the thread (blocking, but lock is released)
+    if let Some(handle) = handle {
         let _ = handle.join();
     }
 
+    // Re-acquire to update state
+    let mut state = state.lock().map_err(|e| e.to_string())?;
     state.is_running = false;
     state.move_mode = false;
 
@@ -137,40 +150,30 @@ fn hide_overlay(state: State<'_, Mutex<OverlayState>>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn toggle_move_mode(state: State<'_, Mutex<OverlayState>>) -> Result<bool, String> {
-    let mut state = state.lock().map_err(|e| e.to_string())?;
+pub async fn toggle_move_mode(state: State<'_, SharedOverlayState>) -> Result<bool, String> {
+    // Extract tx and toggle move_mode, release lock before await
+    let (tx, new_mode) = {
+        let mut state = state.lock().map_err(|e| e.to_string())?;
+        if !state.is_running {
+            return Err("Overlay not running".to_string());
+        }
+        state.move_mode = !state.move_mode;
+        (state.tx.clone(), state.move_mode)
+    };
 
-    if !state.is_running {
-        return Err("Overlay not running".to_string());
-    }
-
-    state.move_mode = !state.move_mode;
-
-    if let Some(tx) = &state.tx {
-        tx.send(OverlayCommand::SetMoveMode(state.move_mode))
+    // Send command without holding lock
+    if let Some(tx) = tx {
+        tx.send(OverlayCommand::SetMoveMode(new_mode)).await
             .map_err(|e| e.to_string())?;
     }
 
-    Ok(state.move_mode)
+    Ok(new_mode)
 }
 
 #[tauri::command]
-fn get_overlay_status(state: State<'_, Mutex<OverlayState>>) -> Result<(bool, bool), String> {
+pub fn get_overlay_status(state: State<'_, SharedOverlayState>) -> Result<(bool, bool), String> {
     let state = state.lock().map_err(|e| e.to_string())?;
     Ok((state.is_running, state.move_mode))
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .manage(Mutex::new(OverlayState::default()))
-        .invoke_handler(tauri::generate_handler![
-            show_overlay,
-            hide_overlay,
-            toggle_move_mode,
-            get_overlay_status
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
-}
+

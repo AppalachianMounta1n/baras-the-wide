@@ -11,15 +11,36 @@ extern "C" {
     async fn invoke(cmd: &str, args: JsValue) -> JsValue;
 }
 
+/// Helper to create invoke args object
+fn make_args(pairs: &[(&str, &str)]) -> JsValue {
+    let obj = js_sys::Object::new();
+    for (key, value) in pairs {
+        js_sys::Reflect::set(&obj, &JsValue::from_str(key), &JsValue::from_str(value)).unwrap();
+    }
+    obj.into()
+}
+
 pub fn App() -> Element {
     let mut overlay_visible = use_signal(|| true);
     let mut move_mode = use_signal(|| false);
     let mut status_msg = use_signal(String::new);
+    let mut log_path = use_signal(String::new);
+    let mut is_tailing = use_signal(|| false);
+
+    // Fetch default log path from backend on mount
+    use_future(move || async move {
+        let result = invoke("default_log_path", JsValue::NULL).await;
+        if let Some(path) = result.as_string() {
+            log_path.set(path);
+        }
+    });
 
     // Read signals once at the top to avoid multiple borrow conflicts
     let is_visible = overlay_visible();
     let is_move_mode = move_mode();
     let status = status_msg();
+    let current_path = log_path();
+    let tailing = is_tailing();
 
     let toggle_overlay = move |_| {
         let current = overlay_visible();
@@ -61,14 +82,47 @@ pub fn App() -> Element {
         }
     };
 
+    let toggle_tailing = move |_| {
+        let currently_tailing = is_tailing();
+        let path = log_path();
+
+        async move {
+            if currently_tailing {
+                // Stop tailing
+                let result = invoke("stop_tailing", JsValue::NULL).await;
+                if result.is_undefined() || result.is_null() {
+                    is_tailing.set(false);
+                    status_msg.set("Stopped tailing".to_string());
+                } else if let Some(err) = result.as_string() {
+                    status_msg.set(format!("Error: {}", err));
+                }
+            } else {
+                // Start tailing
+                if path.is_empty() {
+                    status_msg.set("Please enter a log file path".to_string());
+                    return;
+                }
+
+                let args = make_args(&[("path", &path)]);
+                let result = invoke("start_tailing", args).await;
+                if result.is_undefined() || result.is_null() {
+                    is_tailing.set(true);
+                    status_msg.set(format!("Tailing: {}", path));
+                } else if let Some(err) = result.as_string() {
+                    status_msg.set(format!("Error: {}", err));
+                }
+            }
+        }
+    };
+
     rsx! {
         link { rel: "stylesheet", href: CSS }
         main { class: "container",
             h1 { "Baras" }
             p { class: "subtitle", "SWTOR Combat Log Parser" }
 
+            // Overlay controls
             div { class: "controls",
-
                 button {
                     class: if is_visible { "btn btn-active" } else { "btn" },
                     onclick: toggle_overlay,
@@ -83,8 +137,28 @@ pub fn App() -> Element {
                 }
             }
 
+            // Log file tailing
+            div { class: "log-section",
+                h3 { "Combat Log" }
+                div { class: "log-controls",
+                    input {
+                        r#type: "text",
+                        class: "log-input",
+                        placeholder: "Path to combat log file...",
+                        value: "{current_path}",
+                        disabled: tailing,
+                        oninput: move |e| log_path.set(e.value())
+                    }
+                    button {
+                        class: if tailing { "btn btn-warning" } else { "btn" },
+                        onclick: toggle_tailing,
+                        if tailing { "Stop" } else { "Start Tailing" }
+                    }
+                }
+            }
+
             if !status.is_empty() {
-                p { class: "error", "{status}" }
+                p { class: if status.starts_with("Error") { "error" } else { "info" }, "{status}" }
             }
 
             div { class: "status",
@@ -98,6 +172,12 @@ pub fn App() -> Element {
                     "Mode: "
                     span { class: if is_move_mode { "status-warning" } else { "" },
                         if is_move_mode { "Move Mode (drag to reposition)" } else { "Locked" }
+                    }
+                }
+                p {
+                    "Tailing: "
+                    span { class: if tailing { "status-on" } else { "status-off" },
+                        if tailing { "Active" } else { "Stopped" }
                     }
                 }
             }
