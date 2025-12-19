@@ -193,6 +193,8 @@ pub fn spawn_overlay(
         };
 
         let mut needs_render = true;
+        let mut was_in_resize_corner = false;
+        let mut was_resizing = false;
 
         loop {
             while let Ok(cmd) = rx.try_recv() {
@@ -231,14 +233,24 @@ pub fn spawn_overlay(
             // Clear position dirty flag (position is saved on lock, not continuously)
             let _ = overlay.window_mut().take_position_dirty();
 
+            // Check if resize corner state changed (need to show/hide grip)
+            let in_resize_corner = overlay.window_mut().in_resize_corner();
+            let is_resizing = overlay.window_mut().is_resizing();
+            if in_resize_corner != was_in_resize_corner || is_resizing != was_resizing {
+                needs_render = true;
+                was_in_resize_corner = in_resize_corner;
+                was_resizing = is_resizing;
+            }
+
             let is_interactive = overlay.window_mut().is_interactive();
 
-            if needs_render || is_interactive {
+            if needs_render {
                 overlay.render();
                 needs_render = false;
             }
 
-            let sleep_ms = if is_interactive { 32 } else { 50 }; // ~60 FPS when interactive, ~20 FPS when locked
+            // Sleep longer when locked (no interaction), shorter when interactive
+            let sleep_ms = if is_interactive { 16 } else { 50 };
             thread::sleep(std::time::Duration::from_millis(sleep_ms));
         }
     });

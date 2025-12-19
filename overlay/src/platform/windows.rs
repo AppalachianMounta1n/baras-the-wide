@@ -43,6 +43,8 @@ pub struct WindowsOverlay {
     x: i32,
     y: i32,
     pixel_data: Vec<u8>,
+    bgra_buffer: Vec<u8>,  // Pre-allocated buffer for RGBA->BGRA conversion
+    content_dirty: bool,   // Track if pixel content changed
     click_through: bool,
     position_dirty: bool,
 
@@ -134,16 +136,23 @@ impl WindowsOverlay {
             SelectObject(self.hdc_mem, hbitmap);
             ReleaseDC(HWND::default(), hdc_screen);
 
-            // Resize pixel buffer
+            // Resize pixel buffers
             let size = (self.width * self.height * 4) as usize;
             self.pixel_data.resize(size, 0);
+            self.bgra_buffer.resize(size, 0);
+            self.content_dirty = true;
         }
         Ok(())
     }
 
-    fn update_layered_window(&self) {
+    fn update_layered_window(&mut self) {
+        // Skip expensive pixel operations if content hasn't changed
+        if !self.content_dirty {
+            return;
+        }
+        self.content_dirty = false;
+
         unsafe {
-            // Copy RGBA pixel data to DIB (convert RGBA to BGRA)
             let hdc_screen = GetDC(HWND::default());
 
             let bmi = BITMAPINFO {
@@ -159,18 +168,16 @@ impl WindowsOverlay {
                 ..Default::default()
             };
 
-            // Convert RGBA to BGRA and write directly
-            let bgra_data: Vec<u8> = self
-                .pixel_data
-                .chunks(4)
-                .flat_map(|chunk| {
-                    if chunk.len() == 4 {
-                        vec![chunk[2], chunk[1], chunk[0], chunk[3]] // BGRA
-                    } else {
-                        vec![0, 0, 0, 0]
-                    }
-                })
-                .collect();
+            // Convert RGBA to BGRA using pre-allocated buffer (no allocation!)
+            for (i, chunk) in self.pixel_data.chunks(4).enumerate() {
+                let offset = i * 4;
+                if chunk.len() == 4 && offset + 3 < self.bgra_buffer.len() {
+                    self.bgra_buffer[offset] = chunk[2];     // B
+                    self.bgra_buffer[offset + 1] = chunk[1]; // G
+                    self.bgra_buffer[offset + 2] = chunk[0]; // R
+                    self.bgra_buffer[offset + 3] = chunk[3]; // A
+                }
+            }
 
             // Get the bitmap handle from the DC
             let hgdiobj = GetCurrentObject(self.hdc_mem, OBJ_BITMAP);
@@ -180,7 +187,7 @@ impl WindowsOverlay {
                 hbitmap,
                 0,
                 self.height,
-                bgra_data.as_ptr() as *const _,
+                self.bgra_buffer.as_ptr() as *const _,
                 &bmi,
                 DIB_RGB_COLORS,
             );
@@ -275,6 +282,8 @@ impl OverlayPlatform for WindowsOverlay {
             x: config.x,
             y: config.y,
             pixel_data: vec![0u8; (config.width * config.height * 4) as usize],
+            bgra_buffer: vec![0u8; (config.width * config.height * 4) as usize],
+            content_dirty: true,  // Initial render needed
             click_through: config.click_through,
             position_dirty: false,
             pointer_x: 0,
@@ -326,6 +335,10 @@ impl OverlayPlatform for WindowsOverlay {
     }
 
     fn set_position(&mut self, x: i32, y: i32) {
+        // Skip if position unchanged
+        if x == self.x && y == self.y {
+            return;
+        }
         self.x = x;
         self.y = y;
         self.position_dirty = true;
@@ -398,6 +411,7 @@ impl OverlayPlatform for WindowsOverlay {
     }
 
     fn pixel_buffer(&mut self) -> Option<&mut [u8]> {
+        self.content_dirty = true;  // Assume caller will modify the buffer
         Some(&mut self.pixel_data)
     }
 
