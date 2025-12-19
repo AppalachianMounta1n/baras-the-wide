@@ -184,8 +184,6 @@ impl CombatService {
             self.on_directory_changed().await;
         }
 
-        new_config.save();
-        // Future: other config change handlers
     }
 
     async fn on_directory_changed(&mut self) {

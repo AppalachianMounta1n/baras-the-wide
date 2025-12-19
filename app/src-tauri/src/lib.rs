@@ -58,13 +58,11 @@ fn spawn_auto_show_overlays(
             }
 
             // Send current metrics if tailing
-            if service_handle.is_tailing().await {
-                if let Some(metrics) = service_handle.current_metrics().await {
-                    if !metrics.is_empty() {
+            if service_handle.is_tailing().await &&
+                let Some(metrics) = service_handle.current_metrics().await
+                    && !metrics.is_empty() {
                         let entries = overlay::create_entries_for_type(overlay_type, &metrics);
                         let _ = tx.send(OverlayCommand::UpdateEntries(entries)).await;
-                    }
-                }
             }
 
             eprintln!("Auto-showed {} overlay on startup", overlay_type.config_key());

@@ -167,10 +167,9 @@ pub fn App() -> Element {
                 js_sys::Reflect::set(&obj, &JsValue::from_str("overlayType"), &args).unwrap();
 
                 let result = invoke(cmd, obj.into()).await;
-                if let Some(success) = result.as_bool() {
-                    if success {
+                if let Some(success) = result.as_bool() && success {
                         enabled_signal.set(!current);
-                    }
+
                 }
             }
         }

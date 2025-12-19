@@ -7,8 +7,7 @@ use std::sync::atomic::Ordering;
 use std::path::PathBuf;
 use std::sync::Arc;
 use baras_core::EncounterState;
-use baras_core::Entity;
-use tokio::sync::{mpsc};
+use tokio::sync::mpsc;
 
 use baras_core::context::{resolve, AppConfig};
 use baras_core::EntityType;
