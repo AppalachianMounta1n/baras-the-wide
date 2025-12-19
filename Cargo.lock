@@ -429,6 +429,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "confy",
+ "dirs",
  "hashbrown 0.16.1",
  "lasso",
  "memchr",
