@@ -18,3 +18,6 @@ bundle:
 # Build release binary only (no bundle)
 build-app:
   cd app && cargo tauri build --no-bundle
+
+run-app-image:
+  {{justfile_directory()}}/target/release/bundle/appimage/*.AppImage

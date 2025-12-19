@@ -257,29 +257,29 @@ pub fn App() -> Element {
                                 span { class: "value", "{name}" }
                             }
                         }
-                        if let Some(ref class_name) = info.player_class {
-                            div { class: "session-item",
-                                span { class: "label", "Class" }
-                                span { class: "value", "{class_name}" }
-                            }
-                        }
-                        if let Some(ref disc) = info.player_discipline {
-                            div { class: "session-item",
-                                span { class: "label", "Discipline" }
-                                span { class: "value", "{disc}" }
-                            }
-                        }
                         if let Some(ref area) = info.area_name {
                             div { class: "session-item",
                                 span { class: "label", "Area" }
                                 span { class: "value", "{area}" }
                             }
                         }
-                        div { class: "session-item",
+                        if let Some(ref class_name) = info.player_class {
+                            div { class: "session-item",
+                                span { class: "label", "Class" }
+                                span { class: "value", "{class_name}" }
+                            }
+                        }
+                         div { class: "session-item",
                             span { class: "label", "Combat" }
                             span {
                                 class: if info.in_combat { "value status-warning" } else { "value" },
                                 if info.in_combat { "In Combat" } else { "Out of Combat" }
+                            }
+                        }
+                        if let Some(ref disc) = info.player_discipline {
+                            div { class: "session-item",
+                                span { class: "label", "Discipline" }
+                                span { class: "value", "{disc}" }
                             }
                         }
                         div { class: "session-item",
