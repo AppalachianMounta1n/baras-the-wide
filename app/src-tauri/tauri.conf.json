@@ -16,7 +16,12 @@
         "title": "Baras",
         "width": 800,
         "height": 600,
-        "fullscreen": false
+        "minWidth": 400,
+        "minHeight": 300,
+        "fullscreen": false,
+        "resizable": true,
+        "decorations": true,
+        "center": true
       }
     ],
     "security": {
@@ -25,13 +30,21 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["appimage", "deb"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "shortDescription": "SWTOR Combat Log Parser",
+    "longDescription": "A fast, efficient combat log parser for Star Wars: The Old Republic with real-time overlay support.",
+    "category": "Game",
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
   }
 }
