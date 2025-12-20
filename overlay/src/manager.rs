@@ -4,7 +4,7 @@
 //! with a high-level rendering API.
 #![allow(clippy::too_many_arguments)]
 
-use crate::platform::{NativeOverlay, OverlayConfig, OverlayPlatform, PlatformError};
+use crate::platform::{MonitorInfo, NativeOverlay, OverlayConfig, OverlayPlatform, PlatformError};
 use crate::renderer::Renderer;
 use tiny_skia::Color;
 
@@ -165,6 +165,11 @@ impl OverlayWindow {
     /// Check if overlay is in interactive mode (not click-through)
     pub fn is_interactive(&self) -> bool {
         self.platform.is_interactive()
+    }
+
+    /// Get the monitor that contains the overlay's current position
+    pub fn current_monitor(&self) -> Option<MonitorInfo> {
+        self.platform.current_monitor()
     }
 
     /// Run the window event loop with a render callback

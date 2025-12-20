@@ -60,6 +60,7 @@ pub async fn show_overlay(
 
     // Load position and background alpha from config
     let position = config.overlay_settings.get_position(kind.config_key());
+    let needs_monitor_id_save = position.monitor_id.is_none();
     let background_alpha = config.overlay_settings.background_alpha;
 
     // Create and spawn overlay based on kind
@@ -89,6 +90,32 @@ pub async fn show_overlay(
         {
             let entries = create_entries_for_type(overlay_type, &metrics);
             let _ = tx.send(OverlayCommand::UpdateData(OverlayData::Metrics(entries))).await;
+        }
+    }
+
+    // If monitor_id was None, query and save the position to persist the monitor
+    // the compositor chose. This ensures next spawn goes to same monitor.
+    if needs_monitor_id_save {
+        // Give overlay a moment to be placed by compositor
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let (pos_tx, pos_rx) = tokio::sync::oneshot::channel();
+        let _ = tx.send(OverlayCommand::GetPosition(pos_tx)).await;
+        if let Ok(pos) = pos_rx.await {
+            let relative_x = pos.x - pos.monitor_x;
+            let relative_y = pos.y - pos.monitor_y;
+            let mut config = service.config().await;
+            config.overlay_settings.set_position(
+                kind.config_key(),
+                OverlayPositionConfig {
+                    x: relative_x,
+                    y: relative_y,
+                    width: pos.width,
+                    height: pos.height,
+                    monitor_id: pos.monitor_id,
+                },
+            );
+            let _ = service.update_config(config).await;
         }
     }
 
@@ -168,6 +195,8 @@ pub async fn show_all_overlays(
     let background_alpha = config.overlay_settings.background_alpha;
 
     let mut shown_metric_types = Vec::new();
+    // Track overlays that need their monitor_id saved: (config_key, tx)
+    let mut needs_monitor_save: Vec<(String, tokio::sync::mpsc::Sender<OverlayCommand>)> = Vec::new();
 
     for key in &enabled_keys {
         if key == "personal" {
@@ -180,11 +209,19 @@ pub async fn show_all_overlays(
 
             if !already_running {
                 let position = config.overlay_settings.get_position("personal");
+                let needs_save = position.monitor_id.is_none();
                 let personal_config = config.overlay_settings.personal_overlay.clone();
                 let overlay_handle = create_personal_overlay(position, personal_config, background_alpha)?;
+                let tx = overlay_handle.tx.clone();
 
-                let mut state = state.lock().map_err(|e| e.to_string())?;
-                state.insert(overlay_handle);
+                {
+                    let mut state = state.lock().map_err(|e| e.to_string())?;
+                    state.insert(overlay_handle);
+                }
+
+                if needs_save {
+                    needs_monitor_save.push(("personal".to_string(), tx));
+                }
             }
         } else if let Some(overlay_type) = MetricType::from_config_key(key) {
             // Handle metric overlay
@@ -201,6 +238,7 @@ pub async fn show_all_overlays(
 
             // Load position, appearance, and spawn
             let position = config.overlay_settings.get_position(key);
+            let needs_save = position.monitor_id.is_none();
             let appearance = config.overlay_settings.get_appearance(key);
             let overlay_handle = create_metric_overlay(overlay_type, position, appearance, background_alpha)?;
             let tx = overlay_handle.tx.clone();
@@ -220,8 +258,39 @@ pub async fn show_all_overlays(
                 let _ = tx.send(OverlayCommand::UpdateData(OverlayData::Metrics(entries))).await;
             }
 
+            if needs_save {
+                needs_monitor_save.push((key.clone(), tx.clone()));
+            }
+
             shown_metric_types.push(overlay_type);
         }
+    }
+
+    // Save monitor_id for overlays that didn't have one
+    if !needs_monitor_save.is_empty() {
+        // Give overlays a moment to be placed by compositor
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let mut config = service.config().await;
+        for (key, tx) in needs_monitor_save {
+            let (pos_tx, pos_rx) = tokio::sync::oneshot::channel();
+            let _ = tx.send(OverlayCommand::GetPosition(pos_tx)).await;
+            if let Ok(pos) = pos_rx.await {
+                let relative_x = pos.x - pos.monitor_x;
+                let relative_y = pos.y - pos.monitor_y;
+                config.overlay_settings.set_position(
+                    &key,
+                    OverlayPositionConfig {
+                        x: relative_x,
+                        y: relative_y,
+                        width: pos.width,
+                        height: pos.height,
+                        monitor_id: pos.monitor_id,
+                    },
+                );
+            }
+        }
+        let _ = service.update_config(config).await;
     }
 
     Ok(shown_metric_types)
@@ -262,17 +331,21 @@ pub async fn toggle_move_mode(
             }
         }
 
-        // Save positions to config
+        // Save positions to config (relative to monitor)
         let mut config = service.config().await;
         for pos in positions {
+            // Convert absolute screen position to relative monitor position
+            let relative_x = pos.x - pos.monitor_x;
+            let relative_y = pos.y - pos.monitor_y;
+
             config.overlay_settings.set_position(
                 pos.kind.config_key(),
                 OverlayPositionConfig {
-                    x: pos.x,
-                    y: pos.y,
+                    x: relative_x,
+                    y: relative_y,
                     width: pos.width,
                     height: pos.height,
-                    monitor_id: None,
+                    monitor_id: pos.monitor_id.clone(),
                 },
             );
         }

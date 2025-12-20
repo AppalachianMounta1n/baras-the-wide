@@ -17,6 +17,7 @@ fn main() {
         height: 200,
         namespace: "baras-dps-metric".to_string(),
         click_through: false,
+        target_monitor_id: None,
     };
 
     // Create the metric overlay with default appearance

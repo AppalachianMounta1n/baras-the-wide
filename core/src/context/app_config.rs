@@ -94,13 +94,22 @@ impl Default for PersonalOverlayConfig {
 }
 
 /// Position configuration for an overlay
+///
+/// Positions are stored relative to the monitor's top-left corner, allowing
+/// overlays to appear in the same position on their target monitor even if
+/// the monitor layout changes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OverlayPositionConfig {
+    /// X offset from the monitor's left edge (relative position)
     pub x: i32,
+    /// Y offset from the monitor's top edge (relative position)
     pub y: i32,
+    /// Width in pixels
     pub width: u32,
+    /// Height in pixels
     pub height: u32,
-    /// Monitor identifier - falls back to primary if unavailable
+    /// Monitor identifier - overlay will be placed on this monitor if available,
+    /// otherwise falls back to primary monitor
     pub monitor_id: Option<String>,
 }
 

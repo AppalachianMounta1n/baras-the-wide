@@ -51,12 +51,19 @@ pub fn spawn_overlay<O: Overlay>(
                     }
                     OverlayCommand::GetPosition(response_tx) => {
                         let pos = overlay.position();
+                        let current_monitor = overlay.frame().window().current_monitor();
+                        let (monitor_id, monitor_x, monitor_y) = current_monitor
+                            .map(|m| (Some(m.id), m.x, m.y))
+                            .unwrap_or((None, 0, 0));
                         let _ = response_tx.send(PositionEvent {
                             kind,
                             x: pos.x,
                             y: pos.y,
                             width: pos.width,
                             height: pos.height,
+                            monitor_id,
+                            monitor_x,
+                            monitor_y,
                         });
                     }
                     OverlayCommand::Shutdown => {
@@ -108,12 +115,19 @@ pub fn spawn_overlay<O: Overlay>(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Create and spawn a metric overlay
+///
+/// Position is stored as relative to the saved monitor. On Wayland with layer-shell,
+/// positions are used directly as margins from the output's top-left corner.
+/// The target_monitor_id binds the surface to the correct output.
 pub fn create_metric_overlay(
     overlay_type: MetricType,
     position: OverlayPositionConfig,
     appearance: OverlayAppearanceConfig,
     background_alpha: u8,
 ) -> Result<OverlayHandle, String> {
+    // Position is already relative to the monitor - pass directly
+    // On Wayland: used as layer-shell margins
+    // On Windows: will be converted to absolute using monitor position
     let config = OverlayConfig {
         x: position.x,
         y: position.y,
@@ -121,6 +135,7 @@ pub fn create_metric_overlay(
         height: position.height,
         namespace: overlay_type.namespace().to_string(),
         click_through: true,
+        target_monitor_id: position.monitor_id.clone(),
     };
 
     let overlay = MetricOverlay::new(config, overlay_type.title(), appearance, background_alpha)
@@ -133,11 +148,16 @@ pub fn create_metric_overlay(
 }
 
 /// Create and spawn the personal overlay
+///
+/// Position is stored as relative to the saved monitor. On Wayland with layer-shell,
+/// positions are used directly as margins from the output's top-left corner.
+/// The target_monitor_id binds the surface to the correct output.
 pub fn create_personal_overlay(
     position: OverlayPositionConfig,
     personal_config: PersonalOverlayConfig,
     background_alpha: u8,
 ) -> Result<OverlayHandle, String> {
+    // Position is already relative to the monitor - pass directly
     let config = OverlayConfig {
         x: position.x,
         y: position.y,
@@ -145,6 +165,7 @@ pub fn create_personal_overlay(
         height: position.height,
         namespace: "baras-personal".to_string(),
         click_through: true,
+        target_monitor_id: position.monitor_id.clone(),
     };
 
     let overlay = PersonalOverlay::new(config, personal_config, background_alpha)

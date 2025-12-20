@@ -32,10 +32,18 @@ pub enum OverlayCommand {
 #[derive(Debug, Clone)]
 pub struct PositionEvent {
     pub kind: OverlayType,
+    /// Absolute X position (screen coordinates)
     pub x: i32,
+    /// Absolute Y position (screen coordinates)
     pub y: i32,
     pub width: u32,
     pub height: u32,
+    /// Monitor ID where the overlay is currently located
+    pub monitor_id: Option<String>,
+    /// Monitor's top-left X coordinate (for relative position calculation)
+    pub monitor_x: i32,
+    /// Monitor's top-left Y coordinate (for relative position calculation)
+    pub monitor_y: i32,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
