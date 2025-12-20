@@ -31,7 +31,8 @@ fn spawn_auto_show_overlays(
         }
 
         let enabled_keys = config.overlay_settings.enabled_types();
-        let background_alpha = config.overlay_settings.background_alpha;
+        let metric_opacity = config.overlay_settings.metric_opacity;
+        let personal_opacity = config.overlay_settings.personal_opacity;
 
         for key in &enabled_keys {
             if key == "personal" {
@@ -48,7 +49,7 @@ fn spawn_auto_show_overlays(
                     let position = config.overlay_settings.get_position("personal");
                     let personal_config = config.overlay_settings.personal_overlay.clone();
 
-                    match create_personal_overlay(position, personal_config, background_alpha) {
+                    match create_personal_overlay(position, personal_config, personal_opacity) {
                         Ok(overlay_handle) => {
                             if let Ok(mut state) = overlay_state.lock() {
                                 state.insert(overlay_handle);
@@ -77,7 +78,7 @@ fn spawn_auto_show_overlays(
                 let position = config.overlay_settings.get_position(key);
                 let appearance = config.overlay_settings.get_appearance(key);
 
-                match create_metric_overlay(overlay_type, position, appearance, background_alpha) {
+                match create_metric_overlay(overlay_type, position, appearance, metric_opacity) {
                     Ok(overlay_handle) => {
                         let tx = overlay_handle.tx.clone();
 

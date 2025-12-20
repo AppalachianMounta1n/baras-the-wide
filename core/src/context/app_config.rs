@@ -23,12 +23,18 @@ pub struct OverlayAppearanceConfig {
     pub bar_color: Color,
     #[serde(default = "default_max_entries")]
     pub max_entries: u8,
+    /// Show cumulative total value (e.g., total damage dealt)
+    #[serde(default)]
+    pub show_total: bool,
+    /// Show per-second rate (e.g., DPS) - when both are enabled, rate is rightmost
+    #[serde(default = "default_true")]
+    pub show_per_second: bool,
 }
 
 fn default_true() -> bool { true }
 fn default_font_color() -> Color { [255, 255, 255, 255] }  // White
 fn default_bar_color() -> Color { [180, 50, 50, 255] }     // Red (DPS default)
-fn default_max_entries() -> u8 { 8 }
+fn default_max_entries() -> u8 { 16 }
 
 impl Default for OverlayAppearanceConfig {
     fn default() -> Self {
@@ -38,7 +44,9 @@ impl Default for OverlayAppearanceConfig {
             show_class_icons: false,
             font_color: default_font_color(),
             bar_color: default_bar_color(),
-            max_entries: 8,
+            max_entries: 16,
+            show_total: false,
+            show_per_second: true,
         }
     }
 }
@@ -145,18 +153,24 @@ pub struct OverlaySettings {
     #[serde(default)]
     pub personal_overlay: PersonalOverlayConfig,
 
-    // --- Global settings (apply to all overlays) ---
+    // --- Category opacity settings ---
 
-    /// Background transparency (0 = fully transparent, 255 = fully opaque)
-    #[serde(default = "default_background_alpha")]
-    pub background_alpha: u8,
+    /// Background opacity for metric overlays (DPS, HPS, TPS, etc.)
+    /// 0 = fully transparent, 255 = fully opaque
+    #[serde(default = "default_opacity")]
+    pub metric_opacity: u8,
+    /// Background opacity for personal overlay
+    /// 0 = fully transparent, 255 = fully opaque
+    #[serde(default = "default_opacity")]
+    pub personal_opacity: u8,
+
     /// Global toggle for class icons (future use)
     #[serde(default)]
     pub class_icons_enabled: bool,
 }
 
 fn default_visible() -> bool { true }
-fn default_background_alpha() -> u8 { 180 }
+fn default_opacity() -> u8 { 180 }
 
 impl Default for OverlaySettings {
     fn default() -> Self {
@@ -166,7 +180,8 @@ impl Default for OverlaySettings {
             enabled: HashMap::new(),
             overlays_visible: true,
             personal_overlay: PersonalOverlayConfig::default(),
-            background_alpha: default_background_alpha(),
+            metric_opacity: default_opacity(),
+            personal_opacity: default_opacity(),
             class_icons_enabled: false,
         }
     }

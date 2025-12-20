@@ -36,12 +36,18 @@ pub struct OverlayAppearanceConfig {
     pub bar_color: Color,
     #[serde(default = "default_max_entries")]
     pub max_entries: u8,
+    /// Show cumulative total value (e.g., total damage dealt)
+    #[serde(default)]
+    pub show_total: bool,
+    /// Show per-second rate (e.g., DPS) - default true
+    #[serde(default = "default_true")]
+    pub show_per_second: bool,
 }
 
 fn default_true() -> bool { true }
 fn default_font_color() -> Color { [255, 255, 255, 255] }
 fn default_bar_color() -> Color { [180, 50, 50, 255] }
-fn default_max_entries() -> u8 { 8 }
+fn default_max_entries() -> u8 { 16 }
 
 impl Default for OverlayAppearanceConfig {
     fn default() -> Self {
@@ -51,7 +57,9 @@ impl Default for OverlayAppearanceConfig {
             show_class_icons: false,
             font_color: default_font_color(),
             bar_color: default_bar_color(),
-            max_entries: 8,
+            max_entries: 16,
+            show_total: false,
+            show_per_second: true,
         }
     }
 }
@@ -80,8 +88,8 @@ pub enum PersonalStat {
 impl PersonalStat {
     pub fn label(&self) -> &'static str {
         match self {
-            PersonalStat::EncounterTime => "Time",
-            PersonalStat::EncounterCount => "Fight #",
+            PersonalStat::EncounterTime => "Duration",
+            PersonalStat::EncounterCount => "Encounter",
             PersonalStat::Apm => "APM",
             PersonalStat::Dps => "DPS",
             PersonalStat::EDps => "eDPS",
@@ -169,11 +177,27 @@ pub struct OverlaySettings {
     pub enabled: std::collections::HashMap<String, bool>,
     #[serde(default)]
     pub personal_overlay: PersonalOverlayConfig,
-    #[serde(default = "default_background_alpha")]
-    pub background_alpha: u8,
+    /// Background opacity for metric overlays (DPS, HPS, TPS, etc.)
+    #[serde(default = "default_opacity")]
+    pub metric_opacity: u8,
+    /// Background opacity for personal overlay
+    #[serde(default = "default_opacity")]
+    pub personal_opacity: u8,
 }
 
-fn default_background_alpha() -> u8 { 180 }
+fn default_opacity() -> u8 { 180 }
+
+/// Parse a hex color string (e.g., "#ff0000") to RGBA bytes
+fn parse_hex_color(hex: &str) -> Option<Color> {
+    let hex = hex.trim_start_matches('#');
+    if hex.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    Some([r, g, b, 255])
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
@@ -223,14 +247,14 @@ pub enum MetricType {
 impl MetricType {
     pub fn label(&self) -> &'static str {
         match self {
-            MetricType::Dps => "DPS",
-            MetricType::EDps => "eDPS",
-            MetricType::Hps => "HPS",
-            MetricType::EHps => "eHPS",
-            MetricType::Tps => "TPS",
-            MetricType::Dtps => "DTPS",
-            MetricType::EDtps => "eDTPS",
-            MetricType::Abs => "ABS",
+            MetricType::Dps => "Damage",
+            MetricType::EDps => "Effective Damage",
+            MetricType::Hps => "Healing",
+            MetricType::EHps => "Effective Healing",
+            MetricType::Tps => "Threat",
+            MetricType::Dtps => "Damage Taken",
+            MetricType::EDtps => "Effective Damage Taken",
+            MetricType::Abs => "Shielding Given",
         }
     }
 
@@ -547,9 +571,9 @@ pub fn App() -> Element {
             section { class: "overlay-controls",
                 h3 { "Overlays" }
 
-                // Meters section
-                h4 { class: "subsection-title", "Meters" }
-                div { class: "overlay-meters",
+                // Metrics section
+                h4 { class: "subsection-title", "Metrics" }
+                div { class: "overlay-metrics",
                     for overlay_type in MetricType::all_metrics() {
                         {
                             let ot = *overlay_type;
@@ -567,7 +591,7 @@ pub fn App() -> Element {
 
                 // Personal section
                 h4 { class: "subsection-title", "Personal" }
-                div { class: "overlay-meters",
+                div { class: "overlay-metrics",
                     button {
                         class: if personal_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
                         onclick: toggle_personal,
@@ -679,6 +703,26 @@ fn SettingsPanel(
 
     let current_appearance = get_appearance(&tab);
 
+    // Pre-compute hex color strings for color pickers
+    let bar_color_hex = format!(
+        "#{:02x}{:02x}{:02x}",
+        current_appearance.bar_color[0],
+        current_appearance.bar_color[1],
+        current_appearance.bar_color[2]
+    );
+    let font_color_hex = format!(
+        "#{:02x}{:02x}{:02x}",
+        current_appearance.font_color[0],
+        current_appearance.font_color[1],
+        current_appearance.font_color[2]
+    );
+    let personal_font_color_hex = format!(
+        "#{:02x}{:02x}{:02x}",
+        current_settings.personal_overlay.font_color[0],
+        current_settings.personal_overlay.font_color[1],
+        current_settings.personal_overlay.font_color[2]
+    );
+
     // Save settings to backend (preserves positions)
     let save_to_backend = move |_| {
         let new_settings = draft_settings();
@@ -692,7 +736,8 @@ fn SettingsPanel(
 
                 config.overlay_settings.appearances = new_settings.appearances.clone();
                 config.overlay_settings.personal_overlay = new_settings.personal_overlay.clone();
-                config.overlay_settings.background_alpha = new_settings.background_alpha;
+                config.overlay_settings.metric_opacity = new_settings.metric_opacity;
+                config.overlay_settings.personal_opacity = new_settings.personal_opacity;
                 // Keep positions and enabled state untouched
                 config.overlay_settings.positions = existing_positions;
                 config.overlay_settings.enabled = existing_enabled;
@@ -734,25 +779,42 @@ fn SettingsPanel(
                 }
             }
 
-            // Global settings
+            // Category opacity settings
             div { class: "settings-section",
-                h4 { "Global" }
+                h4 { "Opacity" }
                 div { class: "setting-row",
-                    label { "Background Opacity" }
+                    label { "Metrics Opacity" }
                     input {
                         r#type: "range",
                         min: "0",
                         max: "255",
-                        value: "{current_settings.background_alpha}",
+                        value: "{current_settings.metric_opacity}",
                         oninput: move |e| {
                             if let Ok(val) = e.value().parse::<u8>() {
                                 let mut new_settings = draft_settings();
-                                new_settings.background_alpha = val;
+                                new_settings.metric_opacity = val;
                                 update_draft(new_settings);
                             }
                         }
                     }
-                    span { class: "value", "{current_settings.background_alpha}" }
+                    span { class: "value", "{current_settings.metric_opacity}" }
+                }
+                div { class: "setting-row",
+                    label { "Personal Opacity" }
+                    input {
+                        r#type: "range",
+                        min: "0",
+                        max: "255",
+                        value: "{current_settings.personal_opacity}",
+                        oninput: move |e| {
+                            if let Ok(val) = e.value().parse::<u8>() {
+                                let mut new_settings = draft_settings();
+                                new_settings.personal_opacity = val;
+                                update_draft(new_settings);
+                            }
+                        }
+                    }
+                    span { class: "value", "{current_settings.personal_opacity}" }
                 }
             }
 
@@ -784,6 +846,49 @@ fn SettingsPanel(
                 div { class: "settings-section",
                     h4 { "{tab.to_uppercase()} Meter" }
 
+                    // Display options
+                    div { class: "setting-row",
+                        label { "Show Per-Second" }
+                        input {
+                            r#type: "checkbox",
+                            checked: current_appearance.show_per_second,
+                            onchange: {
+                                let tab = tab.clone();
+                                move |e: Event<FormData>| {
+                                    let mut new_settings = draft_settings();
+                                    let mut appearance = new_settings.appearances
+                                        .entry(tab.clone())
+                                        .or_insert_with(OverlayAppearanceConfig::default)
+                                        .clone();
+                                    appearance.show_per_second = e.checked();
+                                    new_settings.appearances.insert(tab.clone(), appearance);
+                                    update_draft(new_settings);
+                                }
+                            }
+                        }
+                    }
+
+                    div { class: "setting-row",
+                        label { "Show Total" }
+                        input {
+                            r#type: "checkbox",
+                            checked: current_appearance.show_total,
+                            onchange: {
+                                let tab = tab.clone();
+                                move |e: Event<FormData>| {
+                                    let mut new_settings = draft_settings();
+                                    let mut appearance = new_settings.appearances
+                                        .entry(tab.clone())
+                                        .or_insert_with(OverlayAppearanceConfig::default)
+                                        .clone();
+                                    appearance.show_total = e.checked();
+                                    new_settings.appearances.insert(tab.clone(), appearance);
+                                    update_draft(new_settings);
+                                }
+                            }
+                        }
+                    }
+
                     div { class: "setting-row",
                         label { "Show Header" }
                         input {
@@ -806,7 +911,7 @@ fn SettingsPanel(
                     }
 
                     div { class: "setting-row",
-                        label { "Show Footer (Total)" }
+                        label { "Show Footer" }
                         input {
                             r#type: "checkbox",
                             checked: current_appearance.show_footer,
@@ -850,6 +955,57 @@ fn SettingsPanel(
                             }
                         }
                     }
+
+                    // Color settings
+                    div { class: "setting-row",
+                        label { "Bar Color" }
+                        input {
+                            r#type: "color",
+                            key: "{tab}-bar-{bar_color_hex}",
+                            initial_value: bar_color_hex.clone(),
+                            style: "background-color: {bar_color_hex}; width: 50px; height: 30px; border: 1px solid #666; border-radius: 4px; cursor: pointer; padding: 0;",
+                            oninput: {
+                                let tab = tab.clone();
+                                move |e: Event<FormData>| {
+                                    if let Some(color) = parse_hex_color(&e.value()) {
+                                        let mut new_settings = draft_settings();
+                                        let mut appearance = new_settings.appearances
+                                            .entry(tab.clone())
+                                            .or_insert_with(OverlayAppearanceConfig::default)
+                                            .clone();
+                                        appearance.bar_color = color;
+                                        new_settings.appearances.insert(tab.clone(), appearance);
+                                        update_draft(new_settings);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    div { class: "setting-row",
+                        label { "Font Color" }
+                        input {
+                            r#type: "color",
+                            key: "{tab}-font-{font_color_hex}",
+                            initial_value: font_color_hex.clone(),
+                            style: "background-color: {font_color_hex}; width: 50px; height: 30px; border: 1px solid #666; border-radius: 4px; cursor: pointer; padding: 0;",
+                            oninput: {
+                                let tab = tab.clone();
+                                move |e: Event<FormData>| {
+                                    if let Some(color) = parse_hex_color(&e.value()) {
+                                        let mut new_settings = draft_settings();
+                                        let mut appearance = new_settings.appearances
+                                            .entry(tab.clone())
+                                            .or_insert_with(OverlayAppearanceConfig::default)
+                                            .clone();
+                                        appearance.font_color = color;
+                                        new_settings.appearances.insert(tab.clone(), appearance);
+                                        update_draft(new_settings);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             } else {
                 // Personal overlay settings
@@ -883,6 +1039,24 @@ fn SettingsPanel(
                                         }
                                         span { "{stat.label()}" }
                                     }
+                                }
+                            }
+                        }
+                    }
+
+                    // Personal overlay font color
+                    div { class: "setting-row",
+                        label { "Font Color" }
+                        input {
+                            r#type: "color",
+                            key: "personal-font-{personal_font_color_hex}",
+                            initial_value: personal_font_color_hex.clone(),
+                            style: "background-color: {personal_font_color_hex}; width: 50px; height: 30px; border: 1px solid #666; border-radius: 4px; cursor: pointer; padding: 0;",
+                            oninput: move |e: Event<FormData>| {
+                                if let Some(color) = parse_hex_color(&e.value()) {
+                                    let mut new_settings = draft_settings();
+                                    new_settings.personal_overlay.font_color = color;
+                                    update_draft(new_settings);
                                 }
                             }
                         }

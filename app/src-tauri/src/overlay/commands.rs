@@ -58,20 +58,19 @@ pub async fn show_overlay(
         }
     }
 
-    // Load position and background alpha from config
+    // Load position from config
     let position = config.overlay_settings.get_position(kind.config_key());
     let needs_monitor_id_save = position.monitor_id.is_none();
-    let background_alpha = config.overlay_settings.background_alpha;
 
-    // Create and spawn overlay based on kind
+    // Create and spawn overlay based on kind (with per-category opacity)
     let overlay_handle = match kind {
         OverlayType::Metric(overlay_type) => {
             let appearance = config.overlay_settings.get_appearance(kind.config_key());
-            create_metric_overlay(overlay_type, position, appearance, background_alpha)?
+            create_metric_overlay(overlay_type, position, appearance, config.overlay_settings.metric_opacity)?
         }
         OverlayType::Personal => {
             let personal_config = config.overlay_settings.personal_overlay.clone();
-            create_personal_overlay(position, personal_config, background_alpha)?
+            create_personal_overlay(position, personal_config, config.overlay_settings.personal_opacity)?
         }
     };
     let tx = overlay_handle.tx.clone();
@@ -192,7 +191,8 @@ pub async fn show_all_overlays(
     service.update_config(config.clone()).await?;
 
     let enabled_keys = config.overlay_settings.enabled_types();
-    let background_alpha = config.overlay_settings.background_alpha;
+    let metric_opacity = config.overlay_settings.metric_opacity;
+    let personal_opacity = config.overlay_settings.personal_opacity;
 
     let mut shown_metric_types = Vec::new();
     // Track overlays that need their monitor_id saved: (config_key, tx)
@@ -211,7 +211,7 @@ pub async fn show_all_overlays(
                 let position = config.overlay_settings.get_position("personal");
                 let needs_save = position.monitor_id.is_none();
                 let personal_config = config.overlay_settings.personal_overlay.clone();
-                let overlay_handle = create_personal_overlay(position, personal_config, background_alpha)?;
+                let overlay_handle = create_personal_overlay(position, personal_config, personal_opacity)?;
                 let tx = overlay_handle.tx.clone();
 
                 {
@@ -240,7 +240,7 @@ pub async fn show_all_overlays(
             let position = config.overlay_settings.get_position(key);
             let needs_save = position.monitor_id.is_none();
             let appearance = config.overlay_settings.get_appearance(key);
-            let overlay_handle = create_metric_overlay(overlay_type, position, appearance, background_alpha)?;
+            let overlay_handle = create_metric_overlay(overlay_type, position, appearance, metric_opacity)?;
             let tx = overlay_handle.tx.clone();
 
             // Update state
@@ -401,7 +401,8 @@ pub async fn refresh_overlay_settings(
     service: State<'_, crate::service::ServiceHandle>,
 ) -> Result<bool, String> {
     let config = service.config().await;
-    let background_alpha = config.overlay_settings.background_alpha;
+    let metric_opacity = config.overlay_settings.metric_opacity;
+    let personal_opacity = config.overlay_settings.personal_opacity;
 
     // Get all running overlays with their kinds
     let overlays: Vec<_> = {
@@ -409,16 +410,16 @@ pub async fn refresh_overlay_settings(
         state.all_overlays().into_iter().map(|(k, tx)| (k, tx.clone())).collect()
     };
 
-    // Send updated config to each overlay based on its type
+    // Send updated config to each overlay based on its type (with per-category opacity)
     for (kind, tx) in overlays {
         let config_update = match kind {
             OverlayType::Metric(overlay_type) => {
                 let appearance = config.overlay_settings.get_appearance(overlay_type.config_key());
-                OverlayConfigUpdate::Metric(appearance, background_alpha)
+                OverlayConfigUpdate::Metric(appearance, metric_opacity)
             }
             OverlayType::Personal => {
                 let personal_config = config.overlay_settings.personal_overlay.clone();
-                OverlayConfigUpdate::Personal(personal_config, background_alpha)
+                OverlayConfigUpdate::Personal(personal_config, personal_opacity)
             }
         };
         let _ = tx.send(OverlayCommand::UpdateConfig(config_update)).await;

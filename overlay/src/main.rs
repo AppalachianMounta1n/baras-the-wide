@@ -36,24 +36,28 @@ fn main() {
             name: "Player 1".to_string(),
             value: 12500,
             max_value: 15000,
+            total_value: 2_500_000,
             color: colors::dps_bar_fill(),
         },
         MeterEntry {
             name: "Player 2".to_string(),
             value: 10200,
             max_value: 15000,
+            total_value: 1_800_000,
             color: colors::dps_bar_fill(),
         },
         MeterEntry {
             name: "Player 3".to_string(),
             value: 8700,
             max_value: 15000,
+            total_value: 1_200_000,
             color: colors::hps_bar_fill(),
         },
         MeterEntry {
             name: "Player 4".to_string(),
             value: 6100,
             max_value: 15000,
+            total_value: 800_000,
             color: colors::tank_bar_fill(),
         },
     ];

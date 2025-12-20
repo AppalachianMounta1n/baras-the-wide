@@ -27,14 +27,14 @@ impl MetricType {
     /// Display title for this overlay
     pub fn title(&self) -> &'static str {
         match self {
-            MetricType::Dps => "DPS",
-            MetricType::EDps => "eDPS",
-            MetricType::Hps => "HPS",
-            MetricType::EHps => "eHPS",
-            MetricType::Tps => "TPS",
-            MetricType::Dtps => "DTPS",
-            MetricType::EDtps => "eDTPS",
-            MetricType::Abs => "ABS",
+            MetricType::Dps => "Damage",
+            MetricType::EDps => "Effective Damage",
+            MetricType::Hps => "Healing",
+            MetricType::EHps => "Effective Healing",
+            MetricType::Tps => "Threat",
+            MetricType::Dtps => "Damage Taken",
+            MetricType::EDtps => "Effective Damage Taken",
+            MetricType::Abs => "Shielding Given",
         }
     }
 

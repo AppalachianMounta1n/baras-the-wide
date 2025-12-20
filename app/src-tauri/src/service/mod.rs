@@ -465,14 +465,19 @@ async fn calculate_metrics(shared: &Arc<SharedState>) -> Option<Vec<PlayerMetric
                     dps: m.dps as i64,
                     edps: m.edps as i64,
                     total_damage: m.total_damage as u64,
+                    total_damage_effective: m.total_damage_effective as u64,
                     hps: m.hps as i64,
                     ehps: m.ehps as i64,
                     total_healing: m.total_healing as u64,
+                    total_healing_effective: m.total_healing_effective as u64,
                     tps: m.tps as i64,
                     total_threat: m.total_threat as u64,
                     dtps: m.dtps as i64,
                     edtps: m.edtps as i64,
+                    total_damage_taken: m.total_damage_taken as u64,
+                    total_damage_taken_effective: m.total_damage_taken_effective as u64,
                     abs: m.abs as i64,
+                    total_shielding: m.total_shielding as u64,
                 }
             })
             .collect(),
@@ -550,17 +555,27 @@ pub struct LogFileInfo {
 pub struct PlayerMetrics {
     pub entity_id: i64,
     pub name: String,
+    // Damage dealing
     pub dps: i64,
     pub edps: i64,
     pub total_damage: u64,
+    pub total_damage_effective: u64,
+    // Healing
     pub hps: i64,
     pub ehps: i64,
     pub total_healing: u64,
+    pub total_healing_effective: u64,
+    // Threat
     pub tps: i64,
     pub total_threat: u64,
+    // Damage taken
     pub dtps: i64,
     pub edtps: i64,
+    pub total_damage_taken: u64,
+    pub total_damage_taken_effective: u64,
+    // Shielding (absorbs)
     pub abs: i64,
+    pub total_shielding: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

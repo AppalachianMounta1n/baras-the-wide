@@ -12,47 +12,56 @@ use crate::service::PlayerMetrics;
 /// Create meter entries for a specific overlay type from player metrics
 pub fn create_entries_for_type(overlay_type: MetricType, metrics: &[PlayerMetrics]) -> Vec<MeterEntry> {
     let color = overlay_type.bar_color();
-    let (mut values, max_value): (Vec<_>, i64) = match overlay_type {
-        MetricType::Dps => {
-            let max = metrics.iter().map(|m| m.dps).max().unwrap_or(0);
-            (metrics.iter().map(|m| (m.name.clone(), m.dps)).collect(), max)
-        }
-        MetricType::EDps => {
-            let max = metrics.iter().map(|m| m.edps).max().unwrap_or(0);
-            (metrics.iter().map(|m| (m.name.clone(), m.edps)).collect(), max)
-        }
-        MetricType::Hps => {
-            let max = metrics.iter().map(|m| m.hps).max().unwrap_or(0);
-            (metrics.iter().map(|m| (m.name.clone(), m.hps)).collect(), max)
-        }
-        MetricType::EHps => {
-            let max = metrics.iter().map(|m| m.ehps).max().unwrap_or(0);
-            (metrics.iter().map(|m| (m.name.clone(), m.ehps)).collect(), max)
-        }
-        MetricType::Tps => {
-            let max = metrics.iter().map(|m| m.tps).max().unwrap_or(0);
-            (metrics.iter().map(|m| (m.name.clone(), m.tps)).collect(), max)
-        }
-        MetricType::Dtps => {
-            let max = metrics.iter().map(|m| m.dtps).max().unwrap_or(0);
-            (metrics.iter().map(|m| (m.name.clone(), m.dtps)).collect(), max)
-        }
-        MetricType::EDtps => {
-            let max = metrics.iter().map(|m| m.edtps).max().unwrap_or(0);
-            (metrics.iter().map(|m| (m.name.clone(), m.edtps)).collect(), max)
-        }
-        MetricType::Abs => {
-            let max = metrics.iter().map(|m| m.abs).max().unwrap_or(0);
-            (metrics.iter().map(|m| (m.name.clone(), m.abs)).collect(), max)
-        }
+
+    // Extract (name, rate_value, total_value) tuples based on metric type
+    let mut values: Vec<(String, i64, i64)> = match overlay_type {
+        MetricType::Dps => metrics
+            .iter()
+            .map(|m| (m.name.clone(), m.dps, m.total_damage as i64))
+            .collect(),
+        MetricType::EDps => metrics
+            .iter()
+            .map(|m| (m.name.clone(), m.edps, m.total_damage_effective as i64))
+            .collect(),
+        MetricType::Hps => metrics
+            .iter()
+            .map(|m| (m.name.clone(), m.hps, m.total_healing as i64))
+            .collect(),
+        MetricType::EHps => metrics
+            .iter()
+            .map(|m| (m.name.clone(), m.ehps, m.total_healing_effective as i64))
+            .collect(),
+        MetricType::Tps => metrics
+            .iter()
+            .map(|m| (m.name.clone(), m.tps, m.total_threat as i64))
+            .collect(),
+        MetricType::Dtps => metrics
+            .iter()
+            .map(|m| (m.name.clone(), m.dtps, m.total_damage_taken as i64))
+            .collect(),
+        MetricType::EDtps => metrics
+            .iter()
+            .map(|m| (m.name.clone(), m.edtps, m.total_damage_taken_effective as i64))
+            .collect(),
+        MetricType::Abs => metrics
+            .iter()
+            .map(|m| (m.name.clone(), m.abs, m.total_shielding as i64))
+            .collect(),
     };
 
-    // Sort by metric value descending (highest first)
+    // Sort by rate value descending (highest first)
     values.sort_by(|a, b| b.1.cmp(&a.1));
+
+    // Find max rate for progress bar scaling
+    let max_value = values.iter().map(|(_, rate, _)| *rate).max().unwrap_or(1);
 
     values
         .into_iter()
-        .map(|(name, value)| MeterEntry::new(&name, value, max_value).with_color(color))
+        .map(|(name, rate, total)| {
+            MeterEntry::new(&name, rate, max_value)
+                .with_total(total)
+                .with_color(color)
+        })
         .collect()
 }
 

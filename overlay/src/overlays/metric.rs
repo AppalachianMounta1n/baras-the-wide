@@ -9,15 +9,19 @@ use super::{Overlay, OverlayConfigUpdate, OverlayData};
 use crate::frame::OverlayFrame;
 use crate::platform::{OverlayConfig, PlatformError};
 use crate::renderer::colors;
-use crate::utils::{color_from_rgba, truncate_name};
+use crate::utils::{color_from_rgba, format_number, truncate_name};
 use crate::widgets::{Footer, Header, ProgressBar};
 
 /// Entry in a DPS/HPS metric
 #[derive(Debug, Clone)]
 pub struct MeterEntry {
     pub name: String,
+    /// Per-second rate (e.g., DPS, HPS)
     pub value: i64,
+    /// Maximum value for progress bar scaling
     pub max_value: i64,
+    /// Cumulative total (e.g., total damage dealt)
+    pub total_value: i64,
     pub color: Color,
 }
 
@@ -27,8 +31,15 @@ impl MeterEntry {
             name: name.into(),
             value,
             max_value,
+            total_value: 0,
             color: colors::dps_bar_fill(),
         }
+    }
+
+    /// Set the cumulative total value
+    pub fn with_total(mut self, total: i64) -> Self {
+        self.total_value = total;
+        self
     }
 
     pub fn with_color(mut self, color: Color) -> Self {
@@ -136,6 +147,10 @@ impl MetricOverlay {
         let font_color = color_from_rgba(self.appearance.font_color);
         let bar_color = color_from_rgba(self.appearance.bar_color);
 
+        // Get display options
+        let show_total = self.appearance.show_total;
+        let show_per_second = self.appearance.show_per_second;
+
         // Begin frame (clear, background, border)
         self.frame.begin_frame();
 
@@ -172,23 +187,64 @@ impl MetricOverlay {
             };
 
             let display_name = truncate_name(&entry.name, MAX_NAME_CHARS);
+            let progress = if max_val > 0.0 {
+                (entry.max_value as f64 / max_val) as f32
+            } else {
+                0.0
+            };
 
-            ProgressBar::new(display_name, entry.value as f64, max_val)
+            let mut bar = ProgressBar::new(display_name, progress)
                 .with_fill_color(fill_color)
                 .with_bg_color(colors::dps_bar_bg())
-                .with_text_color(font_color)
-                .render(&mut self.frame, padding, y, content_width, bar_height, text_font_size, bar_radius);
+                .with_text_color(font_color);
+
+            // Add text based on show_total and show_per_second settings
+            // Per-second is always rightmost when enabled, total goes center or right
+            if show_per_second && show_total {
+                // Both: total in center, rate on right
+                bar = bar
+                    .with_center_text(format_number(entry.total_value))
+                    .with_right_text(format_number(entry.value));
+            } else if show_per_second {
+                // Rate only (default): rate on right
+                bar = bar.with_right_text(format_number(entry.value));
+            } else if show_total {
+                // Total only: total on right
+                bar = bar.with_right_text(format_number(entry.total_value));
+            }
+            // If neither, just show name (no values)
+
+            bar.render(&mut self.frame, padding, y, content_width, bar_height, text_font_size, bar_radius);
 
             y += bar_height + bar_spacing;
         }
 
         // Draw footer using Footer widget
         if self.appearance.show_footer {
-            let total: i64 = visible_entries.iter().map(|e| e.value).sum();
+            // Calculate sums based on display mode
+            let rate_sum: i64 = visible_entries.iter().map(|e| e.value).sum();
+            let total_sum: i64 = visible_entries.iter().map(|e| e.total_value).sum();
 
-            Footer::new(total.to_string())
-                .with_color(font_color)
-                .render(&mut self.frame, padding, y, content_width, font_size - 2.0, bar_spacing);
+            let footer = if show_per_second && show_total {
+                // Both enabled: show total sum in center, rate sum on right
+                Footer::new(format_number(rate_sum))
+                    .with_secondary(format_number(total_sum))
+                    .with_color(font_color)
+            } else if show_per_second {
+                // Rate only: show rate sum on right
+                Footer::new(format_number(rate_sum))
+                    .with_color(font_color)
+            } else if show_total {
+                // Total only: show total sum on right
+                Footer::new(format_number(total_sum))
+                    .with_color(font_color)
+            } else {
+                // Neither: empty footer (just separator)
+                Footer::new("")
+                    .with_color(font_color)
+            };
+
+            footer.render(&mut self.frame, padding, y, content_width, font_size - 2.0, bar_spacing);
         }
 
         // End frame (resize indicator, commit)

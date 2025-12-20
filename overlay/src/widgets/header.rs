@@ -79,10 +79,16 @@ impl Header {
     }
 }
 
-/// A footer with separator and right-aligned value (e.g., total)
+/// A footer with separator and one or two right-aligned values
+///
+/// Supports both single-column (just rate or just total) and two-column
+/// (total + rate) layouts to match the progress bar display.
 #[derive(Debug, Clone)]
 pub struct Footer {
+    /// Primary value displayed on the right (e.g., rate sum)
     pub value: String,
+    /// Secondary value displayed in center (e.g., total sum)
+    pub secondary_value: Option<String>,
     pub color: Color,
     pub show_separator: bool,
 }
@@ -91,9 +97,16 @@ impl Footer {
     pub fn new(value: impl Into<String>) -> Self {
         Self {
             value: value.into(),
+            secondary_value: None,
             color: colors::white(),
             show_separator: true,
         }
+    }
+
+    /// Set secondary value (displayed in center, e.g., total sum)
+    pub fn with_secondary(mut self, value: impl Into<String>) -> Self {
+        self.secondary_value = Some(value.into());
+        self
     }
 
     pub fn with_color(mut self, color: Color) -> Self {
@@ -104,6 +117,11 @@ impl Footer {
     pub fn with_separator(mut self, show: bool) -> Self {
         self.show_separator = show;
         self
+    }
+
+    /// Check if this is a two-column layout
+    fn is_two_column(&self) -> bool {
+        self.secondary_value.is_some()
     }
 
     /// Render the footer
@@ -132,15 +150,34 @@ impl Footer {
             current_y += spacing;
         }
 
-        // Draw value right-aligned
-        let (text_width, _) = frame.measure_text(&self.value, font_size);
         let text_padding = 4.0 * frame.scale_factor();
+        let text_y = current_y + font_size;
+        let is_two_col = self.is_two_column();
+
+        // Use smaller font for two-column layout
+        let effective_font_size = if is_two_col {
+            font_size * 0.85
+        } else {
+            font_size
+        };
+
+        // Draw primary value right-aligned
+        let (text_width, _) = frame.measure_text(&self.value, effective_font_size);
         frame.draw_text(
             &self.value,
             x + width - text_width - text_padding,
-            current_y + font_size,
-            font_size,
+            text_y,
+            effective_font_size,
             self.color,
         );
+
+        // Draw secondary value in center area (if present)
+        if let Some(ref secondary) = self.secondary_value {
+            // Position secondary value in the center-right area (similar to progress bar layout)
+            let right_start = x + width * 0.71; // Match progress bar column layout
+            let (secondary_width, _) = frame.measure_text(secondary, effective_font_size);
+            let secondary_x = right_start - secondary_width - text_padding;
+            frame.draw_text(secondary, secondary_x, text_y, effective_font_size, self.color);
+        }
     }
 }
