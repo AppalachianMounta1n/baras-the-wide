@@ -63,24 +63,8 @@ pub async fn show_settings(ctx: &CliContext) {
     }
 }
 
-pub async fn show_stats(ctx: &CliContext) {
-    let session = match ctx.session().await {
-        Some(s) => s,
-        None => {
-            println!("No active session");
-            return;
-        }
-    };
-    let s = session.read().await;
-    let enc = s
-        .session_cache
-        .as_ref()
-        .and_then(|c| c.last_combat_encounter());
-
-    match enc {
-        Some(e) => e.show_dps(),
-        None => println!("No combat encounters found"),
-    }
+pub async fn show_stats() {
+    println!("placeholder");
 }
 
 pub fn exit() {

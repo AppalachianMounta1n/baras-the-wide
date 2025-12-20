@@ -25,4 +25,5 @@ pub mod effect_id {
     pub const REVIVED: i64 = 836045448945494;
     pub const TARGETCLEARED: i64 = 836045448953669;
     pub const TARGETSET: i64 = 836045448953668;
+    pub const TAUNT: i64 = 836045448945488;
 }

@@ -6,6 +6,7 @@ pub mod handlers;
 pub mod log;
 pub mod session;
 pub mod swtor_ids;
+pub mod encounter;
 
 // Legacy module - to be removed after migration
 // pub mod encounter;
@@ -13,6 +14,6 @@ pub mod swtor_ids;
 
 // Re-exports for convenience
 pub use events::{EventProcessor, GameSignal, SignalHandler};
-pub use session::{Encounter, EncounterState, SessionCache};
+pub use session::SessionCache;
 pub use swtor_ids::*;
 pub use log::*;

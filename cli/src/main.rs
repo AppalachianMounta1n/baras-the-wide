@@ -77,7 +77,7 @@ async fn respond(line: &str, ctx: &CliContext) -> Result<bool, String> {
         Some(Commands::DeleteOld { days }) => commands::delete_old_files(ctx, *days).await,
         Some(Commands::CleanEmpty) => commands::clean_empty_files(ctx).await,
         Some(Commands::SetDirectory { path }) => commands::set_directory(path, ctx).await,
-        Some(Commands::Stats) => commands::show_stats(ctx).await,
+        Some(Commands::Stats) => commands::show_stats().await,
         Some(Commands::Exit) => {
             commands::exit();
             return Ok(true);

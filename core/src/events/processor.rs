@@ -2,8 +2,8 @@ use crate::log::{CombatEvent, EntityType};
 use crate::context::resolve;
 use crate::events::signal::GameSignal;
 use crate::session::cache::SessionCache;
-use crate::session::encounter::EncounterState;
-use crate::session::player::PlayerInfo;
+use crate::encounter::EncounterState;
+use crate::encounter::entity_info::PlayerInfo;
 use crate::swtor_ids::{effect_id, effect_type_id};
 use chrono::NaiveDateTime;
 

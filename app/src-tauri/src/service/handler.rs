@@ -6,10 +6,10 @@ use crate::service::ServiceCommand;
 use std::sync::atomic::Ordering;
 use std::path::PathBuf;
 use std::sync::Arc;
-use baras_core::EncounterState;
 use tokio::sync::mpsc;
 
 use baras_core::context::{resolve, AppConfig};
+use baras_core::encounter::EncounterState;
 use baras_core::EntityType;
 
 // ─────────────────────────────────────────────────────────────────────────────

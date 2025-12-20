@@ -1,6 +1,6 @@
-use crate::context::resolve;
-use crate::session::encounter::{Encounter, EncounterState};
-use crate::session::player::{AreaInfo, PlayerInfo};
+use crate::encounter::{Encounter, EncounterState,};
+use crate::encounter::entity_info::PlayerInfo;
+use crate::session::info::{AreaInfo};
 use std::collections::VecDeque;
 
 const CACHE_DEFAULT_CAPACITY: usize = 3;
