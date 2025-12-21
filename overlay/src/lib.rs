@@ -40,8 +40,12 @@ pub mod widgets;
 pub use frame::OverlayFrame;
 pub use manager::OverlayWindow;
 pub use overlays::{
-    MetricEntry, MetricOverlay, Overlay, OverlayConfigUpdate, OverlayData, OverlayPosition,
-    PersonalOverlay, PersonalStats,
+    InteractionMode, MetricEntry, MetricOverlay, Overlay, OverlayConfigUpdate, OverlayData,
+    OverlayPosition, PersonalOverlay, PersonalStats, PlayerRole, RaidEffect, RaidFrame,
+    RaidFrameData, RaidGridLayout, RaidOverlay, RaidOverlayConfig, SwapState,
+    // Effect config bounds
+    EFFECT_OFFSET_DEFAULT, EFFECT_OFFSET_MAX, EFFECT_OFFSET_MIN,
+    EFFECT_SIZE_DEFAULT, EFFECT_SIZE_MAX, EFFECT_SIZE_MIN,
 };
 pub use platform::{
     clamp_to_virtual_screen, find_monitor_at, find_monitor_by_id, get_all_monitors,

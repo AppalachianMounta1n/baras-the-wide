@@ -63,6 +63,21 @@ impl OverlayWindow {
         self.platform.set_click_through(enabled);
     }
 
+    /// Enable or disable window dragging when interactive
+    pub fn set_drag_enabled(&mut self, enabled: bool) {
+        self.platform.set_drag_enabled(enabled);
+    }
+
+    /// Check if dragging is enabled
+    pub fn is_drag_enabled(&self) -> bool {
+        self.platform.is_drag_enabled()
+    }
+
+    /// Take a pending click position (if any)
+    pub fn take_pending_click(&mut self) -> Option<(f32, f32)> {
+        self.platform.take_pending_click()
+    }
+
     /// Clear the overlay with a color
     pub fn clear(&mut self, color: Color) {
         let width = self.platform.width();
@@ -117,6 +132,39 @@ impl OverlayWindow {
                 radius,
                 stroke_width,
                 color,
+            );
+        }
+    }
+
+    /// Draw a dashed rounded rectangle outline
+    pub fn stroke_rounded_rect_dashed(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        radius: f32,
+        stroke_width: f32,
+        color: Color,
+        dash_length: f32,
+        gap_length: f32,
+    ) {
+        let width = self.platform.width();
+        let height = self.platform.height();
+        if let Some(buffer) = self.platform.pixel_buffer() {
+            self.renderer.stroke_rounded_rect_dashed(
+                buffer,
+                width,
+                height,
+                x,
+                y,
+                w,
+                h,
+                radius,
+                stroke_width,
+                color,
+                dash_length,
+                gap_length,
             );
         }
     }

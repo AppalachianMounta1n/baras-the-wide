@@ -2,6 +2,12 @@
 //!
 //! This module defines the trait that all platform backends must implement,
 //! allowing the overlay rendering code to be platform-agnostic.
+/// Size constraints for overlays
+pub const MIN_OVERLAY_SIZE: u32 = 50;
+pub const MAX_OVERLAY_WIDTH: u32 = 1280;
+pub const MAX_OVERLAY_HEIGHT: u32 = 1024;
+pub const RESIZE_CORNER_SIZE: i32 = 20;
+
 
 #[cfg(all(unix, not(target_os = "macos")))]
 pub mod wayland;
@@ -117,13 +123,13 @@ pub fn clamp_to_virtual_screen(
 
 /// Find the monitor that contains the center of the given rectangle.
 /// Falls back to the monitor with the most overlap, then primary, then first.
-pub fn find_monitor_at<'a>(
+pub fn find_monitor_at(
     x: i32,
     y: i32,
     width: u32,
     height: u32,
-    monitors: &'a [MonitorInfo],
-) -> Option<&'a MonitorInfo> {
+    monitors: &[MonitorInfo],
+) -> Option<&MonitorInfo> {
     if monitors.is_empty() {
         return None;
     }
@@ -252,6 +258,22 @@ pub trait OverlayPlatform: Sized {
 
     /// Enable or disable click-through mode
     fn set_click_through(&mut self, enabled: bool);
+
+    /// Enable or disable window dragging when interactive
+    ///
+    /// When drag is disabled but click-through is also disabled, clicks are
+    /// captured and reported via `take_pending_click()` instead of initiating
+    /// a window drag. This is used for rearrange mode in raid overlays.
+    fn set_drag_enabled(&mut self, enabled: bool);
+
+    /// Check if dragging is enabled
+    fn is_drag_enabled(&self) -> bool;
+
+    /// Take a pending click position (if any)
+    ///
+    /// Returns the coordinates of the last click when drag is disabled.
+    /// The click is consumed (subsequent calls return None until next click).
+    fn take_pending_click(&mut self) -> Option<(f32, f32)>;
 
     /// Check if pointer is in the resize corner (for visual feedback)
     fn in_resize_corner(&self) -> bool;

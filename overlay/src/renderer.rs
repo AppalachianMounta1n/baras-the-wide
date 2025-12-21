@@ -7,7 +7,8 @@ use cosmic_text::{
     Attrs, Buffer, Color as CosmicColor, Family, FontSystem, Metrics, Shaping, SwashCache,
 };
 use tiny_skia::{
-    Color, FillRule, LineCap, LineJoin, Paint, PathBuilder, PixmapMut, Rect, Stroke, Transform,
+    Color, FillRule, LineCap, LineJoin, Paint, PathBuilder, PixmapMut, Rect, Stroke, StrokeDash,
+    Transform,
 };
 
 /// A software renderer for overlay content
@@ -127,6 +128,44 @@ impl Renderer {
             width: stroke_width,
             line_cap: LineCap::Round,
             line_join: LineJoin::Round,
+            ..Default::default()
+        };
+
+        pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+    }
+
+    /// Draw a dashed rounded rectangle outline (useful for alignment guides)
+    pub fn stroke_rounded_rect_dashed(
+        &self,
+        buffer: &mut [u8],
+        width: u32,
+        height: u32,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        radius: f32,
+        stroke_width: f32,
+        color: Color,
+        dash_length: f32,
+        gap_length: f32,
+    ) {
+        let Some(mut pixmap) = PixmapMut::from_bytes(buffer, width, height) else {
+            return;
+        };
+
+        let path = create_rounded_rect_path(x, y, w, h, radius);
+        let Some(path) = path else { return };
+
+        let mut paint = Paint::default();
+        paint.set_color(color);
+        paint.anti_alias = true;
+
+        let stroke = Stroke {
+            width: stroke_width,
+            line_cap: LineCap::Butt,
+            line_join: LineJoin::Round,
+            dash: StrokeDash::new(vec![dash_length, gap_length], 0.0),
             ..Default::default()
         };
 
@@ -374,5 +413,45 @@ pub mod colors {
     #[inline]
     pub fn label_dim() -> Color {
         Color::from_rgba8(180, 180, 180, 255)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Effect Type Colors
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// HoT (Heal over Time) effect color - green
+    #[inline]
+    pub fn effect_hot() -> Color {
+        Color::from_rgba8(80, 200, 80, 255)
+    }
+
+    /// Debuff effect color - red
+    #[inline]
+    pub fn effect_debuff() -> Color {
+        Color::from_rgba8(200, 60, 60, 255)
+    }
+
+    /// Buff effect color - blue
+    #[inline]
+    pub fn effect_buff() -> Color {
+        Color::from_rgba8(80, 140, 220, 255)
+    }
+
+    /// Shield/absorb effect color - yellow/gold
+    #[inline]
+    pub fn effect_shield() -> Color {
+        Color::from_rgba8(220, 180, 50, 255)
+    }
+
+    /// Cleanse/dispellable effect color - purple
+    #[inline]
+    pub fn effect_cleansable() -> Color {
+        Color::from_rgba8(180, 80, 200, 255)
+    }
+
+    /// Proc/temporary buff color - cyan
+    #[inline]
+    pub fn effect_proc() -> Color {
+        Color::from_rgba8(80, 200, 220, 255)
     }
 }

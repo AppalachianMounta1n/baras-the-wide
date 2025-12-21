@@ -34,7 +34,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 };
 
 use super::{MonitorInfo, OverlayConfig, OverlayPlatform, PlatformError};
-
+use super::{ MAX_OVERLAY_HEIGHT, MAX_OVERLAY_WIDTH, MIN_OVERLAY_SIZE, RESIZE_CORNER_SIZE};
 // ─────────────────────────────────────────────────────────────────────────────
 // Standalone Monitor Enumeration
 // ─────────────────────────────────────────────────────────────────────────────
@@ -100,12 +100,11 @@ impl Dispatch<WlOutput, u32> for MonitorEnumState {
             }
             wl_output::Event::Mode { flags, width, height, .. } => {
                 // Only use the current mode (physical pixels)
-                if let wayland_client::WEnum::Value(mode_flags) = flags {
-                    if mode_flags.contains(wl_output::Mode::Current) {
+                if let wayland_client::WEnum::Value(mode_flags) = flags
+                    && mode_flags.contains(wl_output::Mode::Current) {
                         info.physical_width = width;
                         info.physical_height = height;
                     }
-                }
             }
             wl_output::Event::Scale { factor } => {
                 info.scale = factor;
@@ -395,25 +394,21 @@ struct WaylandState {
 
     // Mode tracking for optimization
     click_through: bool,
+    drag_enabled: bool,
+    pending_click: Option<(f32, f32)>,
 
     // Cross-monitor drag: pending rebind to a different output
     pending_output_rebind: Option<u32>, // Output name (global id) to rebind to
 }
 
-/// Overlay size constraints
-const MIN_OVERLAY_SIZE: u32 = 100;
-const MAX_OVERLAY_WIDTH: u32 = 300;
-const MAX_OVERLAY_HEIGHT: u32 = 700;
-
 /// Resize corner detection
 struct ResizeCorner;
 
 impl ResizeCorner {
-    const CORNER_SIZE: f64 = 20.0; // pixels from bottom-right corner
 
     /// Check if position is in the bottom-right resize corner
     fn is_in_corner(x: f64, y: f64, width: u32, height: u32) -> bool {
-        x > (width as f64 - Self::CORNER_SIZE) && y > (height as f64 - Self::CORNER_SIZE)
+        x > (width as f64 - RESIZE_CORNER_SIZE as f64) && y > (height as f64 - RESIZE_CORNER_SIZE as f64)
     }
 }
 
@@ -465,6 +460,8 @@ impl WaylandState {
             position_dirty: false,
             pending_resize: None,
             click_through,
+            drag_enabled: true,
+            pending_click: None,
             pending_output_rebind: None,
         }
     }
@@ -1052,6 +1049,22 @@ impl OverlayPlatform for WaylandOverlay {
         }
     }
 
+    fn set_drag_enabled(&mut self, enabled: bool) {
+        self.state.drag_enabled = enabled;
+        if !enabled {
+            // Cancel any in-progress drag
+            self.state.is_dragging = false;
+        }
+    }
+
+    fn is_drag_enabled(&self) -> bool {
+        self.state.drag_enabled
+    }
+
+    fn take_pending_click(&mut self) -> Option<(f32, f32)> {
+        self.state.pending_click.take()
+    }
+
     fn in_resize_corner(&self) -> bool {
         self.state.in_resize_corner
     }
@@ -1228,8 +1241,8 @@ impl Dispatch<WlSurface, ()> for WaylandState {
     ) {
         if let wl_surface::Event::Enter { output } = event {
             // Surface entered an output - update our bound_output_bounds
-            if let Some((_, info)) = state.outputs.iter().find(|(o, _)| *o == output) {
-                if info.is_ready() && info.logical_width() > 0 && info.logical_height() > 0 {
+            if let Some((_, info)) = state.outputs.iter().find(|(o, _)| *o == output)
+                && info.is_ready() && info.logical_width() > 0 && info.logical_height() > 0 {
                     eprintln!("Surface entered output: {} at ({}, {}) size {}x{}",
                         info.id(), info.x, info.y, info.logical_width(), info.logical_height());
                     state.bound_output_bounds = Some((
@@ -1239,7 +1252,6 @@ impl Dispatch<WlSurface, ()> for WaylandState {
                         info.logical_height(),
                     ));
                 }
-            }
         }
     }
 }
@@ -1271,12 +1283,11 @@ impl Dispatch<WlOutput, u32> for WaylandState {
             }
             wl_output::Event::Mode { flags, width, height, .. } => {
                 // Only use the current mode (physical pixels)
-                if let wayland_client::WEnum::Value(mode_flags) = flags {
-                    if mode_flags.contains(wl_output::Mode::Current) {
+                if let wayland_client::WEnum::Value(mode_flags) = flags
+                    && mode_flags.contains(wl_output::Mode::Current) {
                         info.physical_width = width;
                         info.physical_height = height;
                     }
-                }
             }
             wl_output::Event::Scale { factor } => {
                 info.scale = factor;
@@ -1407,21 +1418,27 @@ impl Dispatch<WlPointer, ()> for WaylandState {
                 if button == 272 {
                     match button_state {
                         WEnum::Value(wl_pointer::ButtonState::Pressed) => {
-                            // Check if in bottom-right corner for resize
-                            if ResizeCorner::is_in_corner(
-                                state.pointer_x, state.pointer_y,
-                                state.width, state.height
-                            ) {
-                                state.is_resizing = true;
-                                state.pending_width = state.width;
-                                state.pending_height = state.height;
+                            // Resize and drag are only available when drag_enabled (move mode)
+                            // When drag_enabled=false (rearrange mode), all clicks go to the overlay
+                            if state.drag_enabled {
+                                if ResizeCorner::is_in_corner(
+                                    state.pointer_x, state.pointer_y,
+                                    state.width, state.height
+                                ) {
+                                    state.is_resizing = true;
+                                    state.pending_width = state.width;
+                                    state.pending_height = state.height;
+                                } else {
+                                    // Initialize drag state - reset accumulator for relative motion
+                                    state.is_dragging = true;
+                                    state.drag_start_window_x = state.window_x;
+                                    state.drag_start_window_y = state.window_y;
+                                    state.drag_accum_x = 0.0;
+                                    state.drag_accum_y = 0.0;
+                                }
                             } else {
-                                // Initialize drag state - reset accumulator for relative motion
-                                state.is_dragging = true;
-                                state.drag_start_window_x = state.window_x;
-                                state.drag_start_window_y = state.window_y;
-                                state.drag_accum_x = 0.0;
-                                state.drag_accum_y = 0.0;
+                                // Drag disabled (rearrange mode) - report click to overlay
+                                state.pending_click = Some((state.pointer_x as f32, state.pointer_y as f32));
                             }
                         }
                         WEnum::Value(wl_pointer::ButtonState::Released) => {

@@ -11,9 +11,17 @@
 
 mod metric;
 mod personal;
+mod raid;
 
 pub use metric::{MetricEntry, MetricOverlay};
 pub use personal::{PersonalOverlay, PersonalStats};
+pub use raid::{
+    InteractionMode, PlayerRole, RaidEffect, RaidFrame, RaidFrameData,
+    RaidGridLayout, RaidOverlay, RaidOverlayConfig, SwapState,
+    // Effect config bounds (for UI sliders, validation, etc.)
+    EFFECT_OFFSET_DEFAULT, EFFECT_OFFSET_MAX, EFFECT_OFFSET_MIN,
+    EFFECT_SIZE_DEFAULT, EFFECT_SIZE_MAX, EFFECT_SIZE_MIN,
+};
 
 use crate::frame::OverlayFrame;
 use baras_core::context::{OverlayAppearanceConfig, PersonalOverlayConfig};
@@ -29,10 +37,11 @@ pub enum OverlayData {
     Metrics(Vec<MetricEntry>),
     /// Personal player statistics
     Personal(PersonalStats),
+    /// Raid frame data
+    Raid(RaidFrameData),
     // Future variants:
     // Timer(TimerData),
     // BossHealth(BossHealthData),
-    // RaidFrame(RaidFrameData),
 }
 
 /// Configuration updates that can be sent to overlays
@@ -42,7 +51,8 @@ pub enum OverlayConfigUpdate {
     Metric(OverlayAppearanceConfig, u8),
     /// Config for personal overlay (+ background alpha)
     Personal(PersonalOverlayConfig, u8),
-    // Future variants as needed
+    /// Config for raid overlay (+ background alpha)
+    Raid(RaidOverlayConfig, u8),
 }
 
 /// Position information for an overlay

@@ -1,5 +1,5 @@
 //! Progress bar widget for displaying metrics
-
+#![allow(clippy::too_many_arguments)]
 use tiny_skia::Color;
 
 use crate::frame::OverlayFrame;
@@ -83,7 +83,7 @@ impl ProgressBar {
         let mut high = chars.len();
 
         while low < high {
-            let mid = (low + high + 1) / 2;
+            let mid = (low + high).div_ceil(2);
             let truncated: String = chars[..mid].iter().collect();
             let test = format!("{}...", truncated);
             let (test_width, _) = frame.measure_text(&test, font_size);

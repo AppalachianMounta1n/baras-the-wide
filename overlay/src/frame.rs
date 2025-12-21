@@ -8,6 +8,7 @@
 //!
 //! This allows overlay implementations to focus solely on their content rendering.
 
+#![allow(clippy::too_many_arguments)]
 use crate::manager::OverlayWindow;
 use crate::platform::{OverlayConfig, PlatformError};
 use crate::renderer::colors;
@@ -87,17 +88,20 @@ impl OverlayFrame {
         let width = self.window.width() as f32;
         let height = self.window.height() as f32;
         let corner_radius = self.scaled(6.0);
-        let bg_color = Color::from_rgba8(30, 30, 30, self.background_alpha);
 
         // Clear with transparent
         self.window.clear(colors::transparent());
 
-        // Draw background
-        self.window
-            .fill_rounded_rect(0.0, 0.0, width, height, corner_radius, bg_color);
+        // Draw background only if alpha > 0 (fully transparent overlays skip this)
+        if self.background_alpha > 0 {
+            let bg_color = Color::from_rgba8(30, 30, 30, self.background_alpha);
+            self.window
+                .fill_rounded_rect(0.0, 0.0, width, height, corner_radius, bg_color);
+        }
 
-        // Draw border when interactive (move mode)
-        if self.window.is_interactive() {
+        // Draw border only in move mode (interactive AND drag enabled)
+        // Rearrange mode is interactive but drag disabled - no border
+        if self.window.is_interactive() && self.window.is_drag_enabled() {
             let border_color = Color::from_rgba8(128, 128, 128, 200);
             self.window.stroke_rounded_rect(
                 1.0,
@@ -120,7 +124,12 @@ impl OverlayFrame {
     }
 
     /// Draw the resize grip indicator in the bottom-right corner
+    /// Only shown in move mode (interactive AND drag enabled)
     fn draw_resize_indicator(&mut self) {
+        // Only show resize grip in move mode, not rearrange mode
+        if !self.window.is_drag_enabled() {
+            return;
+        }
         if !self.window.in_resize_corner() && !self.window.is_interactive() {
             return;
         }
@@ -201,6 +210,23 @@ impl OverlayFrame {
             .stroke_rounded_rect(x, y, w, h, radius, stroke_width, color);
     }
 
+    /// Draw a dashed rounded rectangle outline (useful for alignment guides)
+    pub fn stroke_rounded_rect_dashed(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        radius: f32,
+        stroke_width: f32,
+        color: Color,
+        dash_length: f32,
+        gap_length: f32,
+    ) {
+        self.window
+            .stroke_rounded_rect_dashed(x, y, w, h, radius, stroke_width, color, dash_length, gap_length);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Window access
     // ─────────────────────────────────────────────────────────────────────────
@@ -263,6 +289,21 @@ impl OverlayFrame {
     /// Enable or disable click-through mode
     pub fn set_click_through(&mut self, enabled: bool) {
         self.window.set_click_through(enabled);
+    }
+
+    /// Enable or disable window dragging when interactive
+    pub fn set_drag_enabled(&mut self, enabled: bool) {
+        self.window.set_drag_enabled(enabled);
+    }
+
+    /// Check if dragging is enabled
+    pub fn is_drag_enabled(&self) -> bool {
+        self.window.is_drag_enabled()
+    }
+
+    /// Take a pending click position (if any)
+    pub fn take_pending_click(&mut self) -> Option<(f32, f32)> {
+        self.window.take_pending_click()
     }
 
     /// Set the window position

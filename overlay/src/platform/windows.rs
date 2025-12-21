@@ -37,6 +37,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::Win32::Foundation::RECT;
 
 use super::{MonitorInfo, OverlayConfig, OverlayPlatform, PlatformError};
+use super::{ MAX_OVERLAY_HEIGHT, MAX_OVERLAY_HEIGHT, MIN_OVERLAY_SIZE, RESIZE_CORNER_SIZE};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Standalone Monitor Enumeration
@@ -131,12 +132,6 @@ pub fn get_all_monitors() -> Vec<MonitorInfo> {
     monitors
 }
 
-/// Size constraints for overlays
-const MIN_OVERLAY_SIZE: u32 = 100;
-const MAX_OVERLAY_WIDTH: u32 = 300;
-const MAX_OVERLAY_HEIGHT: u32 = 700;
-const RESIZE_CORNER_SIZE: i32 = 20;
-
 /// Windows overlay implementation
 pub struct WindowsOverlay {
     hwnd: HWND,
@@ -157,6 +152,8 @@ pub struct WindowsOverlay {
     is_dragging: bool,
     is_resizing: bool,
     in_resize_corner: bool,
+    drag_enabled: bool,
+    pending_click: Option<(f32, f32)>,
     // Drag tracking - uses screen coordinates for stable movement
     drag_start_screen_x: i32,
     drag_start_screen_y: i32,
@@ -444,6 +441,8 @@ impl OverlayPlatform for WindowsOverlay {
             is_dragging: false,
             is_resizing: false,
             in_resize_corner: false,
+            drag_enabled: true,
+            pending_click: None,
             drag_start_screen_x: 0,
             drag_start_screen_y: 0,
             drag_start_win_x: abs_x,
@@ -554,6 +553,23 @@ impl OverlayPlatform for WindowsOverlay {
         overlay_log!("HWND={:?}: click_through mode now {}", self.hwnd, if enabled { "LOCKED" } else { "INTERACTIVE" });
     }
 
+    fn set_drag_enabled(&mut self, enabled: bool) {
+        overlay_log!("HWND={:?}: set_drag_enabled({})", self.hwnd, enabled);
+        self.drag_enabled = enabled;
+        if !enabled {
+            // Cancel any in-progress drag
+            self.is_dragging = false;
+        }
+    }
+
+    fn is_drag_enabled(&self) -> bool {
+        self.drag_enabled
+    }
+
+    fn take_pending_click(&mut self) -> Option<(f32, f32)> {
+        self.pending_click.take()
+    }
+
     fn in_resize_corner(&self) -> bool {
         self.in_resize_corner
     }
@@ -598,27 +614,36 @@ impl OverlayPlatform for WindowsOverlay {
                     WM_LBUTTONDOWN if !self.click_through => {
                         let x = (msg.lParam.0 & 0xFFFF) as i16 as i32;
                         let y = ((msg.lParam.0 >> 16) & 0xFFFF) as i16 as i32;
-                        overlay_log!("HWND={:?}: WM_LBUTTONDOWN at ({},{})", self.hwnd, x, y);
+                        overlay_log!("HWND={:?}: WM_LBUTTONDOWN at ({},{}) drag_enabled={}", self.hwnd, x, y, self.drag_enabled);
 
-                        if self.is_in_resize_corner(x, y) {
-                            overlay_log!("  Starting resize");
-                            self.is_resizing = true;
-                            self.pending_width = self.width;
-                            self.pending_height = self.height;
-                            self.resize_start_x = x;
-                            self.resize_start_y = y;
+                        // Resize and drag are only available when drag_enabled (move mode)
+                        // When drag_enabled=false (rearrange mode), all clicks go to the overlay
+                        if self.drag_enabled {
+                            if self.is_in_resize_corner(x, y) {
+                                overlay_log!("  Starting resize");
+                                self.is_resizing = true;
+                                self.pending_width = self.width;
+                                self.pending_height = self.height;
+                                self.resize_start_x = x;
+                                self.resize_start_y = y;
+                                let _ = SetCapture(self.hwnd);
+                            } else {
+                                overlay_log!("  Starting drag");
+                                self.is_dragging = true;
+                                // Use screen coordinates for stable drag
+                                let mut pt = POINT::default();
+                                let _ = GetCursorPos(&mut pt);
+                                self.drag_start_screen_x = pt.x;
+                                self.drag_start_screen_y = pt.y;
+                                self.drag_start_win_x = self.x;
+                                self.drag_start_win_y = self.y;
+                                let _ = SetCapture(self.hwnd);
+                            }
                         } else {
-                            overlay_log!("  Starting drag");
-                            self.is_dragging = true;
-                            // Use screen coordinates for stable drag
-                            let mut pt = POINT::default();
-                            let _ = GetCursorPos(&mut pt);
-                            self.drag_start_screen_x = pt.x;
-                            self.drag_start_screen_y = pt.y;
-                            self.drag_start_win_x = self.x;
-                            self.drag_start_win_y = self.y;
+                            // Drag disabled (rearrange mode) - report click to overlay
+                            overlay_log!("  Storing pending click for overlay");
+                            self.pending_click = Some((x as f32, y as f32));
                         }
-                        let _ = SetCapture(self.hwnd);
                     }
                     WM_LBUTTONUP => {
                         if self.is_dragging || self.is_resizing {
