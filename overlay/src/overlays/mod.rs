@@ -62,7 +62,11 @@ pub struct OverlayPosition {
 ///
 /// This provides a unified interface for the application layer to interact
 /// with any overlay type without needing to know its specific implementation.
-pub trait Overlay: Send + 'static {
+///
+/// Note: Overlays do NOT need to implement Send because they are created
+/// inside their dedicated thread via spawn_overlay_with_factory. Only the
+/// factory closure (which captures config data) needs to be Send.
+pub trait Overlay: 'static {
     /// Update the overlay with new data
     ///
     /// Implementations should check if the data variant matches their type

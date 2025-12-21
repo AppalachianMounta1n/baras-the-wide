@@ -36,6 +36,50 @@ fn default_font_color() -> Color { [255, 255, 255, 255] }  // White
 fn default_bar_color() -> Color { [180, 50, 50, 255] }     // Red (DPS default)
 fn default_max_entries() -> u8 { 16 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-Overlay-Type Default Colors (Single Source of Truth)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Default bar colors for each overlay type
+pub mod overlay_colors {
+    use super::Color;
+
+    pub const DPS: Color = [180, 50, 50, 255];      // Red
+    pub const EDPS: Color = [180, 50, 50, 255];     // Red (same as DPS)
+    pub const HPS: Color = [50, 180, 50, 255];      // Green
+    pub const EHPS: Color = [50, 180, 50, 255];     // Green (same as HPS)
+    pub const TPS: Color = [50, 100, 180, 255];     // Blue
+    pub const DTPS: Color = [180, 80, 80, 255];     // Dark red
+    pub const EDTPS: Color = [180, 80, 80, 255];    // Dark red (same as DTPS)
+    pub const ABS: Color = [100, 150, 200, 255];    // Light blue
+
+    /// Get the default bar color for an overlay type by its config key
+    pub fn for_key(key: &str) -> Color {
+        match key {
+            "dps" => DPS,
+            "edps" => EDPS,
+            "hps" => HPS,
+            "ehps" => EHPS,
+            "tps" => TPS,
+            "dtps" => DTPS,
+            "edtps" => EDTPS,
+            "abs" => ABS,
+            _ => DPS, // Fallback to DPS color
+        }
+    }
+}
+
+impl OverlayAppearanceConfig {
+    /// Get default appearance for an overlay type by its config key.
+    /// Uses the correct bar color for each overlay type.
+    pub fn default_for_type(key: &str) -> Self {
+        Self {
+            bar_color: overlay_colors::for_key(key),
+            ..Self::default()
+        }
+    }
+}
+
 impl Default for OverlayAppearanceConfig {
     fn default() -> Self {
         Self {

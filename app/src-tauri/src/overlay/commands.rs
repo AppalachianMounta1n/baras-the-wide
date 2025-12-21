@@ -65,7 +65,7 @@ pub async fn show_overlay(
     // Create and spawn overlay based on kind (with per-category opacity)
     let overlay_handle = match kind {
         OverlayType::Metric(overlay_type) => {
-            let appearance = config.overlay_settings.get_appearance(kind.config_key());
+            let appearance = super::get_appearance_for_type(&config.overlay_settings, overlay_type);
             create_metric_overlay(overlay_type, position, appearance, config.overlay_settings.metric_opacity)?
         }
         OverlayType::Personal => {
@@ -268,7 +268,7 @@ pub async fn show_all_overlays(
             // Load position, appearance, and spawn
             let position = config.overlay_settings.get_position(key);
             let needs_save = position.monitor_id.is_none();
-            let appearance = config.overlay_settings.get_appearance(key);
+            let appearance = super::get_appearance_for_type(&config.overlay_settings, overlay_type);
             let overlay_handle = create_metric_overlay(overlay_type, position, appearance, metric_opacity)?;
             let tx = overlay_handle.tx.clone();
 
@@ -442,7 +442,10 @@ pub async fn refresh_overlay_settings(
     for (kind, tx) in overlays {
         let config_update = match kind {
             OverlayType::Metric(overlay_type) => {
-                let appearance = config.overlay_settings.get_appearance(overlay_type.config_key());
+                let appearance = super::get_appearance_for_type(&config.overlay_settings, overlay_type);
+                eprintln!("[REFRESH] Updating {} overlay with appearance: bar_color={:?}, font_color={:?}, max_entries={}, show_header={}, show_footer={}, bg_alpha={}",
+                    overlay_type.config_key(), appearance.bar_color, appearance.font_color, appearance.max_entries,
+                    appearance.show_header, appearance.show_footer, metric_opacity);
                 OverlayConfigUpdate::Metric(appearance, metric_opacity)
             }
             OverlayType::Personal => {

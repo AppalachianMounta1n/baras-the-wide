@@ -170,9 +170,13 @@ pub struct WindowsOverlay {
     running: bool,
 }
 
-// SAFETY: WindowsOverlay is only accessed from its dedicated thread after spawning.
-// The HWND handle is created and used exclusively within that thread's event loop.
-unsafe impl Send for WindowsOverlay {}
+// NOTE: WindowsOverlay intentionally does NOT implement Send.
+// Win32 HWND handles must be used from the thread that created them.
+// The message queue is tied to the creating thread, so SetWindowLongPtrW,
+// PeekMessageW, and other window operations fail when called from a different thread.
+//
+// The spawn_overlay_with_factory function creates the overlay INSIDE the spawned
+// thread to ensure correct threading.
 
 impl WindowsOverlay {
     fn register_class() -> Result<(), PlatformError> {

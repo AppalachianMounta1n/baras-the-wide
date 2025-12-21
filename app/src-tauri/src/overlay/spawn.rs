@@ -1,6 +1,15 @@
 //! Overlay spawning and lifecycle management
 //!
 //! Generic spawn function and factory functions for creating overlays.
+//!
+//! # Important: Threading Model
+//!
+//! On Windows, HWND handles must be used from the thread that created them.
+//! The Win32 message queue is tied to the creating thread, so SetWindowLongPtrW,
+//! PeekMessageW, and other window operations fail when called from a different thread.
+//!
+//! To handle this, overlays are created INSIDE the spawned thread via a factory
+//! function, not passed as pre-created objects.
 
 use std::thread::{self, JoinHandle};
 use tokio::sync::mpsc::{self, Sender};
@@ -15,22 +24,52 @@ use super::types::{OverlayType, MetricType};
 // Generic Spawn Function
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Generic spawn function for any overlay implementing the Overlay trait
+/// Spawn an overlay using a factory function that creates it inside the thread.
+///
+/// This is critical for Windows where HWND must be created and used on the same thread.
+/// The factory function is called inside the spawned thread, ensuring the window
+/// handle's message queue is tied to the correct thread.
+///
+/// Returns `Err` if overlay creation fails (confirmed via channel from spawned thread).
 ///
 /// This unified event loop handles:
 /// - Command processing (move mode, data updates, config updates, position queries)
 /// - Window event polling
 /// - Render scheduling based on interaction state
 /// - Resize corner state tracking
-pub fn spawn_overlay<O: Overlay>(
-    mut overlay: O,
+pub fn spawn_overlay_with_factory<O, F>(
+    create_overlay: F,
     kind: OverlayType,
-) -> (Sender<OverlayCommand>, JoinHandle<()>) {
+) -> Result<(Sender<OverlayCommand>, JoinHandle<()>), String>
+where
+    O: Overlay,
+    F: FnOnce() -> Result<O, String> + Send + 'static,
+{
     let (tx, mut rx) = mpsc::channel::<OverlayCommand>(32);
     let kind_name = format!("{:?}", kind);
 
+    // Use a oneshot channel to get creation result back from spawned thread
+    let (confirm_tx, confirm_rx) = std::sync::mpsc::channel::<Result<(), String>>();
+
     let handle = thread::spawn(move || {
-        eprintln!("[OVERLAY-LOOP] {:?}: Thread started", kind_name);
+        eprintln!("[OVERLAY-LOOP] {:?}: Thread started, creating overlay...", kind_name);
+
+        // Create the overlay INSIDE this thread - critical for Windows HWND threading
+        let mut overlay = match create_overlay() {
+            Ok(o) => {
+                eprintln!("[OVERLAY-LOOP] {:?}: Overlay created successfully", kind_name);
+                // Signal success to the spawning thread
+                let _ = confirm_tx.send(Ok(()));
+                o
+            }
+            Err(e) => {
+                eprintln!("[OVERLAY-LOOP] {:?}: Failed to create overlay: {}", kind_name, e);
+                // Signal failure to the spawning thread
+                let _ = confirm_tx.send(Err(e));
+                return;
+            }
+        };
+
         let mut needs_render = true;
         let mut was_in_resize_corner = false;
         let mut was_resizing = false;
@@ -53,8 +92,9 @@ pub fn spawn_overlay<O: Overlay>(
                         needs_render = true;
                     }
                     OverlayCommand::UpdateConfig(config) => {
-                        eprintln!("[OVERLAY-LOOP] {:?}: Received UpdateConfig", kind_name);
+                        eprintln!("[OVERLAY-LOOP] {:?}: Received UpdateConfig - calling update_config()", kind_name);
                         overlay.update_config(config);
+                        eprintln!("[OVERLAY-LOOP] {:?}: UpdateConfig applied, setting needs_render=true", kind_name);
                         needs_render = true;
                     }
                     OverlayCommand::GetPosition(response_tx) => {
@@ -119,7 +159,12 @@ pub fn spawn_overlay<O: Overlay>(
         eprintln!("[OVERLAY-LOOP] {:?}: Thread exiting after {} iterations", kind_name, loop_count);
     });
 
-    (tx, handle)
+    // Wait for confirmation from the spawned thread
+    match confirm_rx.recv() {
+        Ok(Ok(())) => Ok((tx, handle)),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err("Overlay thread exited before confirming creation".to_string()),
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -131,6 +176,9 @@ pub fn spawn_overlay<O: Overlay>(
 /// Position is stored as relative to the saved monitor. On Wayland with layer-shell,
 /// positions are used directly as margins from the output's top-left corner.
 /// The target_monitor_id binds the surface to the correct output.
+///
+/// The overlay is created inside the spawned thread to ensure Windows HWND
+/// threading requirements are satisfied.
 pub fn create_metric_overlay(
     overlay_type: MetricType,
     position: OverlayPositionConfig,
@@ -150,11 +198,19 @@ pub fn create_metric_overlay(
         target_monitor_id: position.monitor_id.clone(),
     };
 
-    let overlay = MetricOverlay::new(config, overlay_type.title(), appearance, background_alpha)
-        .map_err(|e| format!("Failed to create {} overlay: {}", overlay_type.title(), e))?;
-
+    let title = overlay_type.title().to_string();
     let kind = OverlayType::Metric(overlay_type);
-    let (tx, handle) = spawn_overlay(overlay, kind);
+
+    // Create a factory closure that will be called inside the spawned thread
+    let factory = move || {
+        eprintln!("[SPAWN] Creating {} overlay with appearance: bar_color={:?}, font_color={:?}, max_entries={}, show_header={}, show_footer={}, bg_alpha={}",
+            title, appearance.bar_color, appearance.font_color, appearance.max_entries,
+            appearance.show_header, appearance.show_footer, background_alpha);
+        MetricOverlay::new(config, &title, appearance, background_alpha)
+            .map_err(|e| format!("Failed to create {} overlay: {}", title, e))
+    };
+
+    let (tx, handle) = spawn_overlay_with_factory(factory, kind)?;
 
     Ok(OverlayHandle { tx, handle, kind })
 }
@@ -164,6 +220,9 @@ pub fn create_metric_overlay(
 /// Position is stored as relative to the saved monitor. On Wayland with layer-shell,
 /// positions are used directly as margins from the output's top-left corner.
 /// The target_monitor_id binds the surface to the correct output.
+///
+/// The overlay is created inside the spawned thread to ensure Windows HWND
+/// threading requirements are satisfied.
 pub fn create_personal_overlay(
     position: OverlayPositionConfig,
     personal_config: PersonalOverlayConfig,
@@ -180,11 +239,15 @@ pub fn create_personal_overlay(
         target_monitor_id: position.monitor_id.clone(),
     };
 
-    let overlay = PersonalOverlay::new(config, personal_config, background_alpha)
-        .map_err(|e| format!("Failed to create personal overlay: {}", e))?;
-
     let kind = OverlayType::Personal;
-    let (tx, handle) = spawn_overlay(overlay, kind);
+
+    // Create a factory closure that will be called inside the spawned thread
+    let factory = move || {
+        PersonalOverlay::new(config, personal_config, background_alpha)
+            .map_err(|e| format!("Failed to create personal overlay: {}", e))
+    };
+
+    let (tx, handle) = spawn_overlay_with_factory(factory, kind)?;
 
     Ok(OverlayHandle { tx, handle, kind })
 }

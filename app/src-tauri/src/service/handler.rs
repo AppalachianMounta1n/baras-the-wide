@@ -244,22 +244,12 @@ pub async fn get_current_metrics(
 pub async fn get_config(handle: State<'_, ServiceHandle>) -> Result<AppConfig, String> {
     let mut config = handle.config().await;
 
-    // Populate default appearances for each overlay type (single source of truth)
+    // Populate default appearances for each overlay type using baras_core constants
     for metric_type in MetricType::all() {
-        let color = metric_type.bar_color();
-        // Convert from f32 (0.0-1.0) to u8 (0-255)
-        let bar_color = [
-            (color.red() * 255.0) as u8,
-            (color.green() * 255.0) as u8,
-            (color.blue() * 255.0) as u8,
-            (color.alpha() * 255.0) as u8,
-        ];
+        let key = metric_type.config_key();
         config.overlay_settings.default_appearances.insert(
-            metric_type.config_key().to_string(),
-            OverlayAppearanceConfig {
-                bar_color,
-                ..Default::default()
-            },
+            key.to_string(),
+            OverlayAppearanceConfig::default_for_type(key),
         );
     }
 

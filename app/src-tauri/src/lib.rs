@@ -95,7 +95,7 @@ fn spawn_auto_show_overlays(
 
                 // Load position, appearance, and spawn
                 let position = config.overlay_settings.get_position(key);
-                let appearance = config.overlay_settings.get_appearance(key);
+                let appearance = overlay::get_appearance_for_type(&config.overlay_settings, overlay_type);
 
                 match create_metric_overlay(overlay_type, position, appearance, metric_opacity) {
                     Ok(overlay_handle) => {

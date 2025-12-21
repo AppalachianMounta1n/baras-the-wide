@@ -36,7 +36,7 @@ pub use types::{OverlayType, MetricType};
 pub use state::{OverlayCommand, OverlayHandle, OverlayState, PositionEvent};
 
 // Spawn functions
-pub use spawn::{create_metric_overlay, create_personal_overlay, spawn_overlay};
+pub use spawn::{create_metric_overlay, create_personal_overlay};
 
 // Metrics helpers
 pub use metrics::{create_all_entries, create_entries_for_type};
@@ -46,3 +46,23 @@ pub use commands::{
     get_overlay_status, hide_all_overlays, hide_overlay, refresh_overlay_settings,
     show_all_overlays, show_overlay, toggle_move_mode, OverlayStatusResponse,
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Appearance Helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+use baras_core::context::{OverlayAppearanceConfig, OverlaySettings};
+
+/// Get appearance for a metric overlay type with correct type-specific defaults.
+///
+/// If the user has saved custom appearance settings, those are returned.
+/// Otherwise, returns the default appearance with the correct bar color for this type.
+pub fn get_appearance_for_type(settings: &OverlaySettings, overlay_type: MetricType) -> OverlayAppearanceConfig {
+    let key = overlay_type.config_key();
+    if let Some(saved) = settings.appearances.get(key) {
+        saved.clone()
+    } else {
+        // No saved appearance - use type-specific default
+        overlay_type.default_appearance()
+    }
+}

@@ -290,6 +290,7 @@ impl MetricType {
             MetricType::Abs,
         ]
     }
+
 }
 
 /// Unified overlay kind - matches backend OverlayType
@@ -299,6 +300,7 @@ pub enum OverlayType {
     Metric(MetricType),
     Personal,
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // App Component
@@ -791,9 +793,11 @@ fn SettingsPanel(
     let current_settings = draft_settings();
     let tab = selected_tab();
 
-    // Get appearance for current tab
+    // Get appearance for current tab (uses backend-provided defaults if no saved appearance)
     let get_appearance = |key: &str| -> OverlayAppearanceConfig {
-        current_settings.appearances.get(key).cloned().unwrap_or_default()
+        current_settings.appearances.get(key).cloned()
+            .or_else(|| current_settings.default_appearances.get(key).cloned())
+            .unwrap_or_default()
     };
 
     let current_appearance = get_appearance(&tab);
@@ -963,9 +967,10 @@ fn SettingsPanel(
                                 let tab = tab.clone();
                                 move |e: Event<FormData>| {
                                     let mut new_settings = draft_settings();
+                                    let default = new_settings.default_appearances.get(&tab).cloned().unwrap_or_default();
                                     let mut appearance = new_settings.appearances
                                         .entry(tab.clone())
-                                        .or_insert_with(OverlayAppearanceConfig::default)
+                                        .or_insert(default)
                                         .clone();
                                     appearance.show_per_second = e.checked();
                                     new_settings.appearances.insert(tab.clone(), appearance);
@@ -984,9 +989,10 @@ fn SettingsPanel(
                                 let tab = tab.clone();
                                 move |e: Event<FormData>| {
                                     let mut new_settings = draft_settings();
+                                    let default = new_settings.default_appearances.get(&tab).cloned().unwrap_or_default();
                                     let mut appearance = new_settings.appearances
                                         .entry(tab.clone())
-                                        .or_insert_with(OverlayAppearanceConfig::default)
+                                        .or_insert(default)
                                         .clone();
                                     appearance.show_total = e.checked();
                                     new_settings.appearances.insert(tab.clone(), appearance);
@@ -1005,9 +1011,10 @@ fn SettingsPanel(
                                 let tab = tab.clone();
                                 move |e: Event<FormData>| {
                                     let mut new_settings = draft_settings();
+                                    let default = new_settings.default_appearances.get(&tab).cloned().unwrap_or_default();
                                     let mut appearance = new_settings.appearances
                                         .entry(tab.clone())
-                                        .or_insert_with(OverlayAppearanceConfig::default)
+                                        .or_insert(default)
                                         .clone();
                                     appearance.show_header = e.checked();
                                     new_settings.appearances.insert(tab.clone(), appearance);
@@ -1026,9 +1033,10 @@ fn SettingsPanel(
                                 let tab = tab.clone();
                                 move |e: Event<FormData>| {
                                     let mut new_settings = draft_settings();
+                                    let default = new_settings.default_appearances.get(&tab).cloned().unwrap_or_default();
                                     let mut appearance = new_settings.appearances
                                         .entry(tab.clone())
-                                        .or_insert_with(OverlayAppearanceConfig::default)
+                                        .or_insert(default)
                                         .clone();
                                     appearance.show_footer = e.checked();
                                     new_settings.appearances.insert(tab.clone(), appearance);
@@ -1050,9 +1058,10 @@ fn SettingsPanel(
                                 move |e: Event<FormData>| {
                                     if let Ok(val) = e.value().parse::<u8>() {
                                         let mut new_settings = draft_settings();
+                                        let default = new_settings.default_appearances.get(&tab).cloned().unwrap_or_default();
                                         let mut appearance = new_settings.appearances
                                             .entry(tab.clone())
-                                            .or_insert_with(OverlayAppearanceConfig::default)
+                                            .or_insert(default)
                                             .clone();
                                         appearance.max_entries = val.clamp(1, 16);
                                         new_settings.appearances.insert(tab.clone(), appearance);
@@ -1076,9 +1085,10 @@ fn SettingsPanel(
                                 move |e: Event<FormData>| {
                                     if let Some(color) = parse_hex_color(&e.value()) {
                                         let mut new_settings = draft_settings();
+                                        let default = new_settings.default_appearances.get(&tab).cloned().unwrap_or_default();
                                         let mut appearance = new_settings.appearances
                                             .entry(tab.clone())
-                                            .or_insert_with(OverlayAppearanceConfig::default)
+                                            .or_insert(default)
                                             .clone();
                                         appearance.bar_color = color;
                                         new_settings.appearances.insert(tab.clone(), appearance);
@@ -1101,9 +1111,10 @@ fn SettingsPanel(
                                 move |e: Event<FormData>| {
                                     if let Some(color) = parse_hex_color(&e.value()) {
                                         let mut new_settings = draft_settings();
+                                        let default = new_settings.default_appearances.get(&tab).cloned().unwrap_or_default();
                                         let mut appearance = new_settings.appearances
                                             .entry(tab.clone())
-                                            .or_insert_with(OverlayAppearanceConfig::default)
+                                            .or_insert(default)
                                             .clone();
                                         appearance.font_color = color;
                                         new_settings.appearances.insert(tab.clone(), appearance);
@@ -1122,7 +1133,7 @@ fn SettingsPanel(
                                 let tab = tab.clone();
                                 move |_| {
                                     let mut new_settings = draft_settings();
-                                    // Use overlay-specific default from backend, fallback to generic default
+                                    // Use overlay-specific default from backend
                                     let default_appearance = new_settings.default_appearances
                                         .get(&tab)
                                         .cloned()

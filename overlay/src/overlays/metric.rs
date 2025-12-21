@@ -285,8 +285,12 @@ impl Overlay for MetricOverlay {
 
     fn update_config(&mut self, config: OverlayConfigUpdate) {
         if let OverlayConfigUpdate::Metric(appearance, alpha) = config {
+            eprintln!("[METRIC-OVERLAY] update_config: bar_color={:?}, font_color={:?}, alpha={}",
+                appearance.bar_color, appearance.font_color, alpha);
             self.set_appearance(appearance);
             self.set_background_alpha(alpha);
+        } else {
+            eprintln!("[METRIC-OVERLAY] update_config: received non-Metric config variant, ignoring");
         }
     }
 

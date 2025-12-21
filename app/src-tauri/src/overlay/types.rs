@@ -2,7 +2,6 @@
 //!
 //! Core enums that identify overlay types and their properties.
 
-use baras_overlay::{colors, Color};
 use serde::{Deserialize, Serialize};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -109,15 +108,10 @@ impl MetricType {
         }
     }
 
-    /// Bar fill color for this overlay type
-    pub fn bar_color(&self) -> Color {
-        match self {
-            MetricType::Dps | MetricType::EDps => colors::dps_bar_fill(),
-            MetricType::Hps | MetricType::EHps => colors::hps_bar_fill(),
-            MetricType::Tps => colors::tank_bar_fill(),
-            MetricType::Dtps | MetricType::EDtps => Color::from_rgba8(180, 80, 80, 255),
-            MetricType::Abs => Color::from_rgba8(100, 150, 200, 255),
-        }
+    /// Get default appearance config with the correct bar color for this type.
+    /// Uses baras_core::context::overlay_colors as the single source of truth.
+    pub fn default_appearance(&self) -> baras_core::context::OverlayAppearanceConfig {
+        baras_core::context::OverlayAppearanceConfig::default_for_type(self.config_key())
     }
 }
 
