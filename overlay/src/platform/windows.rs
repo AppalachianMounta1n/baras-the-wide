@@ -21,8 +21,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     RegisterClassExW, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
     UpdateLayeredWindow, GetCursorPos,
     CS_HREDRAW, CS_VREDRAW, GWL_EXSTYLE, HTCLIENT, HWND_TOPMOST, IDC_ARROW, MSG, PM_REMOVE,
-    SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, ULW_ALPHA, WM_DESTROY,
-    WM_ERASEBKGND, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_QUIT,
+    SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, ULW_ALPHA,
+    WM_DESTROY, WM_ERASEBKGND, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_QUIT,
     WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
     WS_EX_TRANSPARENT, WS_POPUP,
 };
@@ -35,89 +35,58 @@ use super::{MonitorInfo, OverlayConfig, OverlayPlatform, PlatformError};
 // Standalone Monitor Enumeration
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Get all connected monitors without requiring an existing overlay window.
-/// This is useful for converting saved relative positions to absolute before spawning.
-pub fn get_all_monitors() -> Vec<MonitorInfo> {
-    // Temporary struct to collect raw monitor data
-    struct RawMonitor {
-        device_name: String,
-        x: i32,
-        y: i32,
-        width: u32,
-        height: u32,
-        is_primary: bool,
-    }
+/// Raw monitor data collected during enumeration.
+/// Defined at module level so it can be used by both the enum callback and processing code.
+struct RawMonitor {
+    device_name: String,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    is_primary: bool,
+}
 
-    let mut raw_monitors: Vec<RawMonitor> = Vec::new();
-
+/// Callback for EnumDisplayMonitors - collects monitor info into a Vec<RawMonitor>
+unsafe extern "system" fn enum_monitors_callback(
+    hmonitor: HMONITOR,
+    _hdc: HDC,
+    _rect: *mut RECT,
+    lparam: LPARAM,
+) -> windows::Win32::Foundation::BOOL {
     unsafe {
-        // Callback to collect monitor info
-        unsafe extern "system" fn enum_callback(
-            hmonitor: HMONITOR,
-            _hdc: HDC,
-            _rect: *mut RECT,
-            lparam: LPARAM,
-        ) -> windows::Win32::Foundation::BOOL {
-            #[allow(dead_code)]
-            struct RawMonitor {
-                device_name: String,
-                x: i32,
-                y: i32,
-                width: u32,
-                height: u32,
-                is_primary: bool,
-            }
+        let raw_monitors = &mut *(lparam.0 as *mut Vec<RawMonitor>);
 
-            unsafe {
-                let raw_monitors = &mut *(lparam.0 as *mut Vec<RawMonitor>);
+        let mut info = MONITORINFOEXW::default();
+        info.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
 
-                let mut info = MONITORINFOEXW::default();
-                info.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
+        if GetMonitorInfoW(hmonitor, &mut info.monitorInfo).as_bool() {
+            let rc = info.monitorInfo.rcMonitor;
 
-                if GetMonitorInfoW(hmonitor, &mut info.monitorInfo).as_bool() {
-                    let rc = info.monitorInfo.rcMonitor;
+            // Convert device name (wide string) to String
+            let name_len = info.szDevice.iter().position(|&c| c == 0).unwrap_or(info.szDevice.len());
+            let device_name = String::from_utf16_lossy(&info.szDevice[..name_len]);
 
-                    // Convert device name (wide string) to String
-                    let name_len = info.szDevice.iter().position(|&c| c == 0).unwrap_or(info.szDevice.len());
-                    let device_name = String::from_utf16_lossy(&info.szDevice[..name_len]);
-
-                    raw_monitors.push(RawMonitor {
-                        device_name,
-                        x: rc.left,
-                        y: rc.top,
-                        width: (rc.right - rc.left) as u32,
-                        height: (rc.bottom - rc.top) as u32,
-                        is_primary: info.monitorInfo.dwFlags & 1 != 0,
-                    });
-                }
-
-                windows::Win32::Foundation::BOOL::from(true)
-            }
+            raw_monitors.push(RawMonitor {
+                device_name,
+                x: rc.left,
+                y: rc.top,
+                width: (rc.right - rc.left) as u32,
+                height: (rc.bottom - rc.top) as u32,
+                is_primary: info.monitorInfo.dwFlags & 1 != 0,
+            });
         }
 
-        let raw_ptr = &mut raw_monitors as *mut Vec<RawMonitor>;
-        let _ = EnumDisplayMonitors(
-            None,
-            None,
-            Some(enum_callback),
-            LPARAM(raw_ptr as isize),
-        );
+        windows::Win32::Foundation::BOOL::from(true)
     }
+}
 
-    // Generate stable IDs that include resolution and position
-    // Format: "DeviceName (WxH@X,Y)" - unique per monitor configuration
-    // This is more robust than counting because:
-    // - Different monitor at same port = different resolution = different ID
-    // - Same monitor at different position = different ID (but clamping protects)
+/// Convert raw monitor data to MonitorInfo with stable device-name-based IDs
+fn raw_monitors_to_info(raw_monitors: Vec<RawMonitor>) -> Vec<MonitorInfo> {
     raw_monitors
         .into_iter()
         .map(|raw| {
-            // Include resolution and position for uniqueness
-            let id = format!("{} ({}x{}@{},{})",
-                raw.device_name, raw.width, raw.height, raw.x, raw.y);
-
             MonitorInfo {
-                id,
+                id: raw.device_name.clone(),
                 name: raw.device_name,
                 x: raw.x,
                 y: raw.y,
@@ -127,6 +96,24 @@ pub fn get_all_monitors() -> Vec<MonitorInfo> {
             }
         })
         .collect()
+}
+
+/// Get all connected monitors without requiring an existing overlay window.
+/// This is useful for converting saved relative positions to absolute before spawning.
+pub fn get_all_monitors() -> Vec<MonitorInfo> {
+    let mut raw_monitors: Vec<RawMonitor> = Vec::new();
+
+    unsafe {
+        let raw_ptr = &mut raw_monitors as *mut Vec<RawMonitor>;
+        let _ = EnumDisplayMonitors(
+            None,
+            None,
+            Some(enum_monitors_callback),
+            LPARAM(raw_ptr as isize),
+        );
+    }
+
+    raw_monitors_to_info(raw_monitors)
 }
 
 /// Size constraints for overlays
@@ -341,6 +328,19 @@ impl WindowsOverlay {
                 ex_style |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
             }
             SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, ex_style.0 as isize);
+
+            // CRITICAL: After changing extended styles, we must call SetWindowPos with
+            // SWP_FRAMECHANGED to force the window to apply the new style. Without this,
+            // the WS_EX_TRANSPARENT flag change won't take effect!
+            let _ = SetWindowPos(
+                self.hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            );
         }
     }
 }
@@ -637,80 +637,8 @@ impl OverlayPlatform for WindowsOverlay {
     }
 
     fn get_monitors(&self) -> Vec<MonitorInfo> {
-        // Temporary struct to collect raw monitor data
-        struct RawMonitor {
-            device_name: String,
-            x: i32,
-            y: i32,
-            width: u32,
-            height: u32,
-            is_primary: bool,
-        }
-
-        let mut raw_monitors: Vec<RawMonitor> = Vec::new();
-
-        unsafe {
-            // Callback to collect monitor info
-            unsafe extern "system" fn enum_callback(
-                hmonitor: HMONITOR,
-                _hdc: HDC,
-                _rect: *mut RECT,
-                lparam: LPARAM,
-            ) -> windows::Win32::Foundation::BOOL {
-                unsafe {
-                    let raw_monitors = &mut *(lparam.0 as *mut Vec<RawMonitor>);
-
-                    let mut info = MONITORINFOEXW::default();
-                    info.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
-
-                    if GetMonitorInfoW(hmonitor, &mut info.monitorInfo).as_bool() {
-                        let rc = info.monitorInfo.rcMonitor;
-
-                        // Convert device name (wide string) to String
-                        let name_len = info.szDevice.iter().position(|&c| c == 0).unwrap_or(info.szDevice.len());
-                        let device_name = String::from_utf16_lossy(&info.szDevice[..name_len]);
-
-                        raw_monitors.push(RawMonitor {
-                            device_name,
-                            x: rc.left,
-                            y: rc.top,
-                            width: (rc.right - rc.left) as u32,
-                            height: (rc.bottom - rc.top) as u32,
-                            is_primary: info.monitorInfo.dwFlags & 1 != 0,
-                        });
-                    }
-
-                    windows::Win32::Foundation::BOOL::from(true)
-                }
-            }
-
-            let raw_ptr = &mut raw_monitors as *mut Vec<RawMonitor>;
-            let _ = EnumDisplayMonitors(
-                None,
-                None,
-                Some(enum_callback),
-                LPARAM(raw_ptr as isize),
-            );
-        }
-
-        // Generate stable IDs that include resolution and position
-        raw_monitors
-            .into_iter()
-            .map(|raw| {
-                let id = format!("{} ({}x{}@{},{})",
-                    raw.device_name, raw.width, raw.height, raw.x, raw.y);
-
-                MonitorInfo {
-                    id,
-                    name: raw.device_name,
-                    x: raw.x,
-                    y: raw.y,
-                    width: raw.width,
-                    height: raw.height,
-                    is_primary: raw.is_primary,
-                }
-            })
-            .collect()
+        // Reuse the standalone function for consistency
+        get_all_monitors()
     }
 }
 
