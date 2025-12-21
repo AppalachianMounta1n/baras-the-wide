@@ -10,9 +10,11 @@ use super::types::MetricType;
 use crate::service::PlayerMetrics;
 
 /// Create meter entries for a specific overlay type from player metrics
+///
+/// Note: Entry colors are NOT set here - entries use the default (dps_bar_fill) color
+/// so that the overlay renderer will use the configured bar_color from appearance settings.
+/// This allows users to customize bar colors via the config panel.
 pub fn create_entries_for_type(overlay_type: MetricType, metrics: &[PlayerMetrics]) -> Vec<MeterEntry> {
-    let color = overlay_type.bar_color();
-
     // Extract (name, rate_value, total_value) tuples based on metric type
     let mut values: Vec<(String, i64, i64)> = match overlay_type {
         MetricType::Dps => metrics
@@ -60,7 +62,7 @@ pub fn create_entries_for_type(overlay_type: MetricType, metrics: &[PlayerMetric
         .map(|(name, rate, total)| {
             MeterEntry::new(&name, rate, max_value)
                 .with_total(total)
-                .with_color(color)
+            // Don't set color - let renderer use configured bar_color
         })
         .collect()
 }

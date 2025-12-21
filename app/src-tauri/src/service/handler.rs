@@ -1,3 +1,5 @@
+use crate::overlay::MetricType;
+use crate::service::CombatData;
 use crate::service::LogFileInfo;
 use crate::service::SharedState;
 use crate::service::PlayerMetrics;
@@ -8,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-use baras_core::context::{resolve, AppConfig};
+use baras_core::context::{resolve, AppConfig, OverlayAppearanceConfig};
 use baras_core::encounter::EncounterState;
 use baras_core::EntityType;
 
@@ -130,31 +132,51 @@ impl ServiceHandle {
         })
     }
 
-    /// Get current encounter metrics
-    pub async fn current_metrics(&self) -> Option<Vec<PlayerMetrics>> {
+    /// Get current combat data (unified for all overlays)
+    pub async fn current_combat_data(&self) -> Option<CombatData> {
         let session_guard = self.shared.session.read().await;
         let session = session_guard.as_ref()?;
         let session = session.read().await;
         let cache = session.session_cache.as_ref()?;
+
+        // Get player info
+        let player_info = &cache.player;
+        let class_discipline = if !player_info.class_name.is_empty() && !player_info.discipline_name.is_empty() {
+            Some(format!("{} / {}", player_info.class_name, player_info.discipline_name))
+        } else if !player_info.class_name.is_empty() {
+            Some(player_info.class_name.clone())
+        } else {
+            None
+        };
+        let player_entity_id = player_info.id;
+
+        // Get encounter info
         let encounter = cache.last_combat_encounter()?;
+        let encounter_count = cache.encounter_count();
+        let encounter_time_secs = (encounter.duration_ms().unwrap_or(0) / 1000) as u64;
 
+        // Calculate metrics
         let entity_metrics = encounter.calculate_entity_metrics()?;
-
-        Some(
-            entity_metrics
-                .into_iter()
-                .filter(|m| m.entity_type != EntityType::Npc)
-                .map(|m| PlayerMetrics {
+        let metrics: Vec<PlayerMetrics> = entity_metrics
+            .into_iter()
+            .filter(|m| m.entity_type != EntityType::Npc)
+            .map(|m| {
+                let name = resolve(m.name).to_string();
+                let safe_name: String = name.chars().filter(|c| !c.is_control()).collect();
+                PlayerMetrics {
                     entity_id: m.entity_id,
-                    name: resolve(m.name).to_string(),
+                    name: safe_name,
                     dps: m.dps as i64,
                     edps: m.edps as i64,
                     total_damage: m.total_damage as u64,
                     total_damage_effective: m.total_damage_effective as u64,
+                    damage_crit_pct: m.damage_crit_pct,
                     hps: m.hps as i64,
                     ehps: m.ehps as i64,
                     total_healing: m.total_healing as u64,
                     total_healing_effective: m.total_healing_effective as u64,
+                    heal_crit_pct: m.heal_crit_pct,
+                    effective_heal_pct: m.effective_heal_pct,
                     tps: m.tps as i64,
                     total_threat: m.total_threat as u64,
                     dtps: m.dtps as i64,
@@ -163,9 +185,18 @@ impl ServiceHandle {
                     total_damage_taken_effective: m.total_damage_taken_effective as u64,
                     abs: m.abs as i64,
                     total_shielding: m.total_shielding as u64,
-                })
-                .collect(),
-        )
+                    apm: m.apm,
+                }
+            })
+            .collect();
+
+        Some(CombatData {
+            metrics,
+            player_entity_id,
+            encounter_time_secs,
+            encounter_count,
+            class_discipline,
+        })
     }
 }
 
@@ -206,12 +237,33 @@ pub async fn get_tailing_status(handle: State<'_, ServiceHandle>) -> Result<bool
 pub async fn get_current_metrics(
     handle: State<'_, ServiceHandle>,
 ) -> Result<Option<Vec<PlayerMetrics>>, String> {
-    Ok(handle.current_metrics().await)
+    Ok(handle.current_combat_data().await.map(|d| d.metrics))
 }
 
 #[tauri::command]
 pub async fn get_config(handle: State<'_, ServiceHandle>) -> Result<AppConfig, String> {
-    Ok(handle.config().await)
+    let mut config = handle.config().await;
+
+    // Populate default appearances for each overlay type (single source of truth)
+    for metric_type in MetricType::all() {
+        let color = metric_type.bar_color();
+        // Convert from f32 (0.0-1.0) to u8 (0-255)
+        let bar_color = [
+            (color.red() * 255.0) as u8,
+            (color.green() * 255.0) as u8,
+            (color.blue() * 255.0) as u8,
+            (color.alpha() * 255.0) as u8,
+        ];
+        config.overlay_settings.default_appearances.insert(
+            metric_type.config_key().to_string(),
+            OverlayAppearanceConfig {
+                bar_color,
+                ..Default::default()
+            },
+        );
+    }
+
+    Ok(config)
 }
 
 #[tauri::command]

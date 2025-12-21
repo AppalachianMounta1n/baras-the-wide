@@ -44,8 +44,8 @@ pub enum ServiceCommand {
 pub enum OverlayUpdate {
     CombatStarted,
     CombatEnded,
-    MetricsUpdated(Vec<PlayerMetrics>),
-    PersonalStatsUpdated(PersonalStats),
+    /// Unified combat data for both metric and personal overlays
+    DataUpdated(CombatData),
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -375,19 +375,12 @@ impl CombatService {
 
                 eprintln!("Metrics trigger: {:?}", trigger);
 
-                // Calculate and send metrics
-                let metrics = calculate_metrics(&shared).await;
-                let personal = calculate_personal_stats(&shared).await;
-
-                if let Some(metrics) = metrics
-                    && !metrics.is_empty()
+                // Calculate and send unified combat data
+                if let Some(data) = calculate_combat_data(&shared).await
+                    && !data.metrics.is_empty()
                 {
-                    eprintln!("Sending {} metrics to overlay", metrics.len());
-                    let _ = overlay_tx.try_send(OverlayUpdate::MetricsUpdated(metrics));
-                }
-
-                if let Some(personal) = personal {
-                    let _ = overlay_tx.try_send(OverlayUpdate::PersonalStatsUpdated(personal));
+                    eprintln!("Sending {} metrics to overlay", data.metrics.len());
+                    let _ = overlay_tx.try_send(OverlayUpdate::DataUpdated(data));
                 }
 
                 // For CombatStarted, start polling during combat
@@ -396,14 +389,10 @@ impl CombatService {
                     while shared.in_combat.load(Ordering::SeqCst) {
                         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
 
-                        if let Some(metrics) = calculate_metrics(&shared).await
-                            && !metrics.is_empty()
+                        if let Some(data) = calculate_combat_data(&shared).await
+                            && !data.metrics.is_empty()
                         {
-                            let _ = overlay_tx.try_send(OverlayUpdate::MetricsUpdated(metrics));
-                        }
-
-                        if let Some(personal) = calculate_personal_stats(&shared).await {
-                            let _ = overlay_tx.try_send(OverlayUpdate::PersonalStatsUpdated(personal));
+                            let _ = overlay_tx.try_send(OverlayUpdate::DataUpdated(data));
                         }
                     }
                 }
@@ -441,57 +430,14 @@ impl CombatService {
     }
 }
 
-/// Calculate current metrics from the session
-async fn calculate_metrics(shared: &Arc<SharedState>) -> Option<Vec<PlayerMetrics>> {
-    let session_guard = shared.session.read().await;
-    let session = session_guard.as_ref()?;
-    let session = session.read().await;
-    let cache = session.session_cache.as_ref()?;
-    let encounter = cache.last_combat_encounter()?;
-
-    let entity_metrics = encounter.calculate_entity_metrics()?;
-
-    Some(
-        entity_metrics
-            .into_iter()
-            .filter(|m| m.entity_type != EntityType::Npc)
-            .map(|m| {
-                let name = resolve(m.name).to_string();
-                // Filter out control characters for safe display
-                let safe_name: String = name.chars().filter(|c| !c.is_control()).collect();
-                PlayerMetrics {
-                    entity_id: m.entity_id,
-                    name: safe_name,
-                    dps: m.dps as i64,
-                    edps: m.edps as i64,
-                    total_damage: m.total_damage as u64,
-                    total_damage_effective: m.total_damage_effective as u64,
-                    hps: m.hps as i64,
-                    ehps: m.ehps as i64,
-                    total_healing: m.total_healing as u64,
-                    total_healing_effective: m.total_healing_effective as u64,
-                    tps: m.tps as i64,
-                    total_threat: m.total_threat as u64,
-                    dtps: m.dtps as i64,
-                    edtps: m.edtps as i64,
-                    total_damage_taken: m.total_damage_taken as u64,
-                    total_damage_taken_effective: m.total_damage_taken_effective as u64,
-                    abs: m.abs as i64,
-                    total_shielding: m.total_shielding as u64,
-                }
-            })
-            .collect(),
-    )
-}
-
-/// Calculate personal stats for the primary player
-async fn calculate_personal_stats(shared: &Arc<SharedState>) -> Option<PersonalStats> {
+/// Calculate unified combat data for all overlays
+async fn calculate_combat_data(shared: &Arc<SharedState>) -> Option<CombatData> {
     let session_guard = shared.session.read().await;
     let session = session_guard.as_ref()?;
     let session = session.read().await;
     let cache = session.session_cache.as_ref()?;
 
-    // Get player info for class/discipline from cache
+    // Get player info for class/discipline and entity ID
     let player_info = &cache.player;
     let class_discipline = if !player_info.class_name.is_empty() && !player_info.discipline_name.is_empty() {
         Some(format!("{} / {}", player_info.class_name, player_info.discipline_name))
@@ -500,41 +446,55 @@ async fn calculate_personal_stats(shared: &Arc<SharedState>) -> Option<PersonalS
     } else {
         None
     };
+    let player_entity_id = player_info.id;
 
+    // Get encounter info
     let encounter = cache.last_combat_encounter()?;
     let encounter_count = cache.encounter_count();
-    let encounter_time_secs = encounter.duration_ms().unwrap_or(0) / 1000;
+    let encounter_time_secs = (encounter.duration_ms().unwrap_or(0) / 1000) as u64;
 
-    // Get player entity ID (id field, must be non-zero)
-    let player_entity_id = player_info.id;
-    if player_entity_id == 0 {
-        return None;
-    }
-
-    // Find the player's metrics in the entity metrics
+    // Calculate metrics for all players
     let entity_metrics = encounter.calculate_entity_metrics()?;
-    let player_metrics = entity_metrics
-        .iter()
-        .find(|m| m.entity_id == player_entity_id)?;
+    let metrics: Vec<PlayerMetrics> = entity_metrics
+        .into_iter()
+        .filter(|m| m.entity_type != EntityType::Npc)
+        .map(|m| {
+            let name = resolve(m.name).to_string();
+            // Filter out control characters for safe display
+            let safe_name: String = name.chars().filter(|c| !c.is_control()).collect();
+            PlayerMetrics {
+                entity_id: m.entity_id,
+                name: safe_name,
+                dps: m.dps as i64,
+                edps: m.edps as i64,
+                total_damage: m.total_damage as u64,
+                total_damage_effective: m.total_damage_effective as u64,
+                damage_crit_pct: m.damage_crit_pct,
+                hps: m.hps as i64,
+                ehps: m.ehps as i64,
+                total_healing: m.total_healing as u64,
+                total_healing_effective: m.total_healing_effective as u64,
+                heal_crit_pct: m.heal_crit_pct,
+                effective_heal_pct: m.effective_heal_pct,
+                tps: m.tps as i64,
+                total_threat: m.total_threat as u64,
+                dtps: m.dtps as i64,
+                edtps: m.edtps as i64,
+                total_damage_taken: m.total_damage_taken as u64,
+                total_damage_taken_effective: m.total_damage_taken_effective as u64,
+                abs: m.abs as i64,
+                total_shielding: m.total_shielding as u64,
+                apm: m.apm,
+            }
+        })
+        .collect();
 
-    Some(PersonalStats {
-        encounter_time_secs: encounter_time_secs as u64,
+    Some(CombatData {
+        metrics,
+        player_entity_id,
+        encounter_time_secs,
         encounter_count,
         class_discipline,
-        apm: player_metrics.apm,
-        dps: player_metrics.dps,
-        edps: player_metrics.edps,
-        total_damage: player_metrics.total_damage,
-        hps: player_metrics.hps,
-        ehps: player_metrics.ehps,
-        total_healing: player_metrics.total_healing,
-        dtps: player_metrics.dtps,
-        edtps: player_metrics.edtps,
-        tps: player_metrics.tps,
-        total_threat: player_metrics.total_threat,
-        damage_crit_pct: player_metrics.damage_crit_pct,
-        heal_crit_pct: player_metrics.heal_crit_pct,
-        effective_heal_pct: player_metrics.effective_heal_pct,
     })
 }
 
@@ -560,11 +520,14 @@ pub struct PlayerMetrics {
     pub edps: i64,
     pub total_damage: u64,
     pub total_damage_effective: u64,
+    pub damage_crit_pct: f32,
     // Healing
     pub hps: i64,
     pub ehps: i64,
     pub total_healing: u64,
     pub total_healing_effective: u64,
+    pub heal_crit_pct: f32,
+    pub effective_heal_pct: f32,
     // Threat
     pub tps: i64,
     pub total_threat: u64,
@@ -576,6 +539,49 @@ pub struct PlayerMetrics {
     // Shielding (absorbs)
     pub abs: i64,
     pub total_shielding: u64,
+    // Activity
+    pub apm: f32,
+}
+
+/// Unified combat data for all overlays
+#[derive(Debug, Clone)]
+pub struct CombatData {
+    /// Metrics for all players
+    pub metrics: Vec<PlayerMetrics>,
+    /// Entity ID of the primary player (for personal overlay)
+    pub player_entity_id: i64,
+    /// Duration of current encounter in seconds
+    pub encounter_time_secs: u64,
+    /// Number of encounters in the session
+    pub encounter_count: usize,
+    /// Player's class and discipline (e.g., "Sorcerer / Corruption")
+    pub class_discipline: Option<String>,
+}
+
+impl CombatData {
+    /// Convert to PersonalStats by finding the player's entry in metrics
+    pub fn to_personal_stats(&self) -> Option<PersonalStats> {
+        let player = self.metrics.iter().find(|m| m.entity_id == self.player_entity_id)?;
+        Some(PersonalStats {
+            encounter_time_secs: self.encounter_time_secs,
+            encounter_count: self.encounter_count,
+            class_discipline: self.class_discipline.clone(),
+            apm: player.apm,
+            dps: player.dps as i32,
+            edps: player.edps as i32,
+            total_damage: player.total_damage as i64,
+            hps: player.hps as i32,
+            ehps: player.ehps as i32,
+            total_healing: player.total_healing as i64,
+            dtps: player.dtps as i32,
+            edtps: player.edtps as i32,
+            tps: player.tps as i32,
+            total_threat: player.total_threat as i64,
+            damage_crit_pct: player.damage_crit_pct,
+            heal_crit_pct: player.heal_crit_pct,
+            effective_heal_pct: player.effective_heal_pct,
+        })
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

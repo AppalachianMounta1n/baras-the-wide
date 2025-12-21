@@ -81,14 +81,21 @@ pub async fn show_overlay(
         state.insert(overlay_handle);
     }
 
-    // Send current metrics if tailing (only for metric overlays)
-    if let OverlayType::Metric(overlay_type) = kind {
-        if service.is_tailing().await
-            && let Some(metrics) = service.current_metrics().await
-            && !metrics.is_empty()
-        {
-            let entries = create_entries_for_type(overlay_type, &metrics);
-            let _ = tx.send(OverlayCommand::UpdateData(OverlayData::Metrics(entries))).await;
+    // Send current data if tailing
+    if service.is_tailing().await
+        && let Some(data) = service.current_combat_data().await
+        && !data.metrics.is_empty()
+    {
+        match kind {
+            OverlayType::Metric(overlay_type) => {
+                let entries = create_entries_for_type(overlay_type, &data.metrics);
+                let _ = tx.send(OverlayCommand::UpdateData(OverlayData::Metrics(entries))).await;
+            }
+            OverlayType::Personal => {
+                if let Some(stats) = data.to_personal_stats() {
+                    let _ = tx.send(OverlayCommand::UpdateData(OverlayData::Personal(stats))).await;
+                }
+            }
         }
     }
 
@@ -194,6 +201,13 @@ pub async fn show_all_overlays(
     let metric_opacity = config.overlay_settings.metric_opacity;
     let personal_opacity = config.overlay_settings.personal_opacity;
 
+    // Get current combat data once for all overlays
+    let combat_data = if service.is_tailing().await {
+        service.current_combat_data().await
+    } else {
+        None
+    };
+
     let mut shown_metric_types = Vec::new();
     // Track overlays that need their monitor_id saved: (config_key, tx)
     let mut needs_monitor_save: Vec<(String, tokio::sync::mpsc::Sender<OverlayCommand>)> = Vec::new();
@@ -217,6 +231,13 @@ pub async fn show_all_overlays(
                 {
                     let mut state = state.lock().map_err(|e| e.to_string())?;
                     state.insert(overlay_handle);
+                }
+
+                // Send initial personal stats if available
+                if let Some(ref data) = combat_data
+                    && let Some(stats) = data.to_personal_stats()
+                {
+                    let _ = tx.send(OverlayCommand::UpdateData(OverlayData::Personal(stats))).await;
                 }
 
                 if needs_save {
@@ -249,12 +270,11 @@ pub async fn show_all_overlays(
                 state.insert(overlay_handle);
             }
 
-            // Send current metrics if tailing
-            if service.is_tailing().await
-                && let Some(metrics) = service.current_metrics().await
-                && !metrics.is_empty()
+            // Send current metrics if available
+            if let Some(ref data) = combat_data
+                && !data.metrics.is_empty()
             {
-                let entries = create_entries_for_type(overlay_type, &metrics);
+                let entries = create_entries_for_type(overlay_type, &data.metrics);
                 let _ = tx.send(OverlayCommand::UpdateData(OverlayData::Metrics(entries))).await;
             }
 

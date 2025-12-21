@@ -169,10 +169,10 @@ impl MetricOverlay {
         let max_entries = self.appearance.max_entries as usize;
         let visible_entries: Vec<_> = self.entries.iter().take(max_entries).collect();
 
-        // Find max value for scaling
+        // Find max value for scaling (use actual rate values, not max_value field)
         let max_val = visible_entries
             .iter()
-            .map(|e| e.max_value as f64)
+            .map(|e| e.value as f64)
             .fold(1.0, f64::max);
 
         // Draw entries using ProgressBar widget
@@ -188,7 +188,7 @@ impl MetricOverlay {
 
             let display_name = truncate_name(&entry.name, MAX_NAME_CHARS);
             let progress = if max_val > 0.0 {
-                (entry.max_value as f64 / max_val) as f32
+                (entry.value as f64 / max_val) as f32
             } else {
                 0.0
             };

@@ -34,6 +34,13 @@ fn spawn_auto_show_overlays(
         let metric_opacity = config.overlay_settings.metric_opacity;
         let personal_opacity = config.overlay_settings.personal_opacity;
 
+        // Get current combat data once for all overlays
+        let combat_data = if service_handle.is_tailing().await {
+            service_handle.current_combat_data().await
+        } else {
+            None
+        };
+
         for key in &enabled_keys {
             if key == "personal" {
                 // Handle personal overlay
@@ -51,9 +58,21 @@ fn spawn_auto_show_overlays(
 
                     match create_personal_overlay(position, personal_config, personal_opacity) {
                         Ok(overlay_handle) => {
+                            let tx = overlay_handle.tx.clone();
+
                             if let Ok(mut state) = overlay_state.lock() {
                                 state.insert(overlay_handle);
                             }
+
+                            // Send initial personal stats if available
+                            if let Some(ref data) = combat_data
+                                && let Some(stats) = data.to_personal_stats()
+                            {
+                                let _ = tx.send(OverlayCommand::UpdateData(
+                                    OverlayData::Personal(stats)
+                                )).await;
+                            }
+
                             eprintln!("Auto-showed personal overlay on startup");
                         }
                         Err(e) => eprintln!("Failed to auto-show personal overlay: {}", e),
@@ -91,12 +110,11 @@ fn spawn_auto_show_overlays(
                             state.insert(overlay_handle);
                         }
 
-                        // Send current metrics if tailing
-                        if service_handle.is_tailing().await
-                            && let Some(metrics) = service_handle.current_metrics().await
-                            && !metrics.is_empty()
+                        // Send current metrics if available
+                        if let Some(ref data) = combat_data
+                            && !data.metrics.is_empty()
                         {
-                            let entries = overlay::create_entries_for_type(overlay_type, &metrics);
+                            let entries = overlay::create_entries_for_type(overlay_type, &data.metrics);
                             let _ = tx.send(OverlayCommand::UpdateData(
                                 OverlayData::Metrics(entries)
                             )).await;

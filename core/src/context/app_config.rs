@@ -167,6 +167,11 @@ pub struct OverlaySettings {
     /// Global toggle for class icons (future use)
     #[serde(default)]
     pub class_icons_enabled: bool,
+
+    /// Default appearance configs per overlay type (not persisted, populated by backend)
+    /// Used by frontend for "Reset to Default" functionality
+    #[serde(default, skip_deserializing)]
+    pub default_appearances: HashMap<String, OverlayAppearanceConfig>,
 }
 
 fn default_visible() -> bool { true }
@@ -183,6 +188,7 @@ impl Default for OverlaySettings {
             metric_opacity: default_opacity(),
             personal_opacity: default_opacity(),
             class_icons_enabled: false,
+            default_appearances: HashMap::new(),
         }
     }
 }

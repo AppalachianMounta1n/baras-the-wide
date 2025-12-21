@@ -5,7 +5,13 @@
 html, body {
   margin: 0;
   padding: 0;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Responsive font sizing - scales with viewport height */
+:root {
+  --base-font: clamp(10px, 1.8vh, 16px);
 }
 
 .logo.dioxus:hover {
@@ -29,15 +35,34 @@ html, body {
 
 .container {
   margin: 0 auto;
-  padding: 2rem 1rem;
+  padding: 1.5vh 1vw;
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
+  justify-content: space-between;
   align-items: center;
   text-align: center;
-  min-height: 100vh;
+  height: 100vh;
   width: 100%;
-  max-width: min(600px, 90%);
+  max-width: min(700px, 95%);
+  overflow: hidden;
+  gap: 0.75vh;
+}
+
+/* App header */
+.app-header {
+  flex: 0 1 auto;
+  width: 100%;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: clamp(1.2rem, 4vh, 2.5rem);
+  line-height: 1.1;
+}
+
+.app-header .subtitle {
+  margin: 0.25vh 0 0 0;
+  font-size: clamp(0.7rem, 1.5vh, 1rem);
 }
 
 .logo {
@@ -72,10 +97,10 @@ h1 {
 
 input,
 button {
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
+  padding: 0.6vh 1.2vw;
+  font-size: clamp(0.7rem, 1.5vh, 1rem);
   font-weight: 500;
   font-family: inherit;
   color: #0f0f0f;
@@ -128,8 +153,8 @@ button {
 /* Baras-specific styles */
 .subtitle {
   color: #888;
-  margin-top: -1em;
-  margin-bottom: 2em;
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 .controls {
@@ -140,10 +165,10 @@ button {
 }
 
 .btn {
-  min-width: 140px;
-  padding: 0.8em 1.5em;
-  font-size: 1em;
-  border-radius: 8px;
+  min-width: unset;
+  padding: 0.8vh 1.5vw;
+  font-size: clamp(0.7rem, 1.5vh, 1rem);
+  border-radius: 6px;
   border: 2px solid #444;
   cursor: pointer;
   transition: all 0.2s;
@@ -214,24 +239,26 @@ button {
 }
 
 .log-section {
-  margin: 2em 0;
+  margin: 0;
   width: 100%;
   max-width: min(500px, 100%);
+  flex: 0 1 auto;
 }
 
 .log-section h3 {
-  margin-bottom: 0.5em;
+  margin: 0 0 0.5vh 0;
+  font-size: clamp(0.9rem, 2vh, 1.2rem);
 }
 
 .log-controls {
   display: flex;
-  gap: 0.5em;
+  gap: 0.5vw;
 }
 
 .log-input {
   flex: 1;
-  padding: 0.6em 1em;
-  font-size: 0.9em;
+  padding: 0.6vh 1vw;
+  font-size: clamp(0.65rem, 1.4vh, 0.9rem);
 }
 
 .log-input:disabled {
@@ -240,30 +267,50 @@ button {
 
 /* Overlay controls */
 .overlay-controls {
-  margin: 1.5em 0;
+  margin: 0;
   width: 100%;
-  max-width: min(400px, 100%);
-}
-
-.overlay-meters {
-  margin: 0.5em 0 1em 0;
-  width: 100%;
+  max-width: min(500px, 100%);
+  flex: 1 1 auto;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.4em;
-  justify-content: center;
-}
-
-.subsection-title {
-  font-size: 0.85em;
-  color: #888;
-  text-transform: uppercase;
-  margin: 0.75em 0 0.25em 0;
-  letter-spacing: 0.5px;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .overlay-controls h3 {
-  margin-bottom: 0.5em;
+  margin: 0 0 0.5vh 0;
+  font-size: clamp(0.9rem, 2vh, 1.2rem);
+  flex-shrink: 0;
+}
+
+/* Settings controls row (Hide/Show, Lock, Customize) */
+.settings-controls {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5vw;
+  margin-bottom: 0.5vh;
+  padding: 0.75vh 0.75vw;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.subsection-title {
+  font-size: clamp(0.5rem, 1.2vh, 0.75rem);
+  color: #888;
+  text-transform: uppercase;
+  margin: 0.3vh 0 0.2vh 0;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+/* Overlay toggle buttons grid */
+.overlay-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.4vh 0.4vw;
+  margin: 0.2vh 0 0.3vh 0;
+  width: 100%;
+  flex-shrink: 0;
 }
 
 .overlay-toggles {
@@ -273,87 +320,133 @@ button {
 }
 
 .btn-overlay {
-  min-width: 60px;
-  padding: 0.6em 1em;
-  margin-left: 0.5em;
+  width: 100%;
+  min-width: unset;
+  padding: 0.6vh 0.3vw;
+  margin: 0;
+  font-size: clamp(0.6rem, 1.4vh, 0.9rem);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.btn-lock {
-  min-width: 80px;
-  margin-left: 1em;
+.btn-control {
+  width: 100%;
+  padding: 0.8vh 0.5vw;
+  margin: 0;
+  font-size: clamp(0.7rem, 1.5vh, 0.95rem);
 }
 
-.btn-show-all {
-  min-width: 70px;
-  margin-left: 0.5em;
-  background-color: #2a6e2a;
-  border-color: #3a8e3a;
+/* Lock button - locked state (neutral/grey) */
+.btn-locked {
+  min-width: unset;
+  margin: 0;
+  background-color: #3a3a3a;
+  border-color: #4a4a4a;
+  color: #ccc;
+}
+
+.btn-locked:hover:not(:disabled) {
+  background-color: #4a4a4a;
+}
+
+/* Lock button - unlocked state (warning orange) */
+.btn-unlocked {
+  min-width: unset;
+  margin: 0;
+  background-color: #8e6e2a;
+  border-color: #ae8e3a;
   color: white;
 }
 
-.btn-show-all:hover {
-  background-color: #308030;
+.btn-unlocked:hover:not(:disabled) {
+  background-color: #a07e3a;
 }
 
-.btn-hide-all {
-  min-width: 70px;
-  margin-left: 0.5em;
-  background-color: #8e2a2a;
-  border-color: #ae3a3a;
+/* Visibility button - visible state (blue) */
+.btn-visible {
+  min-width: unset;
+  margin: 0;
+  background-color: #2a5a8e;
+  border-color: #3a7abe;
   color: white;
 }
 
-.btn-hide-all:hover {
-  background-color: #a03030;
+.btn-visible:hover {
+  background-color: #3a6a9e;
+}
+
+/* Visibility button - hidden state (grey) */
+.btn-hidden {
+  min-width: unset;
+  margin: 0;
+  background-color: #4a4a4a;
+  border-color: #5a5a5a;
+  color: #aaa;
+}
+
+.btn-hidden:hover {
+  background-color: #5a5a5a;
+}
+
+.btn-visibility-placeholder {
+  min-width: unset;
+  margin: 0;
+  background-color: #3a3a3a;
+  border-color: #4a4a4a;
+  color: #666;
+  cursor: default;
 }
 
 /* Session panel */
 .session-panel {
-  margin: 1.5em 0;
+  margin: 0;
   width: 100%;
-  max-width: min(400px, 100%);
+  max-width: min(500px, 100%);
   background: rgba(0, 0, 0, 0.1);
   border-radius: 8px;
-  padding: 1em;
+  padding: 1vh 1.5vw;
   box-sizing: border-box;
+  flex: 0 1 auto;
 }
 
 .session-panel h3 {
-  margin-top: 0;
-  margin-bottom: 0.75em;
+  margin: 0 0 0.5vh 0;
+  font-size: clamp(0.9rem, 2vh, 1.2rem);
 }
 
 .session-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.5em;
+  gap: 0.5vh 1vw;
 }
 
 .session-item {
   display: flex;
   flex-direction: column;
-  padding: 0.25em 0.5em;
+  padding: 0.25vh 0.5vw;
   background: rgba(0, 0, 0, 0.05);
   border-radius: 4px;
 }
 
 .session-item .label {
-  font-size: 0.75em;
+  font-size: clamp(0.5rem, 1.2vh, 0.75rem);
   color: #888;
   text-transform: uppercase;
 }
 
 .session-item .value {
   font-weight: 500;
+  font-size: clamp(0.7rem, 1.6vh, 1rem);
 }
 
 /* Active file display */
 .active-file {
-  margin-top: 0.75em;
-  padding: 0.5em;
+  margin-top: 0.5vh;
+  padding: 0.4vh 0.5vw;
   background: rgba(0, 0, 0, 0.05);
   border-radius: 4px;
-  font-size: 0.85em;
+  font-size: clamp(0.55rem, 1.2vh, 0.85rem);
   text-align: left;
   word-break: break-all;
 }
@@ -368,18 +461,20 @@ button {
 
 /* Status footer */
 .status-footer {
-  margin-top: 2em;
+  margin-top: auto;
+  padding-top: 0.5vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5em;
-  font-size: 0.85em;
+  gap: 0.5vw;
+  font-size: clamp(0.6rem, 1.3vh, 0.85rem);
   color: #888;
+  flex-shrink: 0;
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: clamp(6px, 1vh, 10px);
+  height: clamp(6px, 1vh, 10px);
   border-radius: 50%;
 }
 
@@ -391,10 +486,10 @@ button {
   background-color: #888;
 }
 
-/* Settings button */
+/* Settings/Customize button */
 .btn-settings {
-  min-width: 80px;
-  margin-left: 0.5em;
+  min-width: unset;
+  margin: 0;
   background-color: #4a4a6a;
   border-color: #5a5a8a;
   color: white;
@@ -404,15 +499,32 @@ button {
   background-color: #5a5a7a;
 }
 
-/* Settings panel */
+/* Settings modal backdrop */
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+/* Settings panel (modal dialog) */
 .settings-panel {
-  width: 100%;
-  max-width: min(450px, 100%);
-  background: rgba(0, 0, 0, 0.15);
+  position: relative;
+  width: 90%;
+  max-width: 600px;
+  max-height: 85vh;
+  background: #2a2a2a;
   border-radius: 8px;
   padding: 1em;
-  margin: 1em 0;
   text-align: left;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  overflow-y: auto;
 }
 
 .settings-header {
@@ -441,19 +553,37 @@ button {
 /* Settings tabs */
 .settings-tabs {
   display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  margin: 1em 0;
+}
+
+.tab-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+}
+
+.tab-group-label {
+  font-size: 0.7em;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.25em;
+}
+
+.tab-group-buttons {
+  display: flex;
   flex-wrap: wrap;
   gap: 0.25em;
-  margin: 1em 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  padding-bottom: 0.5em;
 }
 
 .tab-btn {
-  padding: 0.4em 0.8em;
+  padding: 0.4em 0.7em;
   min-width: auto;
-  font-size: 0.85em;
-  border-radius: 4px 4px 0 0;
-  border: 1px solid transparent;
+  font-size: 0.8em;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   background: transparent;
   color: #888;
   box-shadow: none;
@@ -465,10 +595,9 @@ button {
 }
 
 .tab-btn.active {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(100, 150, 255, 0.2);
   color: #fff;
-  border-color: rgba(255, 255, 255, 0.2);
-  border-bottom-color: transparent;
+  border-color: rgba(100, 150, 255, 0.4);
 }
 
 /* Settings sections */
@@ -485,6 +614,46 @@ button {
   color: #aaa;
 }
 
+/* Collapsible section using native details/summary */
+.collapsible {
+  margin: 0.5em 0;
+}
+
+.collapsible-summary {
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.95em;
+  font-weight: 500;
+  color: #aaa;
+  padding: 0.25em 0;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.collapsible-summary::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible-summary::before {
+  content: "▶";
+  font-size: 0.7em;
+  transition: transform 0.2s;
+}
+
+details[open] .collapsible-summary::before {
+  transform: rotate(90deg);
+}
+
+.collapsible-summary:hover {
+  color: #ccc;
+}
+
+.collapsible-content {
+  padding-top: 0.5em;
+}
+
 .setting-row {
   display: flex;
   align-items: center;
@@ -492,6 +661,7 @@ button {
   margin: 0.5em 0;
 }
 
+/* Default: label takes available space, pushes controls to right */
 .setting-row label {
   flex: 1;
   font-size: 0.9em;
@@ -501,56 +671,160 @@ button {
   width: 18px;
   height: 18px;
   cursor: pointer;
-}
-
-.setting-row input[type="range"] {
-  flex: 1;
-  max-width: 150px;
+  flex-shrink: 0;
 }
 
 .setting-row input[type="number"] {
   width: 60px;
   text-align: center;
   padding: 0.3em;
+  flex-shrink: 0;
 }
 
-.setting-row .value {
-  width: 40px;
-  text-align: right;
+.setting-row input[type="color"] {
+  flex-shrink: 0;
+}
+
+/* Color picker - clean native styling */
+.color-picker {
+  width: 50px;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.color-picker::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.color-picker::-webkit-color-swatch {
+  border: none;
+  border-radius: 2px;
+}
+
+.color-picker::-moz-color-swatch {
+  border: none;
+  border-radius: 2px;
+}
+
+/* Reset row - centered button */
+.reset-row {
+  justify-content: flex-end;
+  margin-top: 1em;
+  padding-top: 0.75em;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.btn-reset {
+  background: rgba(100, 100, 100, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #aaa;
+  padding: 0.4em 0.8em;
   font-size: 0.85em;
-  color: #888;
 }
 
-/* Personal stat grid */
+.btn-reset:hover {
+  background: rgba(100, 100, 100, 0.5);
+  color: #ccc;
+}
+
+/* Personal stats section */
 .hint {
   font-size: 0.85em;
   color: #888;
-  margin: 0 0 0.75em 0;
+  margin: 0 0 0.5em 0;
 }
 
-.stat-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.4em;
+/* Selected stats - ordered list */
+.stat-order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3em;
+  margin-bottom: 1em;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
-.stat-toggle {
+.stat-order-item {
   display: flex;
   align-items: center;
   gap: 0.5em;
-  font-size: 0.85em;
-  padding: 0.25em;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.stat-toggle:hover {
+  padding: 0.4em 0.6em;
   background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  font-size: 0.85em;
 }
 
-.stat-toggle input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
+.stat-order-item .stat-name {
+  flex: 1;
+}
+
+.stat-order-item .stat-controls {
+  display: flex;
+  gap: 0.25em;
+}
+
+.stat-order-item .btn-order {
+  padding: 0.15em 0.4em;
+  min-width: unset;
+  font-size: 0.75em;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #aaa;
+  border-radius: 3px;
+}
+
+.stat-order-item .btn-order:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.stat-order-item .btn-order:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.stat-order-item .btn-remove {
+  padding: 0.15em 0.4em;
+  min-width: unset;
+  font-size: 0.75em;
+  background: rgba(200, 50, 50, 0.3);
+  border: 1px solid rgba(200, 50, 50, 0.5);
+  color: #faa;
+  border-radius: 3px;
+}
+
+.stat-order-item .btn-remove:hover {
+  background: rgba(200, 50, 50, 0.5);
+}
+
+/* Available stats to add */
+.stat-add-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 0.75em;
+}
+
+.stat-add-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3em;
+}
+
+.btn-add-stat {
+  padding: 0.3em 0.6em;
+  min-width: unset;
+  font-size: 0.75em;
+  background: rgba(50, 150, 50, 0.2);
+  border: 1px solid rgba(50, 150, 50, 0.4);
+  color: #afa;
+  border-radius: 4px;
+}
+
+.btn-add-stat:hover {
+  background: rgba(50, 150, 50, 0.4);
 }
 
 /* Settings footer */

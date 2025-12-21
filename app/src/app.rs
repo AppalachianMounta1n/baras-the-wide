@@ -183,6 +183,9 @@ pub struct OverlaySettings {
     /// Background opacity for personal overlay
     #[serde(default = "default_opacity")]
     pub personal_opacity: u8,
+    /// Default appearances for each overlay type (populated by backend, not persisted)
+    #[serde(default)]
+    pub default_appearances: std::collections::HashMap<String, OverlayAppearanceConfig>,
 }
 
 fn default_opacity() -> u8 { 180 }
@@ -517,9 +520,13 @@ pub fn App() -> Element {
 
     rsx! {
         link { rel: "stylesheet", href: CSS }
+        link { rel: "stylesheet", href: "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" }
         main { class: "container",
-            h1 { "BARAS" }
-            p { class: "subtitle", "Battle Analysis and Raid Assessment System" }
+            // App header
+            header { class: "app-header",
+                h1 { "BARAS" }
+                p { class: "subtitle", "Battle Analysis and Raid Assessment System" }
+            }
 
 
             // Session info panel
@@ -567,13 +574,67 @@ pub fn App() -> Element {
             }
 
 
-            // Overlay toggles
+            // Overlay controls section
             section { class: "overlay-controls",
                 h3 { "Overlays" }
 
-                // Metrics section
+                // Settings controls row (Hide/Show, Lock, Customize)
+                h4 { class: "subsection-title", "Settings" }
+                div { class: "settings-controls",
+                    // Show/hide toggle (or placeholder if none enabled)
+                    if any_enabled {
+                        button {
+                            class: if is_visible { "btn btn-control btn-visible" } else { "btn btn-control btn-hidden" },
+                            onclick: toggle_visibility,
+                            if is_visible {
+                                i { class: "fa-solid fa-eye" }
+                                span { " Visible" }
+                            } else {
+                                i { class: "fa-solid fa-eye-slash" }
+                                span { " Hidden" }
+                            }
+                        }
+                    } else {
+                        button {
+                            class: "btn btn-control btn-visibility-placeholder",
+                            disabled: true,
+                            i { class: "fa-solid fa-eye-slash" }
+                            span { " Hidden" }
+                        }
+                    }
+                    button {
+                        class: if is_move_mode { "btn btn-control btn-unlocked" } else { "btn btn-control btn-locked" },
+                        disabled: !is_visible || !any_enabled,
+                        onclick: toggle_move,
+                        if is_move_mode {
+                            i { class: "fa-solid fa-lock-open" }
+                            span { " Unlocked" }
+                        } else {
+                            i { class: "fa-solid fa-lock" }
+                            span { " Locked" }
+                        }
+                    }
+                    button {
+                        class: "btn btn-control btn-settings",
+                        onclick: move |_| settings_open.set(!settings_open()),
+                        i { class: "fa-solid fa-screwdriver-wrench" }
+                        span { " Customize" }
+                    }
+                }
+
+                // General section (Personal Stats)
+                h4 { class: "subsection-title", "General" }
+                div { class: "overlay-grid",
+                    button {
+                        class: if personal_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                        onclick: toggle_personal,
+                        "Personal Stats"
+                    }
+                }
+
+                // Metrics section - 3 per row grid
                 h4 { class: "subsection-title", "Metrics" }
-                div { class: "overlay-metrics",
+                div { class: "overlay-grid",
                     for overlay_type in MetricType::all_metrics() {
                         {
                             let ot = *overlay_type;
@@ -588,47 +649,22 @@ pub fn App() -> Element {
                         }
                     }
                 }
-
-                // Personal section
-                h4 { class: "subsection-title", "Personal" }
-                div { class: "overlay-metrics",
-                    button {
-                        class: if personal_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                        onclick: toggle_personal,
-                        "Personal"
-                    }
-                }
             }
-            section { class: "overlay-controls",
-                div { class: "overlay-toggles",
-                    // Single show/hide toggle
-                    if any_enabled {
-                        button {
-                            class: if is_visible { "btn btn-hide-all" } else { "btn btn-show-all" },
-                            onclick: toggle_visibility,
-                            if is_visible { "Hide Overlays" } else { "Show Overlays" }
+
+            // Settings modal
+            if settings_open() {
+                div {
+                    class: "modal-backdrop",
+                    onclick: move |_| settings_open.set(false),
+                    div {
+                        // Stop click propagation so clicking the panel doesn't close it
+                        onclick: move |e| e.stop_propagation(),
+                        SettingsPanel {
+                            settings: overlay_settings,
+                            selected_tab: selected_overlay_tab,
+                            on_close: move |_| settings_open.set(false),
                         }
                     }
-                    button {
-                        class: if is_move_mode { "btn btn-lock btn-warning" } else { "btn btn-lock" },
-                        disabled: !is_visible || !any_enabled,
-                        onclick: toggle_move,
-                        if is_move_mode { "Unlocked" } else { "Locked" }
-                    }
-                    button {
-                        class: "btn btn-settings",
-                        onclick: move |_| settings_open.set(!settings_open()),
-                        "Settings"
-                    }
-                }
-            }
-
-            // Settings panel
-            if settings_open() {
-                SettingsPanel {
-                    settings: overlay_settings,
-                    selected_tab: selected_overlay_tab,
-                    on_close: move |_| settings_open.set(false),
                 }
             }
 
@@ -779,73 +815,85 @@ fn SettingsPanel(
                 }
             }
 
-            // Category opacity settings
-            div { class: "settings-section",
-                h4 { "Opacity" }
-                div { class: "setting-row",
-                    label { "Metrics Opacity" }
-                    input {
-                        r#type: "range",
-                        min: "0",
-                        max: "255",
-                        value: "{current_settings.metric_opacity}",
-                        oninput: move |e| {
-                            if let Ok(val) = e.value().parse::<u8>() {
-                                let mut new_settings = draft_settings();
-                                new_settings.metric_opacity = val;
-                                update_draft(new_settings);
+            // Category opacity settings (collapsible)
+            details { class: "settings-section collapsible",
+                summary { class: "collapsible-summary", "Background Opacity" }
+                div { class: "collapsible-content",
+                    div { class: "setting-row",
+                        label { "Metrics Opacity" }
+                        input {
+                            r#type: "range",
+                            min: "0",
+                            max: "255",
+                            value: "{current_settings.metric_opacity}",
+                            oninput: move |e| {
+                                if let Ok(val) = e.value().parse::<u8>() {
+                                    let mut new_settings = draft_settings();
+                                    new_settings.metric_opacity = val;
+                                    update_draft(new_settings);
+                                }
                             }
                         }
+                        span { class: "value", "{current_settings.metric_opacity}" }
                     }
-                    span { class: "value", "{current_settings.metric_opacity}" }
-                }
-                div { class: "setting-row",
-                    label { "Personal Opacity" }
-                    input {
-                        r#type: "range",
-                        min: "0",
-                        max: "255",
-                        value: "{current_settings.personal_opacity}",
-                        oninput: move |e| {
-                            if let Ok(val) = e.value().parse::<u8>() {
-                                let mut new_settings = draft_settings();
-                                new_settings.personal_opacity = val;
-                                update_draft(new_settings);
+                    div { class: "setting-row",
+                        label { "Personal Opacity" }
+                        input {
+                            r#type: "range",
+                            min: "0",
+                            max: "255",
+                            value: "{current_settings.personal_opacity}",
+                            oninput: move |e| {
+                                if let Ok(val) = e.value().parse::<u8>() {
+                                    let mut new_settings = draft_settings();
+                                    new_settings.personal_opacity = val;
+                                    update_draft(new_settings);
+                                }
                             }
                         }
+                        span { class: "value", "{current_settings.personal_opacity}" }
                     }
-                    span { class: "value", "{current_settings.personal_opacity}" }
                 }
             }
 
-            // Tabs for overlay types
+            // Tabs for overlay types - grouped by category
             div { class: "settings-tabs",
-                for overlay_type in MetricType::all_metrics() {
-                    {
-                        let ot = *overlay_type;
-                        let key = ot.config_key().to_string();
-                        let label = ot.label();
-                        rsx! {
-                            button {
-                                class: if tab == key { "tab-btn active" } else { "tab-btn" },
-                                onclick: move |_| selected_tab.set(key.clone()),
-                                "{label}"
-                            }
+                // General group
+                div { class: "tab-group",
+                    span { class: "tab-group-label", "General" }
+                    div { class: "tab-group-buttons",
+                        button {
+                            class: if tab == "personal" { "tab-btn active" } else { "tab-btn" },
+                            onclick: move |_| selected_tab.set("personal".to_string()),
+                            "Personal Stats"
                         }
                     }
                 }
-                button {
-                    class: if tab == "personal" { "tab-btn active" } else { "tab-btn" },
-                    onclick: move |_| selected_tab.set("personal".to_string()),
-                    "Personal"
+                // Metrics group
+                div { class: "tab-group",
+                    span { class: "tab-group-label", "Metrics" }
+                    div { class: "tab-group-buttons",
+                        for overlay_type in MetricType::all_metrics() {
+                            {
+                                let ot = *overlay_type;
+                                let key = ot.config_key().to_string();
+                                let label = ot.label();
+                                rsx! {
+                                    button {
+                                        class: if tab == key { "tab-btn active" } else { "tab-btn" },
+                                        onclick: move |_| selected_tab.set(key.clone()),
+                                        "{label}"
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
             // Per-overlay settings
             if tab != "personal" {
                 div { class: "settings-section",
-                    h4 { "{tab.to_uppercase()} Meter" }
-
                     // Display options
                     div { class: "setting-row",
                         label { "Show Per-Second" }
@@ -961,9 +1009,9 @@ fn SettingsPanel(
                         label { "Bar Color" }
                         input {
                             r#type: "color",
-                            key: "{tab}-bar-{bar_color_hex}",
-                            initial_value: bar_color_hex.clone(),
-                            style: "background-color: {bar_color_hex}; width: 50px; height: 30px; border: 1px solid #666; border-radius: 4px; cursor: pointer; padding: 0;",
+                            key: "{tab}-bar",
+                            value: "{bar_color_hex}",
+                            class: "color-picker",
                             oninput: {
                                 let tab = tab.clone();
                                 move |e: Event<FormData>| {
@@ -986,9 +1034,9 @@ fn SettingsPanel(
                         label { "Font Color" }
                         input {
                             r#type: "color",
-                            key: "{tab}-font-{font_color_hex}",
-                            initial_value: font_color_hex.clone(),
-                            style: "background-color: {font_color_hex}; width: 50px; height: 30px; border: 1px solid #666; border-radius: 4px; cursor: pointer; padding: 0;",
+                            key: "{tab}-font",
+                            value: "{font_color_hex}",
+                            class: "color-picker",
                             oninput: {
                                 let tab = tab.clone();
                                 move |e: Event<FormData>| {
@@ -1006,38 +1054,110 @@ fn SettingsPanel(
                             }
                         }
                     }
+
+                    // Reset to default button
+                    div { class: "setting-row reset-row",
+                        button {
+                            class: "btn btn-reset",
+                            onclick: {
+                                let tab = tab.clone();
+                                move |_| {
+                                    let mut new_settings = draft_settings();
+                                    // Use overlay-specific default from backend, fallback to generic default
+                                    let default_appearance = new_settings.default_appearances
+                                        .get(&tab)
+                                        .cloned()
+                                        .unwrap_or_default();
+                                    new_settings.appearances.insert(tab.clone(), default_appearance);
+                                    update_draft(new_settings);
+                                }
+                            },
+                            i { class: "fa-solid fa-rotate-left" }
+                            span { " Reset Style" }
+                        }
+                    }
                 }
             } else {
                 // Personal overlay settings
                 div { class: "settings-section",
-                    h4 { "Personal Stats" }
-                    p { class: "hint", "Select which stats to display:" }
+                    p { class: "hint", "Displayed stats:" }
 
-                    div { class: "stat-grid",
-                        for stat in PersonalStat::all() {
-                            {
-                                let is_visible = current_settings.personal_overlay.visible_stats.contains(stat);
-                                rsx! {
-                                    label { class: "stat-toggle",
-                                        input {
-                                            r#type: "checkbox",
-                                            checked: is_visible,
-                                            onchange: {
-                                                let stat = *stat;
-                                                move |e: Event<FormData>| {
+                    // Ordered list of selected stats
+                    {
+                        let visible_stats = current_settings.personal_overlay.visible_stats.clone();
+                        let stat_count = visible_stats.len();
+                        rsx! {
+                            div { class: "stat-order-list",
+                                for (idx, stat) in visible_stats.into_iter().enumerate() {
+                                    div { class: "stat-order-item", key: "{stat:?}",
+                                        span { class: "stat-name", "{stat.label()}" }
+                                        div { class: "stat-controls",
+                                            button {
+                                                class: "btn-order",
+                                                disabled: idx == 0,
+                                                onclick: move |_| {
                                                     let mut new_settings = draft_settings();
-                                                    if e.checked() {
-                                                        if !new_settings.personal_overlay.visible_stats.contains(&stat) {
-                                                            new_settings.personal_overlay.visible_stats.push(stat);
-                                                        }
-                                                    } else {
-                                                        new_settings.personal_overlay.visible_stats.retain(|s| *s != stat);
+                                                    let stats = &mut new_settings.personal_overlay.visible_stats;
+                                                    if idx > 0 {
+                                                        stats.swap(idx, idx - 1);
                                                     }
                                                     update_draft(new_settings);
-                                                }
+                                                },
+                                                "▲"
+                                            }
+                                            button {
+                                                class: "btn-order",
+                                                disabled: idx >= stat_count - 1,
+                                                onclick: move |_| {
+                                                    let mut new_settings = draft_settings();
+                                                    let stats = &mut new_settings.personal_overlay.visible_stats;
+                                                    if idx < stats.len() - 1 {
+                                                        stats.swap(idx, idx + 1);
+                                                    }
+                                                    update_draft(new_settings);
+                                                },
+                                                "▼"
+                                            }
+                                            button {
+                                                class: "btn-remove",
+                                                onclick: move |_| {
+                                                    let mut new_settings = draft_settings();
+                                                    new_settings.personal_overlay.visible_stats.retain(|s| *s != stat);
+                                                    update_draft(new_settings);
+                                                },
+                                                "✕"
                                             }
                                         }
-                                        span { "{stat.label()}" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Available stats to add
+                    div { class: "stat-add-section",
+                        p { class: "hint", "Add stats:" }
+                        div { class: "stat-add-grid",
+                            for stat in PersonalStat::all() {
+                                {
+                                    let is_visible = current_settings.personal_overlay.visible_stats.contains(stat);
+                                    if !is_visible {
+                                        let stat = *stat;
+                                        rsx! {
+                                            button {
+                                                class: "btn-add-stat",
+                                                onclick: move |_| {
+                                                    let mut new_settings = draft_settings();
+                                                    if !new_settings.personal_overlay.visible_stats.contains(&stat) {
+                                                        new_settings.personal_overlay.visible_stats.push(stat);
+                                                    }
+                                                    update_draft(new_settings);
+                                                },
+                                                "+ {stat.label()}"
+                                            }
+                                        }
+                                    } else {
+                                        rsx! {}
                                     }
                                 }
                             }
@@ -1049,9 +1169,9 @@ fn SettingsPanel(
                         label { "Font Color" }
                         input {
                             r#type: "color",
-                            key: "personal-font-{personal_font_color_hex}",
-                            initial_value: personal_font_color_hex.clone(),
-                            style: "background-color: {personal_font_color_hex}; width: 50px; height: 30px; border: 1px solid #666; border-radius: 4px; cursor: pointer; padding: 0;",
+                            key: "personal-font",
+                            value: "{personal_font_color_hex}",
+                            class: "color-picker",
                             oninput: move |e: Event<FormData>| {
                                 if let Some(color) = parse_hex_color(&e.value()) {
                                     let mut new_settings = draft_settings();
@@ -1059,6 +1179,20 @@ fn SettingsPanel(
                                     update_draft(new_settings);
                                 }
                             }
+                        }
+                    }
+
+                    // Reset to default button
+                    div { class: "setting-row reset-row",
+                        button {
+                            class: "btn btn-reset",
+                            onclick: move |_| {
+                                let mut new_settings = draft_settings();
+                                new_settings.personal_overlay = PersonalOverlayConfig::default();
+                                update_draft(new_settings);
+                            },
+                            i { class: "fa-solid fa-rotate-left" }
+                            span { " Reset Style" }
                         }
                     }
                 }
