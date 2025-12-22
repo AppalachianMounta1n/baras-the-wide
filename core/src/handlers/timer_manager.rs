@@ -31,6 +31,7 @@ impl SignalHandler for TimerManager {
                 ability_id,
                 source_id,
                 timestamp,
+                ..
             } => {
                 // TODO: Start timer if ability has an associated timer
                 let _ = (ability_id, source_id, timestamp);

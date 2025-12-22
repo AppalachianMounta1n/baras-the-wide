@@ -180,6 +180,86 @@ impl Default for OverlayPositionConfig {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Raid Overlay Settings
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Configuration for the raid frame overlay
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaidOverlaySettings {
+    /// Grid columns (1, 2, or 4 - max 4)
+    #[serde(default = "default_grid_columns")]
+    pub grid_columns: u8,
+
+    /// Grid rows (1, 2, 4, or 8 - max 8)
+    #[serde(default = "default_grid_rows")]
+    pub grid_rows: u8,
+
+    /// Maximum effects shown per player frame
+    #[serde(default = "default_max_effects")]
+    pub max_effects_per_frame: u8,
+
+    /// Size of effect indicators in pixels (8-24)
+    #[serde(default = "default_effect_size")]
+    pub effect_size: f32,
+
+    /// Vertical offset for effect indicators
+    #[serde(default = "default_effect_offset")]
+    pub effect_vertical_offset: f32,
+
+    /// Frame background color [r, g, b, a]
+    #[serde(default = "default_frame_bg")]
+    pub frame_bg_color: Color,
+
+    /// Show role icons on frames
+    #[serde(default = "default_true")]
+    pub show_role_icons: bool,
+
+    /// Effect indicator fill opacity (0-255)
+    #[serde(default = "default_effect_fill_opacity")]
+    pub effect_fill_opacity: u8,
+}
+
+fn default_grid_columns() -> u8 { 2 }
+fn default_grid_rows() -> u8 { 4 }
+fn default_max_effects() -> u8 { 4 }
+fn default_effect_size() -> f32 { 14.0 }
+fn default_effect_offset() -> f32 { 3.0 }
+fn default_frame_bg() -> Color { [40, 40, 40, 200] }
+fn default_effect_fill_opacity() -> u8 { 255 }
+
+impl Default for RaidOverlaySettings {
+    fn default() -> Self {
+        Self {
+            grid_columns: default_grid_columns(),
+            grid_rows: default_grid_rows(),
+            max_effects_per_frame: default_max_effects(),
+            effect_size: default_effect_size(),
+            effect_vertical_offset: default_effect_offset(),
+            frame_bg_color: default_frame_bg(),
+            show_role_icons: true,
+            effect_fill_opacity: default_effect_fill_opacity(),
+        }
+    }
+}
+
+impl RaidOverlaySettings {
+    /// Validate that grid dimensions result in 4, 8, or 16 total slots
+    pub fn is_valid_grid(&self) -> bool {
+        let total = self.grid_columns as u16 * self.grid_rows as u16;
+        matches!(total, 4 | 8 | 16)
+    }
+
+    /// Get total number of slots
+    pub fn total_slots(&self) -> u8 {
+        self.grid_columns * self.grid_rows
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Overlay Settings (combined)
+// ─────────────────────────────────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OverlaySettings {
     /// Position configs keyed by overlay type name (e.g., "dps", "hps", "tps")
@@ -215,14 +295,31 @@ pub struct OverlaySettings {
     #[serde(default)]
     pub class_icons_enabled: bool,
 
+    /// Lag compensation offset in milliseconds for effect countdowns.
+    /// Adjusts for log I/O and processing latency.
+    /// Positive = countdown ends earlier, Negative = countdown ends later.
+    #[serde(default = "default_lag_offset")]
+    pub effect_lag_offset_ms: i32,
+
     /// Default appearance configs per overlay type (not persisted, populated by backend)
     /// Used by frontend for "Reset to Default" functionality
     #[serde(default, skip_deserializing)]
     pub default_appearances: HashMap<String, OverlayAppearanceConfig>,
+
+    // --- Raid overlay ---
+
+    /// Raid frame overlay configuration
+    #[serde(default)]
+    pub raid_overlay: RaidOverlaySettings,
+
+    /// Background opacity for raid frame overlay (0-255)
+    #[serde(default = "default_opacity")]
+    pub raid_opacity: u8,
 }
 
 fn default_visible() -> bool { true }
 fn default_opacity() -> u8 { 180 }
+fn default_lag_offset() -> i32 { 750 }
 
 impl Default for OverlaySettings {
     fn default() -> Self {
@@ -235,7 +332,10 @@ impl Default for OverlaySettings {
             metric_opacity: default_opacity(),
             personal_opacity: default_opacity(),
             class_icons_enabled: false,
+            effect_lag_offset_ms: default_lag_offset(),
             default_appearances: HashMap::new(),
+            raid_overlay: RaidOverlaySettings::default(),
+            raid_opacity: default_opacity(),
         }
     }
 }

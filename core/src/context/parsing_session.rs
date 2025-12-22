@@ -1,11 +1,24 @@
-use crate::CombatEvent;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use chrono::NaiveDateTime;
+
 use crate::context::AppConfig;
 use crate::events::{EventProcessor, GameSignal, SignalHandler};
+use crate::handlers::EffectTracker;
 use crate::session::SessionCache;
-use chrono::NaiveDateTime;
-use std::path::{Path, PathBuf};
+use crate::tracking::DefinitionSet;
+use crate::CombatEvent;
 
-#[derive(Default)]
+/// A live parsing session that processes combat events and tracks game state.
+///
+/// The session maintains:
+/// - Event processing pipeline (encounters, metrics)
+/// - Effect tracking (HoTs, debuffs, shields for overlay display)
+/// - Signal handlers for cross-cutting concerns
+///
+/// Effect tracking is independent of encounter lifecycle - flushing encounters
+/// does not affect active effects. Effects represent current game state snapshot.
 pub struct ParsingSession {
     pub current_byte: Option<u64>,
     pub active_file: Option<PathBuf>,
@@ -13,11 +26,33 @@ pub struct ParsingSession {
     pub session_cache: Option<SessionCache>,
     processor: EventProcessor,
     signal_handlers: Vec<Box<dyn SignalHandler + Send + Sync>>,
+    /// Effect tracker for HoT/debuff/shield overlay display.
+    /// Wrapped in Arc<Mutex> for shared access between signal dispatch and overlay queries.
+    effect_tracker: Arc<Mutex<EffectTracker>>,
+}
+
+impl Default for ParsingSession {
+    fn default() -> Self {
+        Self {
+            current_byte: None,
+            active_file: None,
+            game_session_date: None,
+            session_cache: Some(SessionCache::new()),
+            processor: EventProcessor::new(),
+            signal_handlers: Vec::new(),
+            effect_tracker: Arc::new(Mutex::new(EffectTracker::default())),
+        }
+    }
 }
 
 impl ParsingSession {
-    pub fn new(path: PathBuf) -> Self {
+    /// Create a new parsing session for a log file.
+    ///
+    /// Effect tracking is always enabled. Pass a `DefinitionSet` to configure
+    /// which effects to track, or use `DefinitionSet::default()` for an empty set.
+    pub fn new(path: PathBuf, definitions: DefinitionSet) -> Self {
         let date_stamp = parse_log_timestamp(&path);
+
         Self {
             current_byte: None,
             active_file: Some(path),
@@ -25,6 +60,7 @@ impl ParsingSession {
             session_cache: Some(SessionCache::new()),
             processor: EventProcessor::new(),
             signal_handlers: Vec::new(),
+            effect_tracker: Arc::new(Mutex::new(EffectTracker::new(definitions))),
         }
     }
 
@@ -56,8 +92,54 @@ impl ParsingSession {
     }
 
     fn dispatch_signals(&mut self, signals: &[GameSignal]) {
+        // Forward to registered signal handlers
         for handler in &mut self.signal_handlers {
             handler.handle_signals(signals);
+        }
+
+        // Forward to effect tracker (kept separate for query access)
+        if let Ok(mut tracker) = self.effect_tracker.lock() {
+            tracker.handle_signals(signals);
+        }
+    }
+
+    /// Get a shared reference to the effect tracker for overlay queries.
+    ///
+    /// The returned Arc can be cloned and held by overlay code for periodic queries.
+    /// Lock the mutex to access `active_effects()` or `effects_for_target()`.
+    pub fn effect_tracker(&self) -> Arc<Mutex<EffectTracker>> {
+        Arc::clone(&self.effect_tracker)
+    }
+
+    /// Tick the effect tracker to update expiration state and remove stale effects.
+    ///
+    /// Call this periodically (e.g., at overlay refresh rate ~10fps) to ensure
+    /// duration-expired effects are cleaned up even without new events.
+    pub fn tick(&self) {
+        if let Ok(mut tracker) = self.effect_tracker.lock() {
+            tracker.tick();
+        }
+    }
+
+    /// Update effect definitions (e.g., after config reload).
+    pub fn set_definitions(&self, definitions: DefinitionSet) {
+        if let Ok(mut tracker) = self.effect_tracker.lock() {
+            tracker.set_definitions(definitions);
+        }
+    }
+
+    /// Enable/disable live mode for effect tracking.
+    /// Call with `true` after initial file load to start tracking effects.
+    pub fn set_effect_live_mode(&self, enabled: bool) {
+        eprintln!("[PARSING-SESSION] Setting effect live mode: {}", enabled);
+        match self.effect_tracker.lock() {
+            Ok(mut tracker) => {
+                tracker.set_live_mode(enabled);
+                eprintln!("[PARSING-SESSION] Effect live mode set successfully");
+            }
+            Err(e) => {
+                eprintln!("[PARSING-SESSION] ERROR: Failed to lock effect_tracker: {}", e);
+            }
         }
     }
 }

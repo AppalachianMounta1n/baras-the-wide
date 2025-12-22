@@ -36,15 +36,16 @@ pub use types::{OverlayType, MetricType};
 pub use state::{OverlayCommand, OverlayHandle, OverlayState, PositionEvent};
 
 // Spawn functions
-pub use spawn::{create_metric_overlay, create_personal_overlay};
+pub use spawn::{create_metric_overlay, create_personal_overlay, create_raid_overlay};
 
 // Metrics helpers
 pub use metrics::{create_all_entries, create_entries_for_type};
 
 // Tauri commands
 pub use commands::{
-    get_overlay_status, hide_all_overlays, hide_overlay, refresh_overlay_settings,
-    show_all_overlays, show_overlay, toggle_move_mode, OverlayStatusResponse,
+    clear_raid_registry, get_overlay_status, hide_all_overlays, hide_overlay,
+    refresh_overlay_settings, remove_raid_slot, show_all_overlays, show_overlay,
+    swap_raid_slots, toggle_move_mode, toggle_raid_rearrange, OverlayStatusResponse,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

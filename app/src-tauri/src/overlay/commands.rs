@@ -7,8 +7,10 @@ use baras_overlay::{OverlayConfigUpdate, OverlayData};
 use serde::Serialize;
 use tauri::State;
 
+use baras_overlay::{RaidGridLayout, RaidOverlayConfig};
+
 use super::metrics::create_entries_for_type;
-use super::spawn::{create_metric_overlay, create_personal_overlay};
+use super::spawn::{create_metric_overlay, create_personal_overlay, create_raid_overlay};
 use super::state::OverlayCommand;
 use super::types::{OverlayType, MetricType};
 use super::SharedOverlayState;
@@ -23,8 +25,11 @@ pub struct OverlayStatusResponse {
     pub enabled: Vec<MetricType>,
     pub personal_running: bool,
     pub personal_enabled: bool,
+    pub raid_running: bool,
+    pub raid_enabled: bool,
     pub overlays_visible: bool,
     pub move_mode: bool,
+    pub rearrange_mode: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -72,6 +77,13 @@ pub async fn show_overlay(
             let personal_config = config.overlay_settings.personal_overlay.clone();
             create_personal_overlay(position, personal_config, config.overlay_settings.personal_opacity)?
         }
+        OverlayType::Raid => {
+            // Load layout and config from saved settings
+            let raid_settings = &config.overlay_settings.raid_overlay;
+            let layout = RaidGridLayout::from_config(raid_settings);
+            let raid_config: RaidOverlayConfig = raid_settings.clone().into();
+            create_raid_overlay(position, layout, raid_config, config.overlay_settings.raid_opacity)?
+        }
     };
     let tx = overlay_handle.tx.clone();
 
@@ -103,6 +115,9 @@ pub async fn show_overlay(
                 if let Some(stats) = data.to_personal_stats() {
                     let _ = tx.send(OverlayCommand::UpdateData(OverlayData::Personal(stats))).await;
                 }
+            }
+            OverlayType::Raid => {
+                // Raid overlay gets data via EffectsUpdated channel, starts empty
             }
         }
     }
@@ -153,6 +168,10 @@ pub async fn hide_overlay(
     // Shutdown overlay if running
     let overlay_handle = {
         let mut state = state.lock().map_err(|e| e.to_string())?;
+        // If hiding raid overlay, clear rearrange mode
+        if matches!(kind, OverlayType::Raid) {
+            state.rearrange_mode = false;
+        }
         state.remove(kind)
     };
 
@@ -252,6 +271,34 @@ pub async fn show_all_overlays(
                     needs_monitor_save.push(("personal".to_string(), tx));
                 }
             }
+        } else if key == "raid" {
+            // Handle raid overlay
+            let kind = OverlayType::Raid;
+            let already_running = {
+                let state = state.lock().map_err(|e| e.to_string())?;
+                state.is_running(kind)
+            };
+
+            if !already_running {
+                let position = config.overlay_settings.get_position("raid");
+                let needs_save = position.monitor_id.is_none();
+                let raid_settings = &config.overlay_settings.raid_overlay;
+                let layout = RaidGridLayout::from_config(raid_settings);
+                let raid_config: RaidOverlayConfig = raid_settings.clone().into();
+                let overlay_handle = create_raid_overlay(position, layout, raid_config, config.overlay_settings.raid_opacity)?;
+                let tx = overlay_handle.tx.clone();
+
+                {
+                    let mut state = state.lock().map_err(|e| e.to_string())?;
+                    state.insert(overlay_handle);
+                }
+
+                // Raid overlay gets data via EffectsUpdated channel, starts empty
+
+                if needs_save {
+                    needs_monitor_save.push(("raid".to_string(), tx));
+                }
+            }
         } else if let Some(overlay_type) = MetricType::from_config_key(key) {
             // Handle metric overlay
             let kind = OverlayType::Metric(overlay_type);
@@ -333,17 +380,29 @@ pub async fn toggle_move_mode(
     state: State<'_, SharedOverlayState>,
     service: State<'_, crate::service::ServiceHandle>,
 ) -> Result<bool, String> {
-    let (txs, new_mode) = {
+    let (txs, new_mode, raid_tx, was_rearranging) = {
         let mut state = state.lock().map_err(|e| e.to_string())?;
         if !state.any_running() {
             return Err("No overlays running".to_string());
         }
         state.move_mode = !state.move_mode;
+        let was_rearranging = state.rearrange_mode;
+        // Move mode overrides rearrange mode
+        if state.move_mode {
+            state.rearrange_mode = false;
+        }
         let txs: Vec<_> = state.all_txs().into_iter().cloned().collect();
-        (txs, state.move_mode)
+        let raid_tx = state.get_raid_tx().cloned();
+        (txs, state.move_mode, raid_tx, was_rearranging)
     };
 
-    // Send to all overlays (both metric and personal use the same command now)
+    // If we were in rearrange mode, turn it off first
+    if was_rearranging && new_mode
+        && let Some(tx) = &raid_tx {
+            let _ = tx.send(OverlayCommand::SetRearrangeMode(false)).await;
+    }
+
+    // Send to all overlays
     for tx in &txs {
         let _ = tx.send(OverlayCommand::SetMoveMode(new_mode)).await;
     }
@@ -384,16 +443,40 @@ pub async fn toggle_move_mode(
 }
 
 #[tauri::command]
+pub async fn toggle_raid_rearrange(
+    state: State<'_, SharedOverlayState>,
+) -> Result<bool, String> {
+    let (raid_tx, new_mode) = {
+        let mut state = state.lock().map_err(|e| e.to_string())?;
+        if !state.is_raid_running() {
+            return Err("Raid overlay not running".to_string());
+        }
+        state.rearrange_mode = !state.rearrange_mode;
+        let tx = state.get_raid_tx().cloned();
+        (tx, state.rearrange_mode)
+    };
+
+    // Send to raid overlay only
+    if let Some(tx) = raid_tx {
+        let _ = tx.send(OverlayCommand::SetRearrangeMode(new_mode)).await;
+    }
+
+    Ok(new_mode)
+}
+
+#[tauri::command]
 pub async fn get_overlay_status(
     state: State<'_, SharedOverlayState>,
     service: State<'_, crate::service::ServiceHandle>,
 ) -> Result<OverlayStatusResponse, String> {
-    let (running_metric_types, personal_running, move_mode) = {
+    let (running_metric_types, personal_running, raid_running, move_mode, rearrange_mode) = {
         let state = state.lock().map_err(|e| e.to_string())?;
         (
             state.running_metric_types(),
             state.is_personal_running(),
+            state.is_raid_running(),
             state.move_mode,
+            state.rearrange_mode,
         )
     };
 
@@ -407,14 +490,18 @@ pub async fn get_overlay_status(
         .collect();
 
     let personal_enabled = config.overlay_settings.is_enabled("personal");
+    let raid_enabled = config.overlay_settings.is_enabled("raid");
 
     Ok(OverlayStatusResponse {
         running: running_metric_types,
         enabled,
         personal_running,
         personal_enabled,
+        raid_running,
+        raid_enabled,
         overlays_visible: config.overlay_settings.overlays_visible,
         move_mode,
+        rearrange_mode,
     })
 }
 
@@ -452,9 +539,55 @@ pub async fn refresh_overlay_settings(
                 let personal_config = config.overlay_settings.personal_overlay.clone();
                 OverlayConfigUpdate::Personal(personal_config, personal_opacity)
             }
+            OverlayType::Raid => {
+                // Load raid config from settings
+                let raid_settings = &config.overlay_settings.raid_overlay;
+                let raid_config: RaidOverlayConfig = raid_settings.clone().into();
+                eprintln!("[REFRESH] Updating raid overlay: max_effects={}, effect_size={:.0}, show_role_icons={}, opacity={}",
+                    raid_config.max_effects_per_frame, raid_config.effect_size,
+                    raid_config.show_role_icons, config.overlay_settings.raid_opacity);
+                OverlayConfigUpdate::Raid(raid_config, config.overlay_settings.raid_opacity)
+            }
         };
         let _ = tx.send(OverlayCommand::UpdateConfig(config_update)).await;
     }
 
     Ok(true)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Raid Registry Commands
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Clear all players from the raid frame registry
+#[tauri::command]
+pub async fn clear_raid_registry(
+    service: State<'_, crate::service::ServiceHandle>,
+) -> Result<(), String> {
+    let mut registry = service.shared.raid_registry.lock().map_err(|e| e.to_string())?;
+    registry.clear();
+    Ok(())
+}
+
+/// Swap two slots in the raid frame registry
+#[tauri::command]
+pub async fn swap_raid_slots(
+    slot_a: u8,
+    slot_b: u8,
+    service: State<'_, crate::service::ServiceHandle>,
+) -> Result<(), String> {
+    let mut registry = service.shared.raid_registry.lock().map_err(|e| e.to_string())?;
+    registry.swap_slots(slot_a, slot_b);
+    Ok(())
+}
+
+/// Remove a player from a specific slot
+#[tauri::command]
+pub async fn remove_raid_slot(
+    slot: u8,
+    service: State<'_, crate::service::ServiceHandle>,
+) -> Result<(), String> {
+    let mut registry = service.shared.raid_registry.lock().map_err(|e| e.to_string())?;
+    registry.remove_slot(slot);
+    Ok(())
 }

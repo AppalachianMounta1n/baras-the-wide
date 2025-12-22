@@ -157,7 +157,7 @@ impl EventProcessor {
             .map(|e| e.state.clone())
             .unwrap_or_default();
 
-        // Handle effect application/removal (doesn't change combat state)
+        // Handle effect application/removal/charges (doesn't change combat state)
         match event.effect.type_id {
             effect_type_id::APPLYEFFECT => {
                 if event.target_entity.entity_type == EntityType::Empty {
@@ -166,11 +166,20 @@ impl EventProcessor {
                 if let Some(enc) = cache.current_encounter_mut() {
                     enc.apply_effect(&event);
                 }
+                let charges = if event.details.charges > 0 {
+                    Some(event.details.charges as u8)
+                } else {
+                    None
+                };
                 signals.push(GameSignal::EffectApplied {
                     effect_id: event.effect.effect_id,
+                    action_id: event.action.action_id,
                     source_id: event.source_entity.log_id,
                     target_id: event.target_entity.log_id,
+                    target_name: event.target_entity.name,
+                    target_entity_type: event.target_entity.entity_type.clone(),
                     timestamp: event.timestamp,
+                    charges,
                 });
             }
             effect_type_id::REMOVEEFFECT => {
@@ -187,6 +196,18 @@ impl EventProcessor {
                     timestamp: event.timestamp,
                 });
             }
+            effect_type_id::MODIFYCHARGES => {
+                if event.target_entity.entity_type == EntityType::Empty {
+                    return signals;
+                }
+                signals.push(GameSignal::EffectChargesChanged {
+                    effect_id: event.effect.effect_id,
+                    action_id: event.action.action_id,
+                    target_id: event.target_entity.log_id,
+                    timestamp: event.timestamp,
+                    charges: event.details.charges as u8,
+                });
+            }
             _ => {}
         }
 
@@ -194,6 +215,25 @@ impl EventProcessor {
         if effect_id == effect_id::ABILITYACTIVATE {
             signals.push(GameSignal::AbilityActivated {
                 ability_id: event.action.action_id,
+                source_id: event.source_entity.log_id,
+                target_id: event.target_entity.log_id,
+                target_name: event.target_entity.name,
+                target_entity_type: event.target_entity.entity_type.clone(),
+                timestamp: event.timestamp,
+            });
+        }
+
+        // Emit target change signals
+        if effect_id == effect_id::TARGETSET {
+            signals.push(GameSignal::TargetChanged {
+                source_id: event.source_entity.log_id,
+                target_id: event.target_entity.log_id,
+                target_name: event.target_entity.name,
+                target_entity_type: event.target_entity.entity_type.clone(),
+                timestamp: event.timestamp,
+            });
+        } else if effect_id == effect_id::TARGETCLEARED {
+            signals.push(GameSignal::TargetCleared {
                 source_id: event.source_entity.log_id,
                 timestamp: event.timestamp,
             });

@@ -15,7 +15,10 @@ use std::thread::{self, JoinHandle};
 use tokio::sync::mpsc::{self, Sender};
 
 use baras_core::context::{OverlayAppearanceConfig, OverlayPositionConfig, PersonalOverlayConfig};
-use baras_overlay::{MetricOverlay, Overlay, OverlayConfig, PersonalOverlay};
+use baras_overlay::{
+    MetricOverlay, Overlay, OverlayConfig, PersonalOverlay,
+    RaidGridLayout, RaidOverlay, RaidOverlayConfig, RaidRegistryAction,
+};
 
 use super::state::{OverlayCommand, OverlayHandle, PositionEvent};
 use super::types::{OverlayType, MetricType};
@@ -37,9 +40,11 @@ use super::types::{OverlayType, MetricType};
 /// - Window event polling
 /// - Render scheduling based on interaction state
 /// - Resize corner state tracking
+/// - Registry action forwarding (for raid overlay)
 pub fn spawn_overlay_with_factory<O, F>(
     create_overlay: F,
     kind: OverlayType,
+    registry_action_tx: Option<std::sync::mpsc::Sender<RaidRegistryAction>>,
 ) -> Result<(Sender<OverlayCommand>, JoinHandle<()>), String>
 where
     O: Overlay,
@@ -83,7 +88,12 @@ where
                 match cmd {
                     OverlayCommand::SetMoveMode(enabled) => {
                         eprintln!("[OVERLAY-LOOP] {:?}: Received SetMoveMode({})", kind_name, enabled);
-                        overlay.set_click_through(!enabled);
+                        overlay.set_move_mode(enabled);
+                        needs_render = true;
+                    }
+                    OverlayCommand::SetRearrangeMode(enabled) => {
+                        eprintln!("[OVERLAY-LOOP] {:?}: Received SetRearrangeMode({})", kind_name, enabled);
+                        overlay.set_rearrange_mode(enabled);
                         needs_render = true;
                     }
                     OverlayCommand::UpdateData(data) => {
@@ -126,6 +136,15 @@ where
             if !overlay.poll_events() {
                 eprintln!("[OVERLAY-LOOP] {:?}: poll_events() returned false after {} iterations - EXITING", kind_name, loop_count);
                 break;
+            }
+
+            // Forward any pending registry actions to the service
+            if let Some(ref tx) = registry_action_tx {
+                for action in overlay.take_pending_registry_actions() {
+                    if tx.send(action).is_err() {
+                        eprintln!("[OVERLAY-LOOP] {:?}: Failed to send registry action", kind_name);
+                    }
+                }
             }
 
             // Check for pending resize
@@ -210,9 +229,9 @@ pub fn create_metric_overlay(
             .map_err(|e| format!("Failed to create {} overlay: {}", title, e))
     };
 
-    let (tx, handle) = spawn_overlay_with_factory(factory, kind)?;
+    let (tx, handle) = spawn_overlay_with_factory(factory, kind, None)?;
 
-    Ok(OverlayHandle { tx, handle, kind })
+    Ok(OverlayHandle { tx, handle, kind, registry_action_rx: None })
 }
 
 /// Create and spawn the personal overlay
@@ -247,7 +266,42 @@ pub fn create_personal_overlay(
             .map_err(|e| format!("Failed to create personal overlay: {}", e))
     };
 
-    let (tx, handle) = spawn_overlay_with_factory(factory, kind)?;
+    let (tx, handle) = spawn_overlay_with_factory(factory, kind, None)?;
 
-    Ok(OverlayHandle { tx, handle, kind })
+    Ok(OverlayHandle { tx, handle, kind, registry_action_rx: None })
+}
+
+/// Create and spawn the raid frames overlay (starts with empty frames)
+///
+/// Returns an OverlayHandle with a registry_action_rx receiver for processing
+/// swap/clear actions from the overlay.
+pub fn create_raid_overlay(
+    position: OverlayPositionConfig,
+    layout: RaidGridLayout,
+    raid_config: RaidOverlayConfig,
+    background_alpha: u8,
+) -> Result<OverlayHandle, String> {
+    let config = OverlayConfig {
+        x: position.x,
+        y: position.y,
+        width: position.width,
+        height: position.height,
+        namespace: "baras-raid".to_string(),
+        click_through: true,
+        target_monitor_id: position.monitor_id.clone(),
+    };
+
+    let kind = OverlayType::Raid;
+
+    // Create channel for registry actions (overlay → service)
+    let (registry_tx, registry_rx) = std::sync::mpsc::channel::<RaidRegistryAction>();
+
+    let factory = move || {
+        RaidOverlay::new(config, layout, raid_config, background_alpha)
+            .map_err(|e| format!("Failed to create raid overlay: {}", e))
+    };
+
+    let (tx, handle) = spawn_overlay_with_factory(factory, kind, Some(registry_tx))?;
+
+    Ok(OverlayHandle { tx, handle, kind, registry_action_rx: Some(registry_rx) })
 }

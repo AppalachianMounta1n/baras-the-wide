@@ -1,3 +1,4 @@
+use crate::context::IStr;
 use crate::log::EntityType;
 use chrono::NaiveDateTime;
 
@@ -31,9 +32,15 @@ pub enum GameSignal {
     // Effect tracking
     EffectApplied {
         effect_id: i64,
+        /// The ability/action that caused this effect
+        action_id: i64,
         source_id: i64,
         target_id: i64,
+        target_name: IStr,
+        target_entity_type: EntityType,
         timestamp: NaiveDateTime,
+        /// Initial charges (if applicable, from log)
+        charges: Option<u8>,
     },
     EffectRemoved {
         effect_id: i64,
@@ -41,10 +48,38 @@ pub enum GameSignal {
         target_id: i64,
         timestamp: NaiveDateTime,
     },
+    /// Effect charges/stacks changed (ModifyCharges event)
+    EffectChargesChanged {
+        effect_id: i64,
+        /// The ability/action that caused this charge change
+        action_id: i64,
+        target_id: i64,
+        timestamp: NaiveDateTime,
+        /// New charge count
+        charges: u8,
+    },
 
-    // Ability activation (for timer triggers)
+    // Ability activation (for timer triggers and raid frame registration)
     AbilityActivated {
         ability_id: i64,
+        source_id: i64,
+        target_id: i64,
+        target_name: IStr,
+        target_entity_type: EntityType,
+        timestamp: NaiveDateTime,
+    },
+
+    /// Entity changed their target (TARGETSET effect)
+    TargetChanged {
+        source_id: i64,
+        target_id: i64,
+        target_name: IStr,
+        target_entity_type: EntityType,
+        timestamp: NaiveDateTime,
+    },
+
+    /// Entity cleared their target (TARGETCLEARED effect)
+    TargetCleared {
         source_id: i64,
         timestamp: NaiveDateTime,
     },

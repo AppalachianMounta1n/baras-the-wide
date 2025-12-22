@@ -1,4 +1,5 @@
 use baras_core::context::{AppConfig, BackgroundTasks, DirectoryIndex, ParsingSession};
+use baras_core::DefinitionSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -37,7 +38,7 @@ impl CliContext {
     /// Start a new parsing session for the given file path.
     /// Returns the session handle to pass to file_handler.
     pub async fn start_session(&self, path: PathBuf) -> SessionHandle {
-        let session = ParsingSession::new(path);
+        let session = ParsingSession::new(path, DefinitionSet::default());
         let handle = Arc::new(RwLock::new(session));
         *self.session.write().await = Some(Arc::clone(&handle));
         handle

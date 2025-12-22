@@ -23,6 +23,20 @@ pub use raid::{
     EFFECT_SIZE_DEFAULT, EFFECT_SIZE_MAX, EFFECT_SIZE_MIN,
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Registry Action (for raid overlay → service communication)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Actions that the raid overlay wants to perform on the registry.
+/// These are collected by the overlay and polled by the spawn loop.
+#[derive(Debug, Clone)]
+pub enum RaidRegistryAction {
+    /// Swap two slots
+    SwapSlots(u8, u8),
+    /// Clear a specific slot
+    ClearSlot(u8),
+}
+
 use crate::frame::OverlayFrame;
 use baras_core::context::{OverlayAppearanceConfig, PersonalOverlayConfig};
 
@@ -124,6 +138,12 @@ pub trait Overlay: 'static {
         self.frame_mut().set_click_through(enabled);
     }
 
+    /// Set move mode (global overlay repositioning mode)
+    /// Default implementation just toggles click-through. Override for custom behavior.
+    fn set_move_mode(&mut self, enabled: bool) {
+        self.set_click_through(!enabled);
+    }
+
     /// Check if the overlay is in interactive mode (not click-through)
     fn is_interactive(&self) -> bool {
         self.frame().is_interactive()
@@ -137,5 +157,18 @@ pub trait Overlay: 'static {
     /// Check if currently resizing
     fn is_resizing(&self) -> bool {
         self.frame().is_resizing()
+    }
+
+    /// Set rearrange mode (raid overlay only - click-to-swap frames)
+    /// Default implementation does nothing. Override in RaidOverlay.
+    fn set_rearrange_mode(&mut self, _enabled: bool) {
+        // Default: no-op for non-raid overlays
+    }
+
+    /// Take any pending registry actions (raid overlay only).
+    /// Returns actions that need to be sent to the service for registry updates.
+    /// Default implementation returns empty vec.
+    fn take_pending_registry_actions(&mut self) -> Vec<RaidRegistryAction> {
+        Vec::new()
     }
 }

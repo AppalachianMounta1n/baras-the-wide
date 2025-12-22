@@ -7,6 +7,7 @@ mod parsing_session;
 pub use app_config::{
     AppConfig, OverlayPositionConfig, OverlaySettings,
     OverlayAppearanceConfig, PersonalOverlayConfig, PersonalStat, Color,
+    RaidOverlaySettings,
 };
 pub use background_tasks::BackgroundTasks;
 pub use directory_index::DirectoryIndex;

@@ -148,6 +148,31 @@ impl ServiceHandle {
     pub async fn current_combat_data(&self) -> Option<CombatData> {
         super::calculate_combat_data(&self.shared).await
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Raid Registry Operations
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Swap two slots in the raid registry
+    pub async fn swap_raid_slots(&self, slot_a: u8, slot_b: u8) {
+        if let Ok(mut registry) = self.shared.raid_registry.lock() {
+            registry.swap_slots(slot_a, slot_b);
+        }
+    }
+
+    /// Remove a slot from the raid registry
+    pub async fn remove_raid_slot(&self, slot: u8) {
+        if let Ok(mut registry) = self.shared.raid_registry.lock() {
+            registry.remove_slot(slot);
+        }
+    }
+
+    /// Clear all raid registry slots
+    pub async fn clear_raid_registry(&self) {
+        if let Ok(mut registry) = self.shared.raid_registry.lock() {
+            registry.clear();
+        }
+    }
 }
 
 

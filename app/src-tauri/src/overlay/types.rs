@@ -127,6 +127,8 @@ pub enum OverlayType {
     Metric(MetricType),
     /// The personal stats overlay
     Personal,
+    /// The raid frames overlay (shows effects/HoTs on group members)
+    Raid,
 }
 
 impl OverlayType {
@@ -135,6 +137,7 @@ impl OverlayType {
         match self {
             OverlayType::Metric(ot) => ot.config_key(),
             OverlayType::Personal => "personal",
+            OverlayType::Raid => "raid",
         }
     }
 
@@ -143,6 +146,7 @@ impl OverlayType {
         match self {
             OverlayType::Metric(ot) => ot.namespace().to_string(),
             OverlayType::Personal => "baras-personal".to_string(),
+            OverlayType::Raid => "baras-raid".to_string(),
         }
     }
 
@@ -151,6 +155,7 @@ impl OverlayType {
         match self {
             OverlayType::Metric(ot) => ot.default_position(),
             OverlayType::Personal => (350, 510),
+            OverlayType::Raid => (650, 50),
         }
     }
 }

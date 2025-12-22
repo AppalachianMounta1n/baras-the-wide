@@ -16,8 +16,10 @@ use super::types::{OverlayType, MetricType};
 
 /// Commands sent to overlay threads
 pub enum OverlayCommand {
-    /// Toggle move/resize mode
+    /// Toggle move/resize mode (global, all overlays)
     SetMoveMode(bool),
+    /// Toggle rearrange mode (raid overlay only - click-to-swap frames)
+    SetRearrangeMode(bool),
     /// Update overlay data (metrics or personal stats)
     UpdateData(OverlayData),
     /// Update overlay configuration
@@ -55,6 +57,9 @@ pub struct OverlayHandle {
     pub tx: Sender<OverlayCommand>,
     pub handle: JoinHandle<()>,
     pub kind: OverlayType,
+    /// Optional receiver for registry actions from the raid overlay
+    /// Uses RaidRegistryAction from baras_overlay crate
+    pub registry_action_rx: Option<std::sync::mpsc::Receiver<baras_overlay::RaidRegistryAction>>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -64,9 +69,11 @@ pub struct OverlayHandle {
 /// State managing all overlay threads
 pub struct OverlayState {
     /// All running overlays, keyed by their kind
-    overlays: HashMap<OverlayType, OverlayHandle>,
+    pub overlays: HashMap<OverlayType, OverlayHandle>,
     /// Global move mode state
     pub move_mode: bool,
+    /// Raid rearrange mode state (click-to-swap frames)
+    pub rearrange_mode: bool,
 }
 
 impl Default for OverlayState {
@@ -74,6 +81,7 @@ impl Default for OverlayState {
         Self {
             overlays: HashMap::new(),
             move_mode: false,
+            rearrange_mode: false,
         }
     }
 }
@@ -123,6 +131,16 @@ impl OverlayState {
         self.get_tx(OverlayType::Personal)
     }
 
+    /// Get the channel for raid overlay (convenience)
+    pub fn get_raid_tx(&self) -> Option<&Sender<OverlayCommand>> {
+        self.get_tx(OverlayType::Raid)
+    }
+
+    /// Check if raid overlay is running
+    pub fn is_raid_running(&self) -> bool {
+        self.overlays.contains_key(&OverlayType::Raid)
+    }
+
     /// Get all channels
     pub fn all_txs(&self) -> Vec<&Sender<OverlayCommand>> {
         self.overlays.values().map(|h| &h.tx).collect()
@@ -134,7 +152,7 @@ impl OverlayState {
             .keys()
             .filter_map(|k| match k {
                 OverlayType::Metric(ot) => Some(*ot),
-                OverlayType::Personal => None,
+                OverlayType::Personal | OverlayType::Raid => None,
             })
             .collect()
     }

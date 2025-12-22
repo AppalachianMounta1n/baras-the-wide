@@ -4,8 +4,9 @@ pub mod utils;
 pub mod bridge;
 use overlay::{
     OverlayState, SharedOverlayState, MetricType, OverlayType, OverlayCommand,
-    create_metric_overlay, create_personal_overlay,
+    create_metric_overlay, create_personal_overlay, create_raid_overlay,
 };
+use baras_overlay::{RaidGridLayout, RaidOverlayConfig};
 use baras_overlay::OverlayData;
 use bridge::spawn_overlay_bridge;
 use service::{CombatService, OverlayUpdate, ServiceHandle};
@@ -76,6 +77,33 @@ fn spawn_auto_show_overlays(
                             eprintln!("Auto-showed personal overlay on startup");
                         }
                         Err(e) => eprintln!("Failed to auto-show personal overlay: {}", e),
+                    }
+                }
+            } else if key == "raid" {
+                // Handle raid overlay
+                let kind = OverlayType::Raid;
+                let already_running = {
+                    match overlay_state.lock() {
+                        Ok(s) => s.is_running(kind),
+                        Err(_) => continue,
+                    }
+                };
+
+                if !already_running {
+                    let position = config.overlay_settings.get_position("raid");
+                    let raid_settings = &config.overlay_settings.raid_overlay;
+                    let layout = RaidGridLayout::from_config(raid_settings);
+                    let raid_config: RaidOverlayConfig = raid_settings.clone().into();
+                    let raid_opacity = config.overlay_settings.raid_opacity;
+
+                    match create_raid_overlay(position, layout, raid_config, raid_opacity) {
+                        Ok(overlay_handle) => {
+                            if let Ok(mut state) = overlay_state.lock() {
+                                state.insert(overlay_handle);
+                            }
+                            eprintln!("Auto-showed raid overlay on startup");
+                        }
+                        Err(e) => eprintln!("Failed to auto-show raid overlay: {}", e),
                     }
                 }
             } else if let Some(overlay_type) = MetricType::from_config_key(key) {
@@ -150,8 +178,8 @@ pub fn run() {
                 // Store the service handle for commands
                 app.handle().manage(handle.clone());
 
-                // Spawn the overlay update bridge
-                spawn_overlay_bridge(overlay_rx, overlay_state.clone());
+                // Spawn the overlay update bridge (needs service handle for registry updates)
+                spawn_overlay_bridge(overlay_rx, overlay_state.clone(), handle.clone());
 
                 // Auto-show enabled overlays on startup
                 spawn_auto_show_overlays(overlay_state.clone(), handle);
@@ -167,8 +195,12 @@ pub fn run() {
             overlay::commands::hide_all_overlays,
             overlay::commands::show_all_overlays,
             overlay::commands::toggle_move_mode,
+            overlay::commands::toggle_raid_rearrange,
             overlay::commands::get_overlay_status,
             overlay::commands::refresh_overlay_settings,
+            overlay::commands::clear_raid_registry,
+            overlay::commands::swap_raid_slots,
+            overlay::commands::remove_raid_slot,
             // Service commands
             service::get_log_files,
             service::start_tailing,

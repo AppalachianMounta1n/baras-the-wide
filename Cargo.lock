@@ -121,6 +121,7 @@ version = "0.1.0"
 dependencies = [
  "baras-core",
  "baras-overlay",
+ "chrono",
  "dirs",
  "home",
  "serde",
@@ -462,6 +463,7 @@ dependencies = [
  "rayon",
  "serde",
  "tokio",
+ "toml 0.8.2",
 ]
 
 [[package]]

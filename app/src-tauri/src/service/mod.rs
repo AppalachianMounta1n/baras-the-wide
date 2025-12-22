@@ -14,14 +14,15 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use baras_core::directory_watcher;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, RwLock};
 
 use baras_core::context::{resolve, AppConfig, DirectoryIndex, ParsingSession};
-use baras_core::{EntityType, GameSignal, Reader, SignalHandler};
 use baras_core::encounter::EncounterState;
 use baras_core::directory_watcher::DirectoryWatcher;
-use baras_overlay::PersonalStats;
+use baras_core::tracking::EffectCategory;
+use baras_core::{load_definitions, ActiveEffect, DefinitionSet, EntityType, GameSignal, Reader, SignalHandler};
+use baras_overlay::{PersonalStats, PlayerRole, RaidEffect, RaidFrame, RaidFrameData};
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,8 +46,10 @@ pub enum ServiceCommand {
 pub enum OverlayUpdate {
     CombatStarted,
     CombatEnded,
-    /// Unified combat data for both metric and personal overlays
+    /// Combat metrics for metric and personal overlays
     DataUpdated(CombatData),
+    /// Effect data for raid frame overlay (HoTs, debuffs, etc.)
+    EffectsUpdated(RaidFrameData),
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -103,6 +106,9 @@ pub struct CombatService {
     tail_handle: Option<tokio::task::JoinHandle<()>>,
     directory_handle: Option<tokio::task::JoinHandle<()>>,
     metrics_handle: Option<tokio::task::JoinHandle<()>>,
+    effects_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Effect/timer definitions loaded at startup for overlay tracking
+    definitions: DefinitionSet,
 }
 
 impl CombatService {
@@ -113,6 +119,9 @@ impl CombatService {
         let config = AppConfig::load();
         let directory_index = DirectoryIndex::build_index(&PathBuf::from(&config.log_directory))
             .unwrap_or_default();
+
+        // Load effect/timer definitions from builtin and user directories
+        let definitions = Self::load_effect_definitions(&app_handle);
 
         let shared = Arc::new(SharedState::new(config, directory_index));
 
@@ -125,11 +134,56 @@ impl CombatService {
             tail_handle: None,
             directory_handle: None,
             metrics_handle: None,
+            effects_handle: None,
+            definitions,
         };
 
         let handle = ServiceHandle { cmd_tx, shared };
 
         (service, handle)
+    }
+
+    /// Load effect definitions from builtin and user config directories
+    fn load_effect_definitions(app_handle: &AppHandle) -> DefinitionSet {
+        // Builtin definitions: bundled with the app in resources
+        // Use resolve() with Resource base directory for proper dev/bundle handling
+        let builtin_dir = app_handle
+            .path()
+            .resolve("definitions/builtin", tauri::path::BaseDirectory::Resource)
+            .ok();
+
+        // Custom definitions: user's config directory
+        let custom_dir = dirs::config_dir().map(|p| p.join("baras").join("definitions"));
+
+        eprintln!("[DEFINITIONS] Looking for builtin definitions at: {:?}", builtin_dir);
+        eprintln!("[DEFINITIONS] Looking for custom definitions at: {:?}", custom_dir);
+
+        // Check if builtin path exists
+        if let Some(ref path) = builtin_dir {
+            eprintln!("[DEFINITIONS] Builtin path exists: {}", path.exists());
+            if path.exists() {
+                if let Ok(entries) = std::fs::read_dir(path) {
+                    let files: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+                    eprintln!("[DEFINITIONS] Builtin directory has {} entries", files.len());
+                }
+            }
+        }
+
+        match load_definitions(builtin_dir.as_deref(), custom_dir.as_deref()) {
+            Ok(defs) => {
+                let effect_count = defs.effects.len();
+                let timer_count = defs.timers.len();
+                eprintln!(
+                    "[DEFINITIONS] Loaded {} effect definitions, {} timer definitions",
+                    effect_count, timer_count
+                );
+                defs
+            }
+            Err(e) => {
+                eprintln!("[DEFINITIONS] Failed to load: {}", e);
+                DefinitionSet::default()
+            }
+        }
     }
 
     /// Run the service event loop
@@ -313,10 +367,15 @@ impl CombatService {
     async fn start_tailing(&mut self, path: PathBuf) {
         self.stop_tailing().await;
 
+        // Clear raid registry when switching files (new session = fresh state)
+        if let Ok(mut registry) = self.shared.raid_registry.lock() {
+            registry.clear();
+        }
+
         // Create trigger channel for signal-driven metrics updates
         let (trigger_tx, trigger_rx) = std::sync::mpsc::channel::<MetricsTrigger>();
 
-        let mut session = ParsingSession::new(path.clone());
+        let mut session = ParsingSession::new(path.clone(), self.definitions.clone());
 
         // Add signal handler that triggers metrics on combat state changes
         let handler = CombatSignalHandler::new(self.shared.clone(), trigger_tx.clone());
@@ -353,6 +412,14 @@ impl CombatService {
                 eprintln!("Error reading log file: {}", e);
             }
         }
+
+        // Enable live mode for effect tracking (skip historical effects)
+        eprintln!("[SERVICE] Enabling effect live mode after initial file read...");
+        {
+            let session_guard = session.read().await;
+            session_guard.set_effect_live_mode(true);
+        }
+        eprintln!("[SERVICE] Effect live mode enabled, starting tail task...");
 
         // Spawn the tail task to watch for new lines
         let tail_handle = tokio::spawn(async move {
@@ -406,15 +473,35 @@ impl CombatService {
             }
         });
 
+        // Spawn effects sampling task (polls continuously, not just in combat)
+        let shared = self.shared.clone();
+        let overlay_tx = self.overlay_tx.clone();
+        let effects_handle = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+                if let Some(data) = build_raid_frame_data(&shared).await {
+                    let _ = overlay_tx.try_send(OverlayUpdate::EffectsUpdated(data));
+                }
+            }
+        });
+
         self.tail_handle = Some(tail_handle);
         self.metrics_handle = Some(metrics_handle);
+        self.effects_handle = Some(effects_handle);
     }
 
     async fn stop_tailing(&mut self) {
         // Reset combat state
         self.shared.in_combat.store(false, Ordering::SeqCst);
 
-        // Cancel metrics task first
+        // Cancel effects task
+        if let Some(handle) = self.effects_handle.take() {
+            handle.abort();
+            let _ = handle.await;
+        }
+
+        // Cancel metrics task
         if let Some(handle) = self.metrics_handle.take() {
             handle.abort();
             let _ = handle.await;
@@ -505,6 +592,147 @@ async fn calculate_combat_data(shared: &Arc<SharedState>) -> Option<CombatData> 
     })
 }
 
+/// Build raid frame data from the effect tracker and registry
+///
+/// Uses RaidSlotRegistry to maintain stable player positions.
+/// Players are registered ONLY when the local player applies a NEW effect to them
+/// (via the new_targets queue), not on every tick.
+async fn build_raid_frame_data(shared: &Arc<SharedState>) -> Option<RaidFrameData> {
+    let session_guard = shared.session.read().await;
+    let session = session_guard.as_ref()?;
+    let session = session.read().await;
+
+    // Get lag offset from config
+    let lag_offset_ms = {
+        let config = shared.config.read().await;
+        config.overlay_settings.effect_lag_offset_ms
+    };
+
+    // Get effect tracker
+    let effect_tracker = session.effect_tracker();
+    let mut tracker = match effect_tracker.lock() {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("[RAID-DATA] Failed to lock effect tracker: {}", e);
+            return None;
+        }
+    };
+
+    // Get local player ID for is_self flag
+    let local_player_id = session.session_cache.as_ref()
+        .map(|c| c.player.id)
+        .unwrap_or(0);
+
+    // Lock registry
+    let mut registry = match shared.raid_registry.lock() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[RAID-DATA] Failed to lock registry: {}", e);
+            return None;
+        }
+    };
+
+    // Process new targets queue - these are entities that JUST received an effect from local player
+    // The registry handles duplicate rejection via try_register
+    for target in tracker.take_new_targets() {
+        let name = resolve(target.name).to_string();
+        registry.try_register(target.entity_id, name);
+    }
+
+    // Group effects by target for registered players only
+    let mut effects_by_target: std::collections::HashMap<i64, Vec<RaidEffect>> =
+        std::collections::HashMap::new();
+
+    for effect in tracker.active_effects() {
+        let target_id = effect.target_entity_id;
+
+        // Only group effects for already-registered players
+        if registry.is_registered(target_id) {
+            effects_by_target
+                .entry(target_id)
+                .or_default()
+                .push(convert_to_raid_effect(effect, lag_offset_ms));
+        }
+    }
+
+    // Build frames from registry (stable slot order)
+    let max_slots = registry.max_slots();
+    let mut frames = Vec::with_capacity(max_slots as usize);
+
+    for slot in 0..max_slots {
+        if let Some(player) = registry.get_player(slot) {
+            let effects = effects_by_target.remove(&player.entity_id).unwrap_or_default();
+            frames.push(RaidFrame {
+                slot,
+                player_id: Some(player.entity_id),
+                name: player.name.clone(),
+                hp_percent: 1.0,
+                role: PlayerRole::Dps, // TODO: map from discipline_id
+                effects,
+                is_self: player.entity_id == local_player_id,
+            });
+        }
+    }
+
+    // Log periodically
+    static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if count % 33 == 0 {
+        let total_effects: usize = frames.iter().map(|f| f.effects.len()).sum();
+        eprintln!("[RAID-DATA] Tick {}: {} players, {} effects", count, registry.len(), total_effects);
+    }
+
+    Some(RaidFrameData { frames })
+}
+
+/// Convert an ActiveEffect (core) to RaidEffect (overlay)
+///
+/// `lag_offset_ms` is a user-configurable offset that compensates for the delay
+/// between game events occurring and log lines being written/processed.
+/// Positive values make countdowns end earlier, negative values make them end later.
+fn convert_to_raid_effect(effect: &ActiveEffect, lag_offset_ms: i32) -> RaidEffect {
+    use chrono::Local;
+
+    // Determine if this is a buff based on category
+    let is_buff = matches!(
+        effect.category,
+        EffectCategory::Buff | EffectCategory::Hot | EffectCategory::Shield
+    );
+
+    let mut raid_effect = RaidEffect::new(effect.game_effect_id, effect.name.clone())
+        .with_charges(effect.stacks)
+        .with_color_rgba(effect.color)
+        .with_is_buff(is_buff);
+
+    // Calculate system expiry with lag compensation
+    if let Some(dur) = effect.duration {
+        // Calculate the lag that existed when we PROCESSED the event, not current lag.
+        // system_time_at_processing = now - time_since_we_processed
+        let time_since_processing = effect.applied_instant.elapsed();
+        let system_time_at_processing = Local::now().naive_local()
+            - chrono::Duration::milliseconds(time_since_processing.as_millis() as i64);
+
+        // Lag = system time at processing - game timestamp at processing
+        let lag_ms = system_time_at_processing
+            .signed_duration_since(effect.last_refreshed_at)
+            .num_milliseconds()
+            .max(0) as u64;
+
+        // Add user-configurable offset for render/processing overhead not captured in timestamps
+        let total_lag_ms = (lag_ms as i64 + lag_offset_ms as i64).max(0) as u64;
+        let total_lag = std::time::Duration::from_millis(total_lag_ms);
+
+        // Compensate: subtract lag from the calculated expiry
+        let compensated_expiry = effect.applied_instant + dur - total_lag.min(dur);
+
+        raid_effect = raid_effect
+            .with_duration(dur)
+            .with_expiry(compensated_expiry);
+    }
+
+    raid_effect
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // DTOs for Tauri IPC
 // ─────────────────────────────────────────────────────────────────────────────
@@ -550,7 +778,7 @@ pub struct PlayerMetrics {
     pub apm: f32,
 }
 
-/// Unified combat data for all overlays
+/// Unified combat data for metric overlays
 #[derive(Debug, Clone)]
 pub struct CombatData {
     /// Metrics for all players

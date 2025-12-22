@@ -6,7 +6,7 @@
 use std::time::Instant;
 use tiny_skia::Color;
 
-use super::{Overlay, OverlayConfigUpdate, OverlayData};
+use super::{Overlay, OverlayConfigUpdate, OverlayData, RaidRegistryAction};
 use crate::frame::OverlayFrame;
 use crate::platform::{OverlayConfig, PlatformError};
 use crate::renderer::colors;
@@ -116,6 +116,12 @@ impl RaidEffect {
 
     pub fn with_color(mut self, color: Color) -> Self {
         self.color = color;
+        self
+    }
+
+    /// Set color from RGBA u8 array (convenience for external code)
+    pub fn with_color_rgba(mut self, rgba: [u8; 4]) -> Self {
+        self.color = Color::from_rgba8(rgba[0], rgba[1], rgba[2], rgba[3]);
         self
     }
 
@@ -291,6 +297,14 @@ pub struct RaidGridLayout {
 }
 
 impl RaidGridLayout {
+    /// Create a layout from config-defined columns/rows
+    pub fn from_config(settings: &baras_core::context::RaidOverlaySettings) -> Self {
+        Self {
+            columns: settings.grid_columns.clamp(1, 4),
+            rows: settings.grid_rows.clamp(1, 8),
+        }
+    }
+
     /// Create a layout for the given player count
     pub fn for_player_count(count: u8) -> Self {
         match count {
@@ -378,6 +392,20 @@ impl RaidOverlayConfig {
     }
 }
 
+impl From<baras_core::context::RaidOverlaySettings> for RaidOverlayConfig {
+    fn from(settings: baras_core::context::RaidOverlaySettings) -> Self {
+        Self {
+            show_role_icons: settings.show_role_icons,
+            max_effects_per_frame: settings.max_effects_per_frame,
+            frame_bg_color: settings.frame_bg_color,
+            selection_color: [80, 120, 180, 220], // Keep hardcoded for now
+            effect_size: settings.effect_size,
+            effect_vertical_offset: settings.effect_vertical_offset,
+            effect_fill_opacity: settings.effect_fill_opacity,
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Raid Frame Data (for OverlayData enum)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -422,6 +450,8 @@ pub struct RaidOverlay {
     needs_render: bool,
     /// Last render timestamp for frame rate limiting
     last_render: Instant,
+    /// Pending registry actions to be sent to the service
+    pending_registry_actions: Vec<RaidRegistryAction>,
 }
 
 impl RaidOverlay {
@@ -449,6 +479,7 @@ impl RaidOverlay {
             overflow_count: 0,
             needs_render: true, // Initial render needed
             last_render: Instant::now() - RENDER_INTERVAL, // Allow immediate first render
+            pending_registry_actions: Vec::new(),
         })
     }
 
@@ -572,12 +603,28 @@ impl RaidOverlay {
     }
 
     /// Update frames from data
+    ///
+    /// Important: Incoming data only contains occupied slots.
+    /// We must clear all frames first, then apply incoming data,
+    /// otherwise cleared slots retain their old content.
     pub fn set_frames(&mut self, new_frames: Vec<RaidFrame>) {
+        // First, clear all frames to empty state
+        for frame in &mut self.frames {
+            frame.clear();
+        }
+
+        // Then apply incoming data (only occupied slots)
         for new_frame in new_frames {
             if let Some(existing) = self.frames.get_mut(new_frame.slot as usize) {
                 *existing = new_frame;
             }
         }
+
+        // Prune expired effects from all frames
+        for frame in &mut self.frames {
+            frame.prune_expired_effects();
+        }
+
         self.needs_render = true;
     }
 
@@ -599,17 +646,17 @@ impl RaidOverlay {
                 self.swap_state.cancel();
             }
             InteractionMode::Move => {
-                // Move mode: transparent container, dashed frame borders for alignment
+                // Move mode: semi-transparent container, dashed frame borders for alignment
                 self.frame.set_click_through(false);
                 self.frame.set_drag_enabled(true);
-                self.frame.set_background_alpha(0); // Transparent - dashed borders show alignment
+                self.frame.set_background_alpha(120); // Semi-transparent so overlay bounds are visible
                 self.swap_state.cancel();
             }
             InteractionMode::Rearrange => {
-                // Rearrange mode: visible, clicks go to overlay for swapping
+                // Rearrange mode: transparent container, clicks go to overlay for swapping
                 self.frame.set_click_through(false);
                 self.frame.set_drag_enabled(false);
-                self.frame.set_background_alpha(180); // Visible container
+                self.frame.set_background_alpha(0); // Fully transparent container
             }
         }
     }
@@ -687,29 +734,45 @@ impl RaidOverlay {
         let (x, y, w, h) = self.slot_bounds(raid_frame.slot);
         let corner_radius = (h * 0.1).clamp(2.0, 6.0);
 
-        // Move mode: transparent background with dashed border for alignment
-        // Normal mode: fully transparent (game UI visible behind)
-        if self.interaction_mode == InteractionMode::Move {
-            // Dashed border for alignment guides - no solid background
-            let guide_color = Color::from_rgba8(180, 180, 180, 200);
-            self.frame.stroke_rounded_rect_dashed(
-                x, y, w, h,
-                corner_radius,
-                1.5,        // stroke width
-                guide_color,
-                6.0,        // dash length
-                4.0,        // gap length
-            );
+        // Draw frame background/border based on interaction mode
+        match self.interaction_mode {
+            InteractionMode::Normal => {
+                // Normal mode: FULLY INVISIBLE frames
+                // Only effects are rendered (below), nothing else
+            }
+            InteractionMode::Move => {
+                // Move mode: transparent frames with dashed border for alignment
+                // (container background is set semi-transparent in set_interaction_mode)
+                let guide_color = Color::from_rgba8(180, 180, 180, 200);
+                self.frame.stroke_rounded_rect_dashed(
+                    x, y, w, h,
+                    corner_radius,
+                    1.5,        // stroke width
+                    guide_color,
+                    6.0,        // dash length
+                    4.0,        // gap length
+                );
+            }
+            InteractionMode::Rearrange => {
+                // Rearrange mode: nearly transparent frame backgrounds (90% transparent = 10% opacity)
+                let bg = Color::from_rgba8(
+                    self.config.frame_bg_color[0],
+                    self.config.frame_bg_color[1],
+                    self.config.frame_bg_color[2],
+                    25, // ~10% opacity (255 * 0.1)
+                );
+                self.frame.fill_rounded_rect(x, y, w, h, corner_radius, bg);
+            }
         }
 
-        // No self-highlight border - game already shows this information
-
-        if raid_frame.is_empty() {
+        // In move mode: render a placeholder effect on ALL frames so user can see positioning
+        if self.interaction_mode == InteractionMode::Move {
+            self.render_placeholder_effect(x, y);
             return;
         }
 
-        // Skip rendering effects/role icons in move mode - focus on alignment
-        if self.interaction_mode == InteractionMode::Move {
+        // Empty frames: nothing more to render (no effects, no role icons)
+        if raid_frame.is_empty() {
             return;
         }
 
@@ -788,6 +851,33 @@ impl RaidOverlay {
                 // No icon for DPS
             }
         }
+    }
+
+    /// Render a single placeholder effect indicator in move mode
+    /// Shows the user where effects will be positioned
+    fn render_placeholder_effect(&mut self, x: f32, y: f32) {
+        let effect_size = self.config.effect_size();
+        let vertical_offset = self.config.effect_vertical_offset();
+        let corner_radius = 2.0;
+
+        // Position: same as first effect in render_effects
+        let ex = x + 3.0;
+        let ey = y + vertical_offset;
+
+        // Semi-transparent background with dashed border to indicate placeholder
+        let bg_color = Color::from_rgba8(80, 80, 80, 150);
+        self.frame.fill_rounded_rect(ex, ey, effect_size, effect_size, corner_radius, bg_color);
+
+        // Dashed border to indicate it's a placeholder
+        let border_color = Color::from_rgba8(150, 150, 150, 200);
+        self.frame.stroke_rounded_rect_dashed(
+            ex, ey, effect_size, effect_size,
+            corner_radius,
+            1.0,        // stroke width
+            border_color,
+            3.0,        // dash length
+            2.0,        // gap length
+        );
     }
 
     /// Render effect indicators on the LEFT side of the frame (matches SWTOR debuff placement)
@@ -921,8 +1011,8 @@ impl RaidOverlay {
         };
         self.frame.draw_text(&text, text_x, text_y, font_size, text_color);
 
-        // Clear button (×) for occupied frames (not self)
-        if !raid_frame.is_empty() && !raid_frame.is_self {
+        // Clear button (×) for ALL occupied frames (including self)
+        if !raid_frame.is_empty() {
             let btn_size = (h * 0.35).clamp(12.0, 18.0);
             let btn_x = x + w - btn_size - 3.0;
             let btn_y = y + 3.0;
@@ -957,12 +1047,16 @@ impl RaidOverlay {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// Handle a click in rearrange mode
+    /// Instead of modifying local state, we queue actions for the registry.
     fn handle_rearrange_click(&mut self, px: f32, py: f32) {
-        // Check clear buttons first (clear_frame sets needs_render)
+        // Check clear buttons first - queue ClearSlot action
         for i in 0..self.frames.len() {
             let frame = &self.frames[i];
-            if !frame.is_empty() && !frame.is_self && self.hit_test_clear_button(frame.slot, px, py) {
-                self.clear_frame(frame.slot);
+            // All non-empty frames can be cleared (including self)
+            if !frame.is_empty() && self.hit_test_clear_button(frame.slot, px, py) {
+                eprintln!("[RAID-OVERLAY] Queuing ClearSlot({})", frame.slot);
+                self.pending_registry_actions.push(RaidRegistryAction::ClearSlot(frame.slot));
+                self.needs_render = true;
                 return;
             }
         }
@@ -970,8 +1064,10 @@ impl RaidOverlay {
         // Then check slot selection for swapping
         if let Some(slot) = self.hit_test(px, py) {
             if let Some((a, b)) = self.swap_state.on_click(slot) {
-                // swap_frames sets needs_render
-                self.swap_frames(a, b);
+                // Queue swap action - registry will update, then data will flow back
+                eprintln!("[RAID-OVERLAY] Queuing SwapSlots({}, {})", a, b);
+                self.pending_registry_actions.push(RaidRegistryAction::SwapSlots(a, b));
+                self.needs_render = true;
             } else {
                 // Selection changed (first click or deselect same slot)
                 self.needs_render = true;
@@ -991,6 +1087,12 @@ impl RaidOverlay {
 impl Overlay for RaidOverlay {
     fn update_data(&mut self, data: OverlayData) {
         if let OverlayData::Raid(raid_data) = data {
+            let frame_count = raid_data.frames.len();
+            let effect_count: usize = raid_data.frames.iter().map(|f| f.effects.len()).sum();
+            if frame_count > 0 || effect_count > 0 {
+                eprintln!("[RAID-OVERLAY] Received {} frames with {} total effects",
+                    frame_count, effect_count);
+            }
             self.set_frames(raid_data.frames);
         }
     }
@@ -1032,5 +1134,27 @@ impl Overlay for RaidOverlay {
 
     fn frame_mut(&mut self) -> &mut OverlayFrame {
         &mut self.frame
+    }
+
+    fn set_move_mode(&mut self, enabled: bool) {
+        let new_mode = if enabled {
+            InteractionMode::Move
+        } else {
+            InteractionMode::Normal
+        };
+        self.set_interaction_mode(new_mode);
+    }
+
+    fn set_rearrange_mode(&mut self, enabled: bool) {
+        let new_mode = if enabled {
+            InteractionMode::Rearrange
+        } else {
+            InteractionMode::Normal
+        };
+        self.set_interaction_mode(new_mode);
+    }
+
+    fn take_pending_registry_actions(&mut self) -> Vec<RaidRegistryAction> {
+        std::mem::take(&mut self.pending_registry_actions)
     }
 }

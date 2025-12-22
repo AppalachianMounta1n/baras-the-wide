@@ -42,7 +42,7 @@ pub use manager::OverlayWindow;
 pub use overlays::{
     InteractionMode, MetricEntry, MetricOverlay, Overlay, OverlayConfigUpdate, OverlayData,
     OverlayPosition, PersonalOverlay, PersonalStats, PlayerRole, RaidEffect, RaidFrame,
-    RaidFrameData, RaidGridLayout, RaidOverlay, RaidOverlayConfig, SwapState,
+    RaidFrameData, RaidGridLayout, RaidOverlay, RaidOverlayConfig, RaidRegistryAction, SwapState,
     // Effect config bounds
     EFFECT_OFFSET_DEFAULT, EFFECT_OFFSET_MAX, EFFECT_OFFSET_MIN,
     EFFECT_SIZE_DEFAULT, EFFECT_SIZE_MAX, EFFECT_SIZE_MIN,

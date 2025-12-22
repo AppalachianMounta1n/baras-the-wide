@@ -197,7 +197,7 @@ mod examples {
             let now = Instant::now();
             if now.duration_since(last_frame) >= frame_duration {
                 overlay_normal.render();
-            //    overlay_move.render();
+                overlay_move.render();
                 overlay_rearrange.render();
                 last_frame = now;
             }

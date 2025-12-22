@@ -16,7 +16,7 @@ impl Default for Action {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Copy)]
 pub enum EntityType {
     Player,
     Npc,
