@@ -16,3 +16,4 @@ pub use session::SessionCache;
 pub use swtor_ids::*;
 pub use tracking::{ActiveEffect, DefinitionSet, EffectDefinition, load_definitions};
 pub use log::*;
+pub use encounter::metrics::PlayerMetrics;

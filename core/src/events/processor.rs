@@ -4,7 +4,7 @@ use crate::events::signal::GameSignal;
 use crate::session::cache::SessionCache;
 use crate::encounter::EncounterState;
 use crate::encounter::entity_info::PlayerInfo;
-use crate::swtor_ids::{effect_id, effect_type_id};
+use crate::swtor_data::{effect_id, effect_type_id};
 use chrono::NaiveDateTime;
 
 // Combat state machine constants

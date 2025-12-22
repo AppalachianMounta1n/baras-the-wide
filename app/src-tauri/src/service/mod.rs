@@ -21,7 +21,7 @@ use baras_core::context::{resolve, AppConfig, DirectoryIndex, ParsingSession};
 use baras_core::encounter::EncounterState;
 use baras_core::directory_watcher::DirectoryWatcher;
 use baras_core::tracking::EffectCategory;
-use baras_core::swtor_ids::{Discipline, Role};
+use baras_core::swtor_data::{Discipline, Role};
 use baras_core::{load_definitions, ActiveEffect, DefinitionSet, EntityType, GameSignal, PlayerMetrics, Reader, SignalHandler};
 use baras_overlay::{PersonalStats, PlayerRole, RaidEffect, RaidFrame, RaidFrameData};
 

@@ -1,6 +1,6 @@
 use crate::LogParser;
 use crate::context::resolve;
-use crate::swtor_ids::effect_type_id;
+use crate::swtor_data::effect_type_id;
 use chrono::{NaiveDate, NaiveDateTime};
 use hashbrown::HashMap;
 use std::fs;
