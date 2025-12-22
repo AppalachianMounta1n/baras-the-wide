@@ -1,15 +1,23 @@
 use super::*;
+use crate::context::resolve;
+use chrono::NaiveDateTime;
+
+fn test_parser() -> LogParser {
+    let date = NaiveDateTime::parse_from_str("2024-01-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+    LogParser::new(date)
+}
 
 // parse_entity
 #[test]
 fn test_parse_entity_npc() {
+    let parser = test_parser();
     let input = "Dread Master Bestia {3273941900591104}:5320000112163|(137.28,-120.98,-8.85,81.28)|(0/19129210)";
-    let result = parse_entity(input);
+    let result = parser.parse_entity(input);
     assert!(result.is_some());
 
     let entity = result.unwrap();
 
-    assert_eq!(entity.name, "Dread Master Bestia");
+    assert_eq!(resolve(entity.name), "Dread Master Bestia");
     assert_eq!(entity.class_id, 3273941900591104);
     assert_eq!(entity.log_id, 5320000112163);
     assert_eq!(entity.entity_type, EntityType::Npc);
@@ -18,13 +26,14 @@ fn test_parse_entity_npc() {
 
 #[test]
 fn test_parse_entity_player() {
+    let parser = test_parser();
     let input = "@Galen Ayder#690129185314118|(-4700.43,-4750.48,710.03,-0.71)|(1/414851)";
-    let result = parse_entity(input);
+    let result = parser.parse_entity(input);
     assert!(result.is_some());
 
     let entity = result.unwrap();
 
-    assert_eq!(entity.name, "Galen Ayder");
+    assert_eq!(resolve(entity.name), "Galen Ayder");
     assert_eq!(entity.class_id, 0);
     assert_eq!(entity.log_id, 690129185314118);
     assert_eq!(entity.entity_type, EntityType::Player);
@@ -33,12 +42,13 @@ fn test_parse_entity_player() {
 
 #[test]
 fn test_parse_entity_companion() {
+    let parser = test_parser();
     let input = "@Jerran Zeva#689501114780828/Raina Temple {493328533553152}:87481369009487|(4749.87,4694.53,710.05,0.00)|(288866/288866)";
-    let result = parse_entity(input);
+    let result = parser.parse_entity(input);
     assert!(result.is_some());
 
     let entity = result.unwrap();
-    assert_eq!(entity.name, "Raina Temple");
+    assert_eq!(resolve(entity.name), "Raina Temple");
     assert_eq!(entity.class_id, 493328533553152);
     assert_eq!(entity.log_id, 87481369009487);
     assert_eq!(entity.entity_type, EntityType::Companion);
@@ -47,8 +57,9 @@ fn test_parse_entity_companion() {
 
 #[test]
 fn test_parse_entity_self_reference() {
+    let parser = test_parser();
     let input = "=";
-    let result = parse_entity(input);
+    let result = parser.parse_entity(input);
     assert!(result.is_some());
 
     let entity = result.unwrap();
@@ -57,8 +68,9 @@ fn test_parse_entity_self_reference() {
 
 #[test]
 fn test_parse_entity_empty() {
+    let parser = test_parser();
     let input = "";
-    let result = parse_entity(input);
+    let result = parser.parse_entity(input);
     assert!(result.is_some());
 
     let entity = result.unwrap();
@@ -70,7 +82,7 @@ fn test_parse_entity_empty() {
 #[test]
 fn test_parse_charges_one() {
     let input = "(1 charges {836045448953667})";
-    let result = parse_charges(input);
+    let result = LogParser::parse_charges(input);
     assert!(result.is_some());
     let details = result.unwrap();
     assert_eq!(details.charges, 1);
@@ -79,7 +91,7 @@ fn test_parse_charges_one() {
 #[test]
 fn test_parse_charges_ten() {
     let input = "(10 charges {836045448953667})";
-    let result = parse_charges(input);
+    let result = LogParser::parse_charges(input);
     assert!(result.is_some());
 
     let details = result.unwrap();
@@ -90,13 +102,13 @@ fn test_parse_charges_ten() {
 #[test]
 fn test_parse_details_damage_basic() {
     let input = " (5765 energy {836045448940874}) <5765.0>";
-    let result = parse_details(input, effect_id::DAMAGE, effect_type_id::APPLYEFFECT);
+    let result = LogParser::parse_details(input, effect_id::DAMAGE, effect_type_id::APPLYEFFECT);
     assert!(result.is_some());
 
     let details = result.unwrap();
     assert_eq!(details.dmg_amount, 5765);
     assert_eq!(details.dmg_effective, 5765);
-    assert_eq!(details.dmg_type, "energy");
+    assert_eq!(resolve(details.dmg_type), "energy");
     assert_eq!(details.dmg_type_id, 836045448940874);
     assert_eq!(details.threat, 5765.0);
     assert!(!details.is_crit);
@@ -124,7 +136,7 @@ fn test_parse_details_damage_with_effective() {
     let details = result.unwrap();
     assert_eq!(details.dmg_amount, 5000);
     assert_eq!(details.dmg_effective, 3500);
-    assert_eq!(details.dmg_type, "kinetic");
+    assert_eq!(resolve(details.dmg_type), "kinetic");
 }
 
 #[test]
@@ -136,7 +148,7 @@ fn test_parse_details_damage_with_absorbed() {
 
     let details = result.unwrap();
     assert_eq!(details.dmg_amount, 5000);
-    assert_eq!(details.dmg_type, "kinetic");
+    assert_eq!(resolve(details.dmg_type), "kinetic");
     assert_eq!(details.dmg_effective, 3000);
     assert_eq!(details.dmg_absorbed, 2000);
 }
@@ -149,8 +161,8 @@ fn test_parse_details_damage_miss() {
 
     let details = result.unwrap();
     assert_eq!(details.dmg_amount, 0);
-    assert_eq!(details.dmg_type, "");
-    assert_eq!(details.avoid_type, "miss");
+    assert_eq!(resolve(details.dmg_type), "");
+    assert_eq!(resolve(details.avoid_type), "miss");
 }
 
 #[test]
@@ -160,40 +172,40 @@ fn test_parse_dmage_shielded() {
     assert!(result.is_some());
 
     let details = result.unwrap();
-    assert_eq!(details.dmg_type, "energy");
+    assert_eq!(resolve(details.dmg_type), "energy");
     assert_eq!(details.dmg_absorbed, 1150);
-    assert_eq!(details.avoid_type, "shield");
+    assert_eq!(resolve(details.avoid_type), "shield");
     assert_eq!(details.dmg_effective, 2583)
 }
 
 #[test]
 fn test_parse_damage_after_death() {
     let input = "(41422 ~0 energy {836045448940874} -)";
-    let result = parse_details(input, effect_id::DAMAGE, effect_type_id::APPLYEFFECT);
+    let result = LogParser::parse_details(input, effect_id::DAMAGE, effect_type_id::APPLYEFFECT);
 
     assert!(result.is_some());
 
     let details = result.unwrap();
-    assert_eq!(details.avoid_type, String::new());
+    assert_eq!(resolve(details.avoid_type), "");
     assert_eq!(details.dmg_effective, 0);
-    assert_eq!(details.dmg_type, "energy");
+    assert_eq!(resolve(details.dmg_type), "energy");
 }
 
 #[test]
 fn test_parse_details_damage_reflect() {
     let input = "(116010 kinetic {836045448940873}(reflected {836045448953649}))";
-    let result = parse_details(input, effect_id::DAMAGE, effect_type_id::APPLYEFFECT);
+    let result = LogParser::parse_details(input, effect_id::DAMAGE, effect_type_id::APPLYEFFECT);
     let details = result.unwrap();
 
     assert!(details.is_reflect);
     assert_eq!(details.dmg_effective, 116010);
-    assert_eq!(details.dmg_type, "kinetic");
+    assert_eq!(resolve(details.dmg_type), "kinetic");
 }
 
 #[test]
 fn test_parse_details_damage_reflect_nullified() {
     let input = " (0 -) <1500.0>";
-    let result = parse_details(input, effect_id::DAMAGE, effect_type_id::APPLYEFFECT);
+    let result = LogParser::parse_details(input, effect_id::DAMAGE, effect_type_id::APPLYEFFECT);
     assert!(result.is_some());
 
     let details = result.unwrap();
@@ -205,7 +217,7 @@ fn test_parse_details_damage_reflect_nullified() {
 #[test]
 fn test_parse_details_heal_basic() {
     let input = " (3500) <1750>";
-    let result = parse_details(input, effect_id::HEAL, effect_type_id::APPLYEFFECT);
+    let result = LogParser::parse_details(input, effect_id::HEAL, effect_type_id::APPLYEFFECT);
     assert!(result.is_some());
 
     let details = result.unwrap();
@@ -218,7 +230,7 @@ fn test_parse_details_heal_basic() {
 #[test]
 fn test_parse_details_heal_crit() {
     let input = " (5000*) <2500>";
-    let result = parse_details(input, effect_id::HEAL, effect_type_id::APPLYEFFECT);
+    let result = LogParser::parse_details(input, effect_id::HEAL, effect_type_id::APPLYEFFECT);
     assert!(result.is_some());
 
     let details = result.unwrap();
@@ -229,7 +241,7 @@ fn test_parse_details_heal_crit() {
 #[test]
 fn test_parse_details_heal_with_effective() {
     let input = " (4000 ~2000) <1000>";
-    let result = parse_details(input, effect_id::HEAL, effect_type_id::APPLYEFFECT);
+    let result = LogParser::parse_details(input, effect_id::HEAL, effect_type_id::APPLYEFFECT);
     assert!(result.is_some());
 
     let details = result.unwrap();
@@ -241,7 +253,7 @@ fn test_parse_details_heal_with_effective() {
 #[test]
 fn test_parse_details_modify_charges() {
     let input = " (3 charges {836045448953667})";
-    let result = parse_details(
+    let result = LogParser::parse_details(
         input,
         effect_id::ABILITYACTIVATE,
         effect_type_id::MODIFYCHARGES,
@@ -256,7 +268,7 @@ fn test_parse_details_modify_charges() {
 #[test]
 fn test_parse_details_apply_effect_with_charges() {
     let input = " (5 charges {836045448953667})";
-    let result = parse_details(
+    let result = LogParser::parse_details(
         input,
         effect_id::ABILITYACTIVATE,
         effect_type_id::APPLYEFFECT,
@@ -270,7 +282,7 @@ fn test_parse_details_apply_effect_with_charges() {
 #[test]
 fn test_parse_details_default() {
     let input = "";
-    let result = parse_details(
+    let result = LogParser::parse_details(
         input,
         effect_id::ABILITYACTIVATE,
         effect_type_id::DISCIPLINECHANGED,
