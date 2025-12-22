@@ -37,7 +37,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::Win32::Foundation::RECT;
 
 use super::{MonitorInfo, OverlayConfig, OverlayPlatform, PlatformError};
-use super::{ MAX_OVERLAY_HEIGHT, MAX_OVERLAY_HEIGHT, MIN_OVERLAY_SIZE, RESIZE_CORNER_SIZE};
+use super::{ MAX_OVERLAY_HEIGHT, MAX_OVERLAY_WIDTH, MIN_OVERLAY_SIZE, RESIZE_CORNER_SIZE};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Standalone Monitor Enumeration
