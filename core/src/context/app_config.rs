@@ -381,6 +381,60 @@ impl OverlaySettings {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Hotkey Settings
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Global hotkey configuration
+/// Hotkeys use Tauri's shortcut format (e.g., "CommandOrControl+Shift+O")
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HotkeySettings {
+    /// Toggle all overlays visible/hidden
+    #[serde(default)]
+    pub toggle_visibility: Option<String>,
+    /// Toggle move/resize mode
+    #[serde(default)]
+    pub toggle_move_mode: Option<String>,
+    /// Toggle raid frame rearrange mode
+    #[serde(default)]
+    pub toggle_rearrange_mode: Option<String>,
+}
+
+impl Default for HotkeySettings {
+    fn default() -> Self {
+        Self {
+            toggle_visibility: None,
+            toggle_move_mode: None,
+            toggle_rearrange_mode: None,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Overlay Profiles
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Maximum number of profiles a user can create
+pub const MAX_PROFILES: usize = 12;
+
+/// A named snapshot of all overlay settings.
+/// Profiles allow users to quickly switch between different configurations
+/// (e.g., healer setup vs DPS setup, 8-man vs 16-man raids).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OverlayProfile {
+    /// User-defined name for this profile
+    pub name: String,
+    /// Complete snapshot of overlay settings at time of save
+    pub settings: OverlaySettings,
+}
+
+impl OverlayProfile {
+    /// Create a new profile with the given name and settings
+    pub fn new(name: String, settings: OverlaySettings) -> Self {
+        Self { name, settings }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // App Config
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -416,6 +470,16 @@ pub struct AppConfig {
     pub log_retention_days: u32,
     #[serde(default)]
     pub overlay_settings: OverlaySettings,
+    /// Global hotkey bindings
+    #[serde(default)]
+    pub hotkeys: HotkeySettings,
+    /// Saved overlay profiles (max 12)
+    #[serde(default)]
+    pub profiles: Vec<OverlayProfile>,
+    /// Name of the currently active profile, if any.
+    /// When None, the user is working with unsaved settings.
+    #[serde(default)]
+    pub active_profile_name: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -425,6 +489,9 @@ impl Default for AppConfig {
             auto_delete_empty_files: false,
             log_retention_days: 21,
             overlay_settings: OverlaySettings::default(),
+            hotkeys: HotkeySettings::default(),
+            profiles: Vec::new(),
+            active_profile_name: None,
         }
     }
 }
@@ -436,5 +503,81 @@ impl AppConfig {
 
     pub fn save(self) {
         confy::store("baras", "config", self).expect("Failed to save configuration");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Profile Management
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Save current overlay settings as a new profile with the given name.
+    /// If a profile with that name exists, it will be updated.
+    /// Returns Err if max profiles reached and name doesn't exist.
+    pub fn save_profile(&mut self, name: String) -> Result<(), &'static str> {
+        // Check if profile already exists (update case)
+        if let Some(profile) = self.profiles.iter_mut().find(|p| p.name == name) {
+            profile.settings = self.overlay_settings.clone();
+            self.active_profile_name = Some(name);
+            return Ok(());
+        }
+
+        // New profile - check limit
+        if self.profiles.len() >= MAX_PROFILES {
+            return Err("Maximum number of profiles reached (12)");
+        }
+
+        self.profiles.push(OverlayProfile::new(name.clone(), self.overlay_settings.clone()));
+        self.active_profile_name = Some(name);
+        Ok(())
+    }
+
+    /// Load a profile by name, replacing current overlay settings.
+    /// Returns Err if profile not found.
+    pub fn load_profile(&mut self, name: &str) -> Result<(), &'static str> {
+        let profile = self.profiles.iter().find(|p| p.name == name)
+            .ok_or("Profile not found")?;
+        self.overlay_settings = profile.settings.clone();
+        self.active_profile_name = Some(name.to_string());
+        Ok(())
+    }
+
+    /// Delete a profile by name. Returns Err if profile not found.
+    /// If the deleted profile was active, active_profile_name becomes None.
+    pub fn delete_profile(&mut self, name: &str) -> Result<(), &'static str> {
+        let len_before = self.profiles.len();
+        self.profiles.retain(|p| p.name != name);
+        if self.profiles.len() == len_before {
+            return Err("Profile not found");
+        }
+        if self.active_profile_name.as_deref() == Some(name) {
+            self.active_profile_name = None;
+        }
+        Ok(())
+    }
+
+    /// Rename a profile. Returns Err if old name not found or new name already exists.
+    pub fn rename_profile(&mut self, old_name: &str, new_name: String) -> Result<(), &'static str> {
+        // Check new name doesn't already exist
+        if self.profiles.iter().any(|p| p.name == new_name) {
+            return Err("A profile with that name already exists");
+        }
+
+        let profile = self.profiles.iter_mut().find(|p| p.name == old_name)
+            .ok_or("Profile not found")?;
+        profile.name = new_name.clone();
+
+        if self.active_profile_name.as_deref() == Some(old_name) {
+            self.active_profile_name = Some(new_name);
+        }
+        Ok(())
+    }
+
+    /// Get list of profile names
+    pub fn profile_names(&self) -> Vec<String> {
+        self.profiles.iter().map(|p| p.name.clone()).collect()
+    }
+
+    /// Check if a profile name is available
+    pub fn is_profile_name_available(&self, name: &str) -> bool {
+        !self.profiles.iter().any(|p| p.name == name)
     }
 }

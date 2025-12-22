@@ -5,8 +5,9 @@
 
 use dioxus::prelude::*;
 use crate::app::{
-    MetricType, OverlayAppearanceConfig, OverlaySettings,
+    MetricType, OverlayAppearanceConfig, OverlaySettings, OverlayStatus,
     PersonalOverlayConfig, PersonalStat, RaidOverlaySettings, parse_hex_color,
+    MAX_PROFILES,
 };
 use wasm_bindgen::prelude::*;
 
@@ -22,6 +23,13 @@ use crate::app::AppConfig;
 pub fn SettingsPanel(
     settings: Signal<OverlaySettings>,
     selected_tab: Signal<String>,
+    profile_names: Signal<Vec<String>>,
+    active_profile: Signal<Option<String>>,
+    // Overlay enabled signals for UI state updates
+    metric_overlays_enabled: Signal<std::collections::HashMap<MetricType, bool>>,
+    personal_enabled: Signal<bool>,
+    raid_enabled: Signal<bool>,
+    overlays_visible: Signal<bool>,
     on_close: EventHandler<()>,
     on_header_mousedown: EventHandler<MouseEvent>,
 ) -> Element {
@@ -29,6 +37,10 @@ pub fn SettingsPanel(
     let mut draft_settings = use_signal(|| settings());
     let mut has_changes = use_signal(|| false);
     let mut save_status = use_signal(String::new);
+
+    // Profile UI state (local to this panel)
+    let mut new_profile_name = use_signal(String::new);
+    let mut profile_status = use_signal(String::new);
 
     let current_settings = draft_settings();
     let tab = selected_tab();
@@ -128,6 +140,184 @@ pub fn SettingsPanel(
                     onclick: move |_| on_close.call(()),
                     onmousedown: move |e| e.stop_propagation(), // Don't start drag when clicking close
                     "X"
+                }
+            }
+
+            // Profiles section (collapsible accordion)
+            details { class: "settings-section collapsible",
+                summary { class: "collapsible-summary",
+                    i { class: "fa-solid fa-user-gear summary-icon" }
+                    "Profiles"
+                    if let Some(ref name) = active_profile() {
+                        span { class: "profile-active-badge", "{name}" }
+                    }
+                }
+                div { class: "collapsible-content",
+                    // Profile list
+                    if !profile_names().is_empty() {
+                        div { class: "profile-list compact",
+                            for name in profile_names().iter() {
+                                {
+                                    let profile_name = name.clone();
+                                    let is_active = active_profile().as_ref() == Some(&profile_name);
+                                    rsx! {
+                                        div {
+                                            class: if is_active { "profile-item active" } else { "profile-item" },
+                                            span { class: "profile-name", "{profile_name}" }
+                                            div { class: "profile-actions",
+                                                // Load button
+                                                button {
+                                                    class: "btn btn-small btn-load",
+                                                    disabled: is_active,
+                                                    onclick: {
+                                                        let pname = profile_name.clone();
+                                                        move |_| {
+                                                            let pname = pname.clone();
+                                                            spawn(async move {
+                                                                let obj = js_sys::Object::new();
+                                                                js_sys::Reflect::set(&obj, &JsValue::from_str("name"), &JsValue::from_str(&pname)).unwrap();
+                                                                let result = invoke("load_profile", obj.into()).await;
+                                                                if result.is_undefined() || result.is_null() {
+                                                                    active_profile.set(Some(pname.clone()));
+                                                                    profile_status.set(format!("Loaded '{}'", pname));
+                                                                    // Refresh settings in this panel
+                                                                    let config_result = invoke("get_config", JsValue::NULL).await;
+                                                                    if let Ok(config) = serde_wasm_bindgen::from_value::<AppConfig>(config_result) {
+                                                                        draft_settings.set(config.overlay_settings.clone());
+                                                                        settings.set(config.overlay_settings);
+                                                                    }
+                                                                    // Refresh ALL running overlays
+                                                                    let _ = invoke("refresh_overlay_settings", JsValue::NULL).await;
+                                                                    // Update UI button states from actual overlay status
+                                                                    let status_result = invoke("get_overlay_status", JsValue::NULL).await;
+                                                                    if let Ok(status) = serde_wasm_bindgen::from_value::<OverlayStatus>(status_result) {
+                                                                        let mut new_map = std::collections::HashMap::new();
+                                                                        for ot in MetricType::all_metrics() {
+                                                                            let key = ot.config_key().to_string();
+                                                                            new_map.insert(*ot, status.enabled.contains(&key));
+                                                                        }
+                                                                        metric_overlays_enabled.set(new_map);
+                                                                        personal_enabled.set(status.personal_enabled);
+                                                                        raid_enabled.set(status.raid_enabled);
+                                                                        overlays_visible.set(status.overlays_visible);
+                                                                    }
+                                                                } else if let Some(err) = result.as_string() {
+                                                                    profile_status.set(format!("Error: {}", err));
+                                                                }
+                                                            });
+                                                        }
+                                                    },
+                                                    "Load"
+                                                }
+                                                // Save/Update button
+                                                button {
+                                                    class: "btn btn-small btn-update",
+                                                    title: "Overwrite profile with current settings",
+                                                    onclick: {
+                                                        let pname = profile_name.clone();
+                                                        move |_| {
+                                                            let pname = pname.clone();
+                                                            spawn(async move {
+                                                                let obj = js_sys::Object::new();
+                                                                js_sys::Reflect::set(&obj, &JsValue::from_str("name"), &JsValue::from_str(&pname)).unwrap();
+                                                                let result = invoke("save_profile", obj.into()).await;
+                                                                if result.is_undefined() || result.is_null() {
+                                                                    active_profile.set(Some(pname.clone()));
+                                                                    profile_status.set(format!("Saved '{}'", pname));
+                                                                } else if let Some(err) = result.as_string() {
+                                                                    profile_status.set(format!("Error: {}", err));
+                                                                }
+                                                            });
+                                                        }
+                                                    },
+                                                    "Save"
+                                                }
+                                                // Delete button
+                                                button {
+                                                    class: "btn btn-small btn-delete",
+                                                    onclick: {
+                                                        let pname = profile_name.clone();
+                                                        move |_| {
+                                                            let pname = pname.clone();
+                                                            spawn(async move {
+                                                                let obj = js_sys::Object::new();
+                                                                js_sys::Reflect::set(&obj, &JsValue::from_str("name"), &JsValue::from_str(&pname)).unwrap();
+                                                                let result = invoke("delete_profile", obj.into()).await;
+                                                                if result.is_undefined() || result.is_null() {
+                                                                    // Refresh profile list in shared state
+                                                                    let names_result = invoke("get_profile_names", JsValue::NULL).await;
+                                                                    if let Ok(names) = serde_wasm_bindgen::from_value::<Vec<String>>(names_result) {
+                                                                        profile_names.set(names);
+                                                                    }
+                                                                    let active_result = invoke("get_active_profile", JsValue::NULL).await;
+                                                                    if let Ok(name) = serde_wasm_bindgen::from_value::<Option<String>>(active_result) {
+                                                                        active_profile.set(name);
+                                                                    }
+                                                                    profile_status.set(format!("Deleted '{}'", pname));
+                                                                } else if let Some(err) = result.as_string() {
+                                                                    profile_status.set(format!("Error: {}", err));
+                                                                }
+                                                            });
+                                                        }
+                                                    },
+                                                    "×"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Create new profile
+                    div { class: "profile-create",
+                        input {
+                            r#type: "text",
+                            class: "profile-name-input",
+                            placeholder: "New profile name...",
+                            maxlength: "32",
+                            value: new_profile_name,
+                            oninput: move |e| new_profile_name.set(e.value())
+                        }
+                        button {
+                            class: "btn btn-small btn-save",
+                            disabled: new_profile_name().trim().is_empty() || profile_names().len() >= MAX_PROFILES,
+                            onclick: move |_| {
+                                let name = new_profile_name().trim().to_string();
+                                if name.is_empty() { return; }
+
+                                spawn(async move {
+                                    let obj = js_sys::Object::new();
+                                    js_sys::Reflect::set(&obj, &JsValue::from_str("name"), &JsValue::from_str(&name)).unwrap();
+                                    let result = invoke("save_profile", obj.into()).await;
+                                    if result.is_undefined() || result.is_null() {
+                                        // Refresh profile list in shared state
+                                        let names_result = invoke("get_profile_names", JsValue::NULL).await;
+                                        if let Ok(names) = serde_wasm_bindgen::from_value::<Vec<String>>(names_result) {
+                                            profile_names.set(names);
+                                        }
+                                        active_profile.set(Some(name.clone()));
+                                        new_profile_name.set(String::new());
+                                        profile_status.set(format!("Created '{}'", name));
+                                    } else if let Some(err) = result.as_string() {
+                                        profile_status.set(format!("Error: {}", err));
+                                    }
+                                });
+                            },
+                            "+ New"
+                        }
+                    }
+
+                    if profile_names().len() >= MAX_PROFILES {
+                        p { class: "hint hint-warning compact",
+                            "Maximum {MAX_PROFILES} profiles"
+                        }
+                    }
+
+                    if !profile_status().is_empty() {
+                        p { class: "profile-status compact", "{profile_status}" }
+                    }
                 }
             }
 
@@ -358,19 +548,19 @@ pub fn SettingsPanel(
                         span { class: "value", "{current_settings.raid_overlay.effect_vertical_offset:.0}px" }
                     }
 
-                    // Show Role Icons - hidden until role detection is implemented
-                    // div { class: "setting-row",
-                    //     label { "Show Role Icons" }
-                    //     input {
-                    //         r#type: "checkbox",
-                    //         checked: current_settings.raid_overlay.show_role_icons,
-                    //         onchange: move |e: Event<FormData>| {
-                    //             let mut new_settings = draft_settings();
-                    //             new_settings.raid_overlay.show_role_icons = e.checked();
-                    //             update_draft(new_settings);
-                    //         }
-                    //     }
-                    // }
+                    // Show Role Icons
+                    div { class: "setting-row",
+                        label { "Show Role Icons" }
+                        input {
+                            r#type: "checkbox",
+                            checked: current_settings.raid_overlay.show_role_icons,
+                            onchange: move |e: Event<FormData>| {
+                                let mut new_settings = draft_settings();
+                                new_settings.raid_overlay.show_role_icons = e.checked();
+                                update_draft(new_settings);
+                            }
+                        }
+                    }
 
                     // Reset to default button
                     div { class: "setting-row reset-row",

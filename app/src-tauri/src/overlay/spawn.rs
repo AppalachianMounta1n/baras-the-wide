@@ -107,6 +107,11 @@ where
                         eprintln!("[OVERLAY-LOOP] {:?}: UpdateConfig applied, setting needs_render=true", kind_name);
                         needs_render = true;
                     }
+                    OverlayCommand::SetPosition(x, y) => {
+                        eprintln!("[OVERLAY-LOOP] {:?}: Received SetPosition({}, {})", kind_name, x, y);
+                        overlay.frame_mut().window_mut().set_position(x, y);
+                        needs_render = true;
+                    }
                     OverlayCommand::GetPosition(response_tx) => {
                         eprintln!("[OVERLAY-LOOP] {:?}: Received GetPosition", kind_name);
                         let pos = overlay.position();

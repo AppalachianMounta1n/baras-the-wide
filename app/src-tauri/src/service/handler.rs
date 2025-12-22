@@ -64,10 +64,25 @@ impl ServiceHandle {
 
     /// Update the configuration
     pub async fn update_config(&self, config: AppConfig) -> Result<(), String> {
-        let old_dir = self.shared.config.read().await.log_directory.clone();
+        let old_config = self.shared.config.read().await.clone();
+        let old_dir = old_config.log_directory.clone();
         let new_dir = config.log_directory.clone();
+
+        // Check if grid size changed
+        let old_slots = old_config.overlay_settings.raid_overlay.grid_columns
+            * old_config.overlay_settings.raid_overlay.grid_rows;
+        let new_slots = config.overlay_settings.raid_overlay.grid_columns
+            * config.overlay_settings.raid_overlay.grid_rows;
+
         *self.shared.config.write().await = config.clone();
         config.save();
+
+        // Update raid registry max slots if grid size changed
+        if new_slots != old_slots {
+            if let Ok(mut registry) = self.shared.raid_registry.lock() {
+                registry.set_max_slots(new_slots);
+            }
+        }
 
         if old_dir != new_dir {
             self.cmd_tx
@@ -259,4 +274,92 @@ pub async fn get_session_info(
     handle: State<'_, ServiceHandle>
 ) -> Result<Option<SessionInfo>, String> {
     Ok(handle.session_info().await)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Profile Commands
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_profile_names(handle: State<'_, ServiceHandle>) -> Result<Vec<String>, String> {
+    let config = handle.config().await;
+    Ok(config.profile_names())
+}
+
+#[tauri::command]
+pub async fn get_active_profile(handle: State<'_, ServiceHandle>) -> Result<Option<String>, String> {
+    let config = handle.config().await;
+    Ok(config.active_profile_name.clone())
+}
+
+/// Sync the enabled map with actual running overlay state
+pub fn sync_enabled_with_running(
+    config: &mut baras_core::context::AppConfig,
+    overlay_state: &crate::overlay::OverlayState,
+) {
+    use crate::overlay::{OverlayType, MetricType};
+
+    // Sync raid overlay state
+    let raid_running = overlay_state.is_running(OverlayType::Raid);
+    config.overlay_settings.set_enabled("raid", raid_running);
+
+    // Sync personal overlay state
+    let personal_running = overlay_state.is_running(OverlayType::Personal);
+    config.overlay_settings.set_enabled("personal", personal_running);
+
+    // Sync all metric overlay states
+    for metric_type in MetricType::all() {
+        let running = overlay_state.is_running(OverlayType::Metric(*metric_type));
+        config.overlay_settings.set_enabled(metric_type.config_key(), running);
+    }
+}
+
+#[tauri::command]
+pub async fn save_profile(
+    name: String,
+    handle: State<'_, ServiceHandle>,
+    overlay_state: State<'_, crate::overlay::SharedOverlayState>,
+) -> Result<(), String> {
+    let mut config = handle.config().await;
+
+    // Sync enabled state with actual running overlays before saving
+    if let Ok(state) = overlay_state.lock() {
+        sync_enabled_with_running(&mut config, &state);
+    }
+
+    config.save_profile(name).map_err(|e| e.to_string())?;
+    *handle.shared.config.write().await = config.clone();
+    config.save();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn load_profile(name: String, handle: State<'_, ServiceHandle>) -> Result<(), String> {
+    let mut config = handle.config().await;
+    config.load_profile(&name).map_err(|e| e.to_string())?;
+    *handle.shared.config.write().await = config.clone();
+    config.save();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_profile(name: String, handle: State<'_, ServiceHandle>) -> Result<(), String> {
+    let mut config = handle.config().await;
+    config.delete_profile(&name).map_err(|e| e.to_string())?;
+    *handle.shared.config.write().await = config.clone();
+    config.save();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn rename_profile(
+    old_name: String,
+    new_name: String,
+    handle: State<'_, ServiceHandle>
+) -> Result<(), String> {
+    let mut config = handle.config().await;
+    config.rename_profile(&old_name, new_name).map_err(|e| e.to_string())?;
+    *handle.shared.config.write().await = config.clone();
+    config.save();
+    Ok(())
 }

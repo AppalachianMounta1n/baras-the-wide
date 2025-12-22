@@ -21,6 +21,7 @@ use baras_core::context::{resolve, AppConfig, DirectoryIndex, ParsingSession};
 use baras_core::encounter::EncounterState;
 use baras_core::directory_watcher::DirectoryWatcher;
 use baras_core::tracking::EffectCategory;
+use baras_core::swtor_ids::{Discipline, Role};
 use baras_core::{load_definitions, ActiveEffect, DefinitionSet, EntityType, GameSignal, Reader, SignalHandler};
 use baras_overlay::{PersonalStats, PlayerRole, RaidEffect, RaidFrame, RaidFrameData};
 
@@ -86,6 +87,12 @@ impl SignalHandler for CombatSignalHandler {
             GameSignal::CombatEnded { .. } => {
                 self.shared.in_combat.store(false, Ordering::SeqCst);
                 let _ = self.trigger_tx.send(MetricsTrigger::CombatEnded);
+            }
+            GameSignal::DisciplineChanged { entity_id, discipline_id, .. } => {
+                // Update raid registry with discipline info for role icons
+                if let Ok(mut registry) = self.shared.raid_registry.lock() {
+                    registry.update_discipline(*entity_id, 0, *discipline_id);
+                }
             }
             _ => {}
         }
@@ -662,12 +669,23 @@ async fn build_raid_frame_data(shared: &Arc<SharedState>) -> Option<RaidFrameDat
     for slot in 0..max_slots {
         if let Some(player) = registry.get_player(slot) {
             let effects = effects_by_target.remove(&player.entity_id).unwrap_or_default();
+
+            // Map discipline to role (defaults to DPS if unknown)
+            let role = player.discipline_id
+                .and_then(Discipline::from_guid)
+                .map(|d| match d.role() {
+                    Role::Tank => PlayerRole::Tank,
+                    Role::Healer => PlayerRole::Healer,
+                    Role::Dps => PlayerRole::Dps,
+                })
+                .unwrap_or(PlayerRole::Dps);
+
             frames.push(RaidFrame {
                 slot,
                 player_id: Some(player.entity_id),
                 name: player.name.clone(),
                 hp_percent: 1.0,
-                role: PlayerRole::Dps, // TODO: map from discipline_id
+                role,
                 effects,
                 is_self: player.entity_id == local_player_id,
             });

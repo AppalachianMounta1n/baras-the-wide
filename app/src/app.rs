@@ -282,6 +282,27 @@ pub fn parse_hex_color(hex: &str) -> Option<Color> {
     Some([r, g, b, 255])
 }
 
+/// Global hotkey configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct HotkeySettings {
+    #[serde(default)]
+    pub toggle_visibility: Option<String>,
+    #[serde(default)]
+    pub toggle_move_mode: Option<String>,
+    #[serde(default)]
+    pub toggle_rearrange_mode: Option<String>,
+}
+
+/// A named snapshot of all overlay settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OverlayProfile {
+    pub name: String,
+    pub settings: OverlaySettings,
+}
+
+/// Maximum number of profiles allowed
+pub const MAX_PROFILES: usize = 12;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     #[serde(default)]
@@ -292,6 +313,12 @@ pub struct AppConfig {
     pub log_retention_days: u32,
     #[serde(default)]
     pub overlay_settings: OverlaySettings,
+    #[serde(default)]
+    pub hotkeys: HotkeySettings,
+    #[serde(default)]
+    pub profiles: Vec<OverlayProfile>,
+    #[serde(default)]
+    pub active_profile_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -427,6 +454,16 @@ pub fn App() -> Element {
     let mut settings_dragging = use_signal(|| false);
     let mut settings_drag_offset = use_signal(|| (0i32, 0i32));
 
+    // Hotkey settings state
+    let mut hotkey_visibility = use_signal(String::new);
+    let mut hotkey_move_mode = use_signal(String::new);
+    let mut hotkey_rearrange = use_signal(String::new);
+    let mut hotkey_save_status = use_signal(String::new);
+
+    // Profile state (for main page dropdown)
+    let mut profile_names = use_signal(Vec::<String>::new);
+    let mut active_profile = use_signal(|| None::<String>);
+
     // Fetch initial state from backend
     use_future(move || async move {
         // Get config
@@ -434,6 +471,14 @@ pub fn App() -> Element {
         if let Ok(config) = serde_wasm_bindgen::from_value::<AppConfig>(result) {
             log_directory.set(config.log_directory.clone());
             overlay_settings.set(config.overlay_settings);
+            // Load hotkey settings
+            if let Some(v) = config.hotkeys.toggle_visibility { hotkey_visibility.set(v); }
+            if let Some(v) = config.hotkeys.toggle_move_mode { hotkey_move_mode.set(v); }
+            if let Some(v) = config.hotkeys.toggle_rearrange_mode { hotkey_rearrange.set(v); }
+            // Load profile data
+            let names: Vec<String> = config.profiles.iter().map(|p| p.name.clone()).collect();
+            profile_names.set(names);
+            active_profile.set(config.active_profile_name);
         }
 
         // Get watcher status
@@ -644,8 +689,6 @@ pub fn App() -> Element {
 
     // Browse and set directory using native dialog
     let browse_directory = move |_| {
-        let current_overlay_settings = overlay_settings();
-
         async move {
             // Open native directory picker
             let options = js_sys::Object::new();
@@ -658,24 +701,22 @@ pub fn App() -> Element {
             if let Some(path) = result.as_string() {
                 log_directory.set(path.clone());
 
-                // Save to config
-                let config = AppConfig {
-                    log_directory: path.clone(),
-                    auto_delete_empty_files: false,
-                    log_retention_days: 0,
-                    overlay_settings: current_overlay_settings,
-                };
+                // Get current config and update only log_directory
+                let config_result = invoke("get_config", JsValue::NULL).await;
+                if let Ok(mut config) = serde_wasm_bindgen::from_value::<AppConfig>(config_result) {
+                    config.log_directory = path.clone();
 
-                let args = serde_wasm_bindgen::to_value(&config).unwrap_or(JsValue::NULL);
-                let obj = js_sys::Object::new();
-                js_sys::Reflect::set(&obj, &JsValue::from_str("config"), &args).unwrap();
+                    let args = serde_wasm_bindgen::to_value(&config).unwrap_or(JsValue::NULL);
+                    let obj = js_sys::Object::new();
+                    js_sys::Reflect::set(&obj, &JsValue::from_str("config"), &args).unwrap();
 
-                let save_result = invoke("update_config", obj.into()).await;
-                if save_result.is_undefined() || save_result.is_null() {
-                    is_watching.set(true);
-                    status_msg.set(format!("Watching: {}", path));
-                } else if let Some(err) = save_result.as_string() {
-                    status_msg.set(format!("Error: {}", err));
+                    let save_result = invoke("update_config", obj.into()).await;
+                    if save_result.is_undefined() || save_result.is_null() {
+                        is_watching.set(true);
+                        status_msg.set(format!("Watching: {}", path));
+                    } else if let Some(err) = save_result.as_string() {
+                        status_msg.set(format!("Error: {}", err));
+                    }
                 }
             }
         }
@@ -785,10 +826,86 @@ pub fn App() -> Element {
 
             // Overlay controls section
             section { class: "overlay-controls",
-                h3 { "Overlays" }
+                div { class: "overlays-header",
+                    h3 { "Overlays" }
 
-                // Settings controls row (Hide/Show, Lock, Customize)
-                h4 { class: "subsection-title", "Settings" }
+                    // Quick profile selector
+                    if !profile_names().is_empty() {
+                        div { class: "profile-selector",
+                            i { class: "fa-solid fa-user-gear" }
+                            select {
+                                class: "profile-dropdown",
+                                value: active_profile().unwrap_or_default(),
+                                onchange: move |e| {
+                                    let selected = e.value();
+                                    if selected.is_empty() { return; }
+
+                                    spawn(async move {
+                                        let obj = js_sys::Object::new();
+                                        js_sys::Reflect::set(&obj, &JsValue::from_str("name"), &JsValue::from_str(&selected)).unwrap();
+                                        let result = invoke("load_profile", obj.into()).await;
+                                        if result.is_undefined() || result.is_null() {
+                                            active_profile.set(Some(selected.clone()));
+                                            // Refresh overlay settings
+                                            let config_result = invoke("get_config", JsValue::NULL).await;
+                                            if let Ok(config) = serde_wasm_bindgen::from_value::<AppConfig>(config_result) {
+                                                overlay_settings.set(config.overlay_settings);
+                                            }
+                                            // Refresh running overlays
+                                            let _ = invoke("refresh_overlay_settings", JsValue::NULL).await;
+                                            // Update UI button states from actual overlay status
+                                            let status_result = invoke("get_overlay_status", JsValue::NULL).await;
+                                            if let Ok(status) = serde_wasm_bindgen::from_value::<OverlayStatus>(status_result) {
+                                                let mut new_map = std::collections::HashMap::new();
+                                                for ot in MetricType::all_metrics() {
+                                                    let key = ot.config_key().to_string();
+                                                    new_map.insert(*ot, status.enabled.contains(&key));
+                                                }
+                                                metric_overlays_enabled.set(new_map);
+                                                personal_enabled.set(status.personal_enabled);
+                                                raid_enabled.set(status.raid_enabled);
+                                                overlays_visible.set(status.overlays_visible);
+                                            }
+                                        }
+                                    });
+                                },
+                                for name in profile_names().iter() {
+                                    {
+                                        let pname = name.clone();
+                                        let is_selected = active_profile().as_ref() == Some(&pname);
+                                        rsx! {
+                                            option {
+                                                value: "{pname}",
+                                                selected: is_selected,
+                                                "{pname}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Quick save button (only show if a profile is selected)
+                            if active_profile().is_some() {
+                                button {
+                                    class: "profile-save-btn",
+                                    title: "Save current settings to profile",
+                                    onclick: move |_| {
+                                        if let Some(profile_name) = active_profile() {
+                                            spawn(async move {
+                                                let obj = js_sys::Object::new();
+                                                js_sys::Reflect::set(&obj, &JsValue::from_str("name"), &JsValue::from_str(&profile_name)).unwrap();
+                                                let _ = invoke("save_profile", obj.into()).await;
+                                            });
+                                        }
+                                    },
+                                    i { class: "fa-solid fa-floppy-disk" }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Overlay Controls row (Hide/Show, Lock, Rearrange Frames)
+                h4 { class: "subsection-title", "Overlay Controls" }
                 div { class: "settings-controls",
                     // Show/hide toggle (or placeholder if none enabled)
                     if any_enabled {
@@ -824,10 +941,22 @@ pub fn App() -> Element {
                         }
                     }
                     button {
-                        class: "btn btn-control btn-settings",
-                        onclick: move |_| settings_open.set(!settings_open()),
-                        i { class: "fa-solid fa-screwdriver-wrench" }
-                        span { " Customize" }
+                        class: if is_rearrange_mode { "btn btn-control btn-rearrange btn-active" } else { "btn btn-control btn-rearrange" },
+                        disabled: !raid_on || is_move_mode,
+                        onclick: toggle_rearrange,
+                        i { class: "fa-solid fa-grip" }
+                        span { " Rearrange" }
+                    }
+                    button {
+                        class: "btn btn-control btn-clear-frames",
+                        disabled: !raid_on,
+                        onclick: move |_| {
+                            spawn(async move {
+                                let _ = invoke("clear_raid_registry", JsValue::NULL).await;
+                            });
+                        },
+                        i { class: "fa-solid fa-trash" }
+                        span { " Clear Frames" }
                     }
                 }
 
@@ -843,12 +972,6 @@ pub fn App() -> Element {
                         class: if raid_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
                         onclick: toggle_raid,
                         "Raid Frames"
-                    }
-                    button {
-                        class: if is_rearrange_mode { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                        disabled: !raid_on || is_move_mode,
-                        onclick: toggle_rearrange,
-                        "Rearrange"
                     }
                 }
 
@@ -867,6 +990,16 @@ pub fn App() -> Element {
                                 }
                             }
                         }
+                    }
+                }
+
+                // Customize button (own section)
+                div { class: "customize-section",
+                    button {
+                        class: "btn btn-control btn-settings",
+                        onclick: move |_| settings_open.set(!settings_open()),
+                        i { class: "fa-solid fa-screwdriver-wrench" }
+                        span { " Customize" }
                     }
                 }
             }
@@ -906,6 +1039,12 @@ pub fn App() -> Element {
                     SettingsPanel {
                         settings: overlay_settings,
                         selected_tab: selected_overlay_tab,
+                        profile_names: profile_names,
+                        active_profile: active_profile,
+                        metric_overlays_enabled: metric_overlays_enabled,
+                        personal_enabled: personal_enabled,
+                        raid_enabled: raid_enabled,
+                        overlays_visible: overlays_visible,
                         on_close: move |_| settings_open.set(false),
                         on_header_mousedown: move |e: MouseEvent| {
                             let (panel_x, panel_y) = settings_panel_pos();
@@ -964,6 +1103,79 @@ pub fn App() -> Element {
                                         span { class: "status-dot status-on" }
                                         span { "Watching for new log files" }
                                     }
+                                }
+                            }
+
+                            // Hotkey Settings Section
+                            div { class: "settings-section",
+                                h4 { "Global Hotkeys" }
+                                p { class: "hint", "Configure keyboard shortcuts. Format: Ctrl+Shift+Key (Windows/macOS only)" }
+                                p { class: "hint hint-warning",
+                                    i { class: "fa-solid fa-triangle-exclamation" }
+                                    " Not supported on Linux. Restart app after changes."
+                                }
+
+                                div { class: "hotkey-grid",
+                                    div { class: "setting-row",
+                                        label { "Show/Hide Overlays" }
+                                        input {
+                                            r#type: "text",
+                                            class: "hotkey-input",
+                                            placeholder: "e.g., Ctrl+Shift+O",
+                                            value: hotkey_visibility,
+                                            oninput: move |e| hotkey_visibility.set(e.value())
+                                        }
+                                    }
+
+                                    div { class: "setting-row",
+                                        label { "Toggle Move Mode" }
+                                        input {
+                                            r#type: "text",
+                                            class: "hotkey-input",
+                                            placeholder: "e.g., Ctrl+Shift+M",
+                                            value: hotkey_move_mode,
+                                            oninput: move |e| hotkey_move_mode.set(e.value())
+                                        }
+                                    }
+
+                                    div { class: "setting-row",
+                                        label { "Toggle Rearrange Mode" }
+                                        input {
+                                            r#type: "text",
+                                            class: "hotkey-input",
+                                            placeholder: "e.g., Ctrl+Shift+R",
+                                            value: hotkey_rearrange,
+                                            oninput: move |e| hotkey_rearrange.set(e.value())
+                                        }
+                                    }
+                                }
+
+                                div { class: "settings-footer",
+                                    button {
+                                        class: "btn btn-save",
+                                        onclick: move |_| {
+                                            let vis = hotkey_visibility();
+                                            let mov = hotkey_move_mode();
+                                            let rea = hotkey_rearrange();
+
+                                            spawn(async move {
+                                                let result = invoke("get_config", JsValue::NULL).await;
+                                                if let Ok(mut config) = serde_wasm_bindgen::from_value::<AppConfig>(result) {
+                                                    config.hotkeys.toggle_visibility = if vis.is_empty() { None } else { Some(vis) };
+                                                    config.hotkeys.toggle_move_mode = if mov.is_empty() { None } else { Some(mov) };
+                                                    config.hotkeys.toggle_rearrange_mode = if rea.is_empty() { None } else { Some(rea) };
+
+                                                    let args = serde_wasm_bindgen::to_value(&config).unwrap_or(JsValue::NULL);
+                                                    let obj = js_sys::Object::new();
+                                                    js_sys::Reflect::set(&obj, &JsValue::from_str("config"), &args).unwrap();
+                                                    let _ = invoke("update_config", obj.into()).await;
+                                                    hotkey_save_status.set("Saved! Restart to apply.".to_string());
+                                                }
+                                            });
+                                        },
+                                        "Save Hotkeys"
+                                    }
+                                    span { class: "save-status", "{hotkey_save_status}" }
                                 }
                             }
                         }

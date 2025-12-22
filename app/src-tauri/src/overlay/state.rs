@@ -24,6 +24,8 @@ pub enum OverlayCommand {
     UpdateData(OverlayData),
     /// Update overlay configuration
     UpdateConfig(OverlayConfigUpdate),
+    /// Set overlay position (x, y in screen coordinates)
+    SetPosition(i32, i32),
     /// Request current position via oneshot channel
     GetPosition(tokio::sync::oneshot::Sender<PositionEvent>),
     /// Shutdown the overlay
@@ -74,6 +76,8 @@ pub struct OverlayState {
     pub move_mode: bool,
     /// Raid rearrange mode state (click-to-swap frames)
     pub rearrange_mode: bool,
+    /// Whether overlays are currently visible (mirrors config)
+    pub overlays_visible: bool,
 }
 
 impl Default for OverlayState {
@@ -82,6 +86,7 @@ impl Default for OverlayState {
             overlays: HashMap::new(),
             move_mode: false,
             rearrange_mode: false,
+            overlays_visible: true,
         }
     }
 }
@@ -175,5 +180,22 @@ impl OverlayState {
     /// Get all overlay kinds and their channels
     pub fn all_overlays(&self) -> Vec<(OverlayType, &Sender<OverlayCommand>)> {
         self.overlays.iter().map(|(k, h)| (*k, &h.tx)).collect()
+    }
+
+    /// Get list of running overlay kinds
+    pub fn running_overlays(&self) -> Vec<OverlayType> {
+        self.overlays.keys().copied().collect()
+    }
+
+    /// Set move mode and broadcast to all overlays
+    pub fn set_move_mode(&mut self, enabled: bool) {
+        self.move_mode = enabled;
+        // Note: Actual broadcast to overlays must be done by caller with async context
+    }
+
+    /// Set rearrange mode for raid overlay
+    pub fn set_rearrange_mode(&mut self, enabled: bool) {
+        self.rearrange_mode = enabled;
+        // Note: Actual broadcast to overlay must be done by caller with async context
     }
 }

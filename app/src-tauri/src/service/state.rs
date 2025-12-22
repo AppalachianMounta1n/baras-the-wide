@@ -41,6 +41,9 @@ pub struct RaidSlotRegistry {
     entity_to_slot: HashMap<i64, u8>,
     /// Maximum number of slots (configurable, default 8)
     max_slots: u8,
+    /// Pending discipline info for entities not yet registered
+    /// (DisciplineChanged often fires before player is registered)
+    pending_disciplines: HashMap<i64, i64>,
 }
 
 impl RaidSlotRegistry {
@@ -49,12 +52,14 @@ impl RaidSlotRegistry {
             slots: HashMap::new(),
             entity_to_slot: HashMap::new(),
             max_slots,
+            pending_disciplines: HashMap::new(),
         }
     }
 
     /// Try to register a player in the first available slot.
     /// Returns `Some(slot)` if newly registered, `None` if already registered or full.
     /// This is the primary registration method - duplicates are silently rejected.
+    /// Any pending discipline info is automatically applied upon registration.
     pub fn try_register(&mut self, entity_id: i64, name: String) -> Option<u8> {
         // Already registered - reject
         if self.entity_to_slot.contains_key(&entity_id) {
@@ -63,7 +68,13 @@ impl RaidSlotRegistry {
 
         // Find first available slot (returns None if all full)
         let slot = self.find_first_available_slot()?;
-        let player = RegisteredPlayer::new(entity_id, name);
+        let mut player = RegisteredPlayer::new(entity_id, name);
+
+        // Check for pending discipline info (DisciplineChanged often fires before registration)
+        if let Some(discipline_id) = self.pending_disciplines.remove(&entity_id) {
+            player.discipline_id = Some(discipline_id);
+            eprintln!("[RAID-REGISTRY] Applied pending discipline {} to entity {}", discipline_id, entity_id);
+        }
 
         self.slots.insert(slot, player);
         self.entity_to_slot.insert(entity_id, slot);
@@ -72,13 +83,20 @@ impl RaidSlotRegistry {
         Some(slot)
     }
 
-    /// Update player's class/discipline from DisciplineChanged event
+    /// Update player's class/discipline from DisciplineChanged event.
+    /// If the player isn't registered yet, stores the discipline for later application.
     pub fn update_discipline(&mut self, entity_id: i64, class_id: i64, discipline_id: i64) {
         if let Some(&slot) = self.entity_to_slot.get(&entity_id) {
+            // Player is registered - update directly
             if let Some(player) = self.slots.get_mut(&slot) {
                 player.class_id = Some(class_id);
                 player.discipline_id = Some(discipline_id);
+                eprintln!("[RAID-REGISTRY] Updated discipline for entity {} in slot {}: discipline_id={}", entity_id, slot, discipline_id);
             }
+        } else {
+            // Player not registered yet - store for later
+            self.pending_disciplines.insert(entity_id, discipline_id);
+            eprintln!("[RAID-REGISTRY] Stored pending discipline for entity {}: discipline_id={}", entity_id, discipline_id);
         }
     }
 
@@ -145,6 +163,7 @@ impl RaidSlotRegistry {
     pub fn clear(&mut self) {
         self.slots.clear();
         self.entity_to_slot.clear();
+        self.pending_disciplines.clear();
         eprintln!("[RAID-REGISTRY] Cleared all slots");
     }
 
@@ -166,6 +185,56 @@ impl RaidSlotRegistry {
     /// Maximum slots configured
     pub fn max_slots(&self) -> u8 {
         self.max_slots
+    }
+
+    /// Update max slots and compact players if grid shrinks.
+    /// Players in slots >= new_max are moved to available lower slots.
+    /// Returns the number of players that couldn't fit and were removed.
+    pub fn set_max_slots(&mut self, new_max: u8) -> usize {
+        if new_max >= self.max_slots {
+            self.max_slots = new_max;
+            return 0;
+        }
+
+        // Collect players that need to be moved (in slots >= new_max)
+        let mut displaced: Vec<RegisteredPlayer> = Vec::new();
+        let mut slots_to_remove = Vec::new();
+
+        for (&slot, _) in &self.slots {
+            if slot >= new_max {
+                slots_to_remove.push(slot);
+            }
+        }
+
+        for slot in slots_to_remove {
+            if let Some(player) = self.slots.remove(&slot) {
+                self.entity_to_slot.remove(&player.entity_id);
+                displaced.push(player);
+            }
+        }
+
+        self.max_slots = new_max;
+
+        // Try to place displaced players in available slots
+        let mut removed_count = 0;
+        for player in displaced {
+            if let Some(new_slot) = self.find_first_available_slot() {
+                let entity_id = player.entity_id;
+                self.slots.insert(new_slot, player);
+                self.entity_to_slot.insert(entity_id, new_slot);
+                eprintln!("[RAID-REGISTRY] Compacted player {} to slot {}", entity_id, new_slot);
+            } else {
+                // No room - player is lost
+                eprintln!("[RAID-REGISTRY] No room for player {} after grid resize", player.entity_id);
+                removed_count += 1;
+            }
+        }
+
+        if removed_count > 0 {
+            eprintln!("[RAID-REGISTRY] Grid resize: {} players removed (no available slots)", removed_count);
+        }
+
+        removed_count
     }
 }
 

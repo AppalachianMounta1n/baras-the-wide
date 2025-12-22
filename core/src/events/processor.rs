@@ -56,6 +56,15 @@ impl EventProcessor {
                 }
             }
             self.add_player_to_encounter(&event, cache);
+
+            // Emit DisciplineChanged for ALL players (used for raid frame role detection)
+            if event.effect.discipline_id != 0 {
+                signals.push(GameSignal::DisciplineChanged {
+                    entity_id: event.source_entity.log_id,
+                    discipline_id: event.effect.discipline_id,
+                    timestamp: event.timestamp,
+                });
+            }
         }
 
         // 2. Handle death/revive

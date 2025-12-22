@@ -187,6 +187,182 @@ pub async fn hide_overlay(
 // Bulk Overlay Commands
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Implementation of hide_all_overlays (for use by hotkeys and commands)
+pub async fn hide_all_overlays_impl(
+    state: SharedOverlayState,
+    service: crate::service::ServiceHandle,
+) -> Result<bool, String> {
+    // Update and persist overlays_visible = false
+    let mut config = service.config().await;
+    config.overlay_settings.overlays_visible = false;
+    service.update_config(config).await?;
+
+    // Shutdown all running overlays
+    let handles = {
+        let mut state = state.lock().map_err(|e| e.to_string())?;
+        state.move_mode = false;
+        state.overlays_visible = false;
+        state.drain()
+    };
+
+    for handle in handles {
+        let _ = handle.tx.send(OverlayCommand::Shutdown).await;
+        let _ = handle.handle.join();
+    }
+
+    Ok(true)
+}
+
+/// Implementation of show_all_overlays (for use by hotkeys and commands)
+pub async fn show_all_overlays_impl(
+    state: SharedOverlayState,
+    service: crate::service::ServiceHandle,
+) -> Result<Vec<MetricType>, String> {
+    // Update and persist overlays_visible = true
+    let mut config = service.config().await;
+    config.overlay_settings.overlays_visible = true;
+    service.update_config(config.clone()).await?;
+
+    // Update state
+    {
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        s.overlays_visible = true;
+    }
+
+    let enabled_keys = config.overlay_settings.enabled_types();
+    let metric_opacity = config.overlay_settings.metric_opacity;
+    let personal_opacity = config.overlay_settings.personal_opacity;
+
+    // Get current combat data once for all overlays
+    let combat_data = if service.is_tailing().await {
+        service.current_combat_data().await
+    } else {
+        None
+    };
+
+    let mut shown_metric_types = Vec::new();
+    let mut needs_monitor_save: Vec<(String, tokio::sync::mpsc::Sender<OverlayCommand>)> = Vec::new();
+
+    for key in &enabled_keys {
+        if key == "personal" {
+            let kind = OverlayType::Personal;
+            let already_running = {
+                let s = state.lock().map_err(|e| e.to_string())?;
+                s.is_running(kind)
+            };
+
+            if !already_running {
+                let position = config.overlay_settings.get_position("personal");
+                let needs_save = position.monitor_id.is_none();
+                let personal_config = config.overlay_settings.personal_overlay.clone();
+                let overlay_handle = create_personal_overlay(position, personal_config, personal_opacity)?;
+                let tx = overlay_handle.tx.clone();
+
+                {
+                    let mut s = state.lock().map_err(|e| e.to_string())?;
+                    s.insert(overlay_handle);
+                }
+
+                if let Some(ref data) = combat_data
+                    && let Some(stats) = data.to_personal_stats()
+                {
+                    let _ = tx.send(OverlayCommand::UpdateData(OverlayData::Personal(stats))).await;
+                }
+
+                if needs_save {
+                    needs_monitor_save.push(("personal".to_string(), tx));
+                }
+            }
+        } else if key == "raid" {
+            let kind = OverlayType::Raid;
+            let already_running = {
+                let s = state.lock().map_err(|e| e.to_string())?;
+                s.is_running(kind)
+            };
+
+            if !already_running {
+                let position = config.overlay_settings.get_position("raid");
+                let needs_save = position.monitor_id.is_none();
+                let raid_settings = &config.overlay_settings.raid_overlay;
+                let layout = RaidGridLayout::from_config(raid_settings);
+                let raid_config: RaidOverlayConfig = raid_settings.clone().into();
+                let overlay_handle = create_raid_overlay(position, layout, raid_config, config.overlay_settings.raid_opacity)?;
+                let tx = overlay_handle.tx.clone();
+
+                {
+                    let mut s = state.lock().map_err(|e| e.to_string())?;
+                    s.insert(overlay_handle);
+                }
+
+                if needs_save {
+                    needs_monitor_save.push(("raid".to_string(), tx));
+                }
+            }
+        } else if let Some(overlay_type) = MetricType::from_config_key(key) {
+            let kind = OverlayType::Metric(overlay_type);
+            {
+                let s = state.lock().map_err(|e| e.to_string())?;
+                if s.is_running(kind) {
+                    shown_metric_types.push(overlay_type);
+                    continue;
+                }
+            }
+
+            let position = config.overlay_settings.get_position(key);
+            let needs_save = position.monitor_id.is_none();
+            let appearance = super::get_appearance_for_type(&config.overlay_settings, overlay_type);
+            let overlay_handle = create_metric_overlay(overlay_type, position, appearance, metric_opacity)?;
+            let tx = overlay_handle.tx.clone();
+
+            {
+                let mut s = state.lock().map_err(|e| e.to_string())?;
+                s.insert(overlay_handle);
+            }
+
+            if let Some(ref data) = combat_data
+                && !data.metrics.is_empty()
+            {
+                let entries = create_entries_for_type(overlay_type, &data.metrics);
+                let _ = tx.send(OverlayCommand::UpdateData(OverlayData::Metrics(entries))).await;
+            }
+
+            if needs_save {
+                needs_monitor_save.push((key.clone(), tx.clone()));
+            }
+
+            shown_metric_types.push(overlay_type);
+        }
+    }
+
+    // Save monitor_id for overlays that didn't have one
+    if !needs_monitor_save.is_empty() {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let mut config = service.config().await;
+        for (key, tx) in needs_monitor_save {
+            let (pos_tx, pos_rx) = tokio::sync::oneshot::channel();
+            let _ = tx.send(OverlayCommand::GetPosition(pos_tx)).await;
+            if let Ok(pos) = pos_rx.await {
+                let relative_x = pos.x - pos.monitor_x;
+                let relative_y = pos.y - pos.monitor_y;
+                config.overlay_settings.set_position(
+                    &key,
+                    OverlayPositionConfig {
+                        x: relative_x,
+                        y: relative_y,
+                        width: pos.width,
+                        height: pos.height,
+                        monitor_id: pos.monitor_id,
+                    },
+                );
+            }
+        }
+        let _ = service.update_config(config).await;
+    }
+
+    Ok(shown_metric_types)
+}
+
 /// Hide all running overlays and set overlays_visible=false
 #[tauri::command]
 pub async fn hide_all_overlays(
@@ -449,7 +625,9 @@ pub async fn toggle_raid_rearrange(
     let (raid_tx, new_mode) = {
         let mut state = state.lock().map_err(|e| e.to_string())?;
         if !state.is_raid_running() {
-            return Err("Raid overlay not running".to_string());
+            // Raid not running - just return false, don't error
+            eprintln!("[REARRANGE] Raid overlay not running, ignoring toggle");
+            return Ok(false);
         }
         state.rearrange_mode = !state.rearrange_mode;
         let tx = state.get_raid_tx().cloned();
@@ -519,14 +697,140 @@ pub async fn refresh_overlay_settings(
     let metric_opacity = config.overlay_settings.metric_opacity;
     let personal_opacity = config.overlay_settings.personal_opacity;
 
-    // Get all running overlays with their kinds
+    // ─────────────────────────────────────────────────────────────────────────
+    // Handle Personal Overlay - enable/disable based on profile
+    // ─────────────────────────────────────────────────────────────────────────
+    let personal_enabled = config.overlay_settings.enabled.get("personal").copied().unwrap_or(false);
+    let personal_running = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.is_running(OverlayType::Personal)
+    };
+
+    if personal_running && !personal_enabled {
+        // Shut down personal overlay if running but not enabled in profile
+        eprintln!("[REFRESH] Shutting down personal overlay (disabled in profile)");
+        if let Ok(mut state_guard) = state.lock() {
+            if let Some(handle) = state_guard.remove(OverlayType::Personal) {
+                let _ = handle.tx.try_send(OverlayCommand::Shutdown);
+            }
+        }
+    } else if !personal_running && personal_enabled {
+        // Start personal overlay if not running but enabled in profile
+        eprintln!("[REFRESH] Starting personal overlay (enabled in profile)");
+        let position = config.overlay_settings.get_position("personal");
+        let personal_config = config.overlay_settings.personal_overlay.clone();
+        match create_personal_overlay(position, personal_config, personal_opacity) {
+            Ok(handle) => {
+                if let Ok(mut state_guard) = state.lock() {
+                    state_guard.insert(handle);
+                }
+            }
+            Err(e) => eprintln!("[REFRESH] Failed to create personal overlay: {}", e),
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Handle Metric Overlays - enable/disable based on profile
+    // ─────────────────────────────────────────────────────────────────────────
+    for metric_type in MetricType::all() {
+        let key = metric_type.config_key();
+        let enabled = config.overlay_settings.enabled.get(key).copied().unwrap_or(false);
+        let running = {
+            let s = state.lock().map_err(|e| e.to_string())?;
+            s.is_running(OverlayType::Metric(*metric_type))
+        };
+
+        if running && !enabled {
+            // Shut down metric overlay if running but not enabled in profile
+            eprintln!("[REFRESH] Shutting down {} overlay (disabled in profile)", key);
+            if let Ok(mut state_guard) = state.lock() {
+                if let Some(handle) = state_guard.remove(OverlayType::Metric(*metric_type)) {
+                    let _ = handle.tx.try_send(OverlayCommand::Shutdown);
+                }
+            }
+        } else if !running && enabled {
+            // Start metric overlay if not running but enabled in profile
+            eprintln!("[REFRESH] Starting {} overlay (enabled in profile)", key);
+            let position = config.overlay_settings.get_position(key);
+            let appearance = super::get_appearance_for_type(&config.overlay_settings, *metric_type);
+            match create_metric_overlay(*metric_type, position, appearance, metric_opacity) {
+                Ok(handle) => {
+                    if let Ok(mut state_guard) = state.lock() {
+                        state_guard.insert(handle);
+                    }
+                }
+                Err(e) => eprintln!("[REFRESH] Failed to create {} overlay: {}", key, e),
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Handle Raid Overlay - always recreate to handle grid size changes
+    // ─────────────────────────────────────────────────────────────────────────
+    let raid_enabled_in_profile = config.overlay_settings.enabled.get("raid").copied().unwrap_or(false);
+
+    // Check if raid was running and shut it down
+    let raid_was_running = {
+        let mut was_running = false;
+        if let Ok(mut state_guard) = state.lock() {
+            if let Some(handle) = state_guard.remove(OverlayType::Raid) {
+                eprintln!("[REFRESH] Shutting down raid overlay for refresh");
+                let _ = handle.tx.try_send(OverlayCommand::Shutdown);
+                was_running = true;
+            }
+        }
+        was_running
+    };
+
+    // Recreate raid if it was running OR if profile has it enabled
+    if raid_was_running || raid_enabled_in_profile {
+        eprintln!("[REFRESH] Recreating raid overlay (was_running={}, profile_enabled={})",
+            raid_was_running, raid_enabled_in_profile);
+        let position = config.overlay_settings.get_position("raid");
+        let raid_settings = &config.overlay_settings.raid_overlay;
+        let layout = RaidGridLayout::from_config(raid_settings);
+        let raid_config: RaidOverlayConfig = raid_settings.clone().into();
+        let raid_opacity = config.overlay_settings.raid_opacity;
+
+        match create_raid_overlay(position, layout, raid_config, raid_opacity) {
+            Ok(handle) => {
+                if let Ok(mut state_guard) = state.lock() {
+                    state_guard.insert(handle);
+                    eprintln!("[REFRESH] Raid overlay created and inserted into state");
+                }
+            }
+            Err(e) => {
+                eprintln!("[REFRESH] Failed to create raid overlay: {}", e);
+            }
+        }
+    } else {
+        eprintln!("[REFRESH] Raid not running and not enabled in profile, skipping");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Update config for all currently running overlays
+    // ─────────────────────────────────────────────────────────────────────────
     let overlays: Vec<_> = {
         let state = state.lock().map_err(|e| e.to_string())?;
         state.all_overlays().into_iter().map(|(k, tx)| (k, tx.clone())).collect()
     };
 
-    // Send updated config to each overlay based on its type (with per-category opacity)
+    // Send updated config and position to each overlay based on its type
     for (kind, tx) in overlays {
+        // Get the config key for this overlay type
+        let config_key = match kind {
+            OverlayType::Metric(overlay_type) => overlay_type.config_key().to_string(),
+            OverlayType::Personal => "personal".to_string(),
+            OverlayType::Raid => "raid".to_string(),
+        };
+
+        // Send position update if we have saved position for this overlay
+        if let Some(pos) = config.overlay_settings.positions.get(&config_key) {
+            eprintln!("[REFRESH] Updating {} position to ({}, {})", config_key, pos.x, pos.y);
+            let _ = tx.send(OverlayCommand::SetPosition(pos.x, pos.y)).await;
+        }
+
+        // Send config update
         let config_update = match kind {
             OverlayType::Metric(overlay_type) => {
                 let appearance = super::get_appearance_for_type(&config.overlay_settings, overlay_type);
