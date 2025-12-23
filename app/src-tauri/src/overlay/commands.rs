@@ -768,10 +768,9 @@ pub async fn refresh_overlay_settings(
     if personal_running && !personal_enabled {
         // Shut down personal overlay if running but not enabled in profile
         eprintln!("[REFRESH] Shutting down personal overlay (disabled in profile)");
-        if let Ok(mut state_guard) = state.lock() {
-            if let Some(handle) = state_guard.remove(OverlayType::Personal) {
+        if let Ok(mut state_guard) = state.lock()
+            && let Some(handle) = state_guard.remove(OverlayType::Personal) {
                 let _ = handle.tx.try_send(OverlayCommand::Shutdown);
-            }
         }
     } else if !personal_running && personal_enabled {
         // Start personal overlay if not running but enabled in profile
@@ -802,10 +801,9 @@ pub async fn refresh_overlay_settings(
         if running && !enabled {
             // Shut down metric overlay if running but not enabled in profile
             eprintln!("[REFRESH] Shutting down {} overlay (disabled in profile)", key);
-            if let Ok(mut state_guard) = state.lock() {
-                if let Some(handle) = state_guard.remove(OverlayType::Metric(*metric_type)) {
+            if let Ok(mut state_guard) = state.lock()
+                && let Some(handle) = state_guard.remove(OverlayType::Metric(*metric_type)) {
                     let _ = handle.tx.try_send(OverlayCommand::Shutdown);
-                }
             }
         } else if !running && enabled {
             // Start metric overlay if not running but enabled in profile
@@ -831,12 +829,11 @@ pub async fn refresh_overlay_settings(
     // Check if raid was running and shut it down
     let raid_was_running = {
         let mut was_running = false;
-        if let Ok(mut state_guard) = state.lock() {
-            if let Some(handle) = state_guard.remove(OverlayType::Raid) {
+        if let Ok(mut state_guard) = state.lock()
+            && let Some(handle) = state_guard.remove(OverlayType::Raid) {
                 eprintln!("[REFRESH] Shutting down raid overlay for refresh");
                 let _ = handle.tx.try_send(OverlayCommand::Shutdown);
                 was_running = true;
-            }
         }
         was_running
     };
@@ -877,10 +874,9 @@ pub async fn refresh_overlay_settings(
 
     if boss_health_running && !boss_health_enabled {
         eprintln!("[REFRESH] Shutting down boss health overlay (disabled in profile)");
-        if let Ok(mut state_guard) = state.lock() {
-            if let Some(handle) = state_guard.remove(OverlayType::BossHealth) {
+        if let Ok(mut state_guard) = state.lock()
+            && let Some(handle) = state_guard.remove(OverlayType::BossHealth) {
                 let _ = handle.tx.try_send(OverlayCommand::Shutdown);
-            }
         }
     } else if !boss_health_running && boss_health_enabled {
         eprintln!("[REFRESH] Starting boss health overlay (enabled in profile)");

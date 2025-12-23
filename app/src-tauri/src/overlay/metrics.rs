@@ -19,27 +19,27 @@ pub fn create_entries_for_type(overlay_type: MetricType, metrics: &[PlayerMetric
     let mut values: Vec<(String, i64, i64)> = match overlay_type {
         MetricType::Dps => metrics
             .iter()
-            .map(|m| (m.name.clone(), m.dps, m.total_damage as i64))
+            .map(|m| (m.name.clone(), m.dps, m.total_damage))
             .collect(),
         MetricType::EDps => metrics
             .iter()
-            .map(|m| (m.name.clone(), m.edps, m.total_damage_effective as i64))
+            .map(|m| (m.name.clone(), m.edps, m.total_damage_effective))
             .collect(),
         MetricType::BossDps => metrics
             .iter()
-            .map(|m| (m.name.clone(), m.bossdps, m.total_damage_boss as i64))
+            .map(|m| (m.name.clone(), m.bossdps, m.total_damage_boss))
             .collect(),
         MetricType::Hps => metrics
             .iter()
-            .map(|m| (m.name.clone(), m.hps, m.total_healing as i64))
+            .map(|m| (m.name.clone(), m.hps, m.total_healing))
             .collect(),
         MetricType::EHps => metrics
             .iter()
-            .map(|m| (m.name.clone(), m.ehps, m.total_healing_effective as i64))
+            .map(|m| (m.name.clone(), m.ehps, m.total_healing_effective))
             .collect(),
         MetricType::Tps => metrics
             .iter()
-            .map(|m| (m.name.clone(), m.tps, m.total_threat as i64))
+            .map(|m| (m.name.clone(), m.tps, m.total_threat))
             .collect(),
         MetricType::Dtps => metrics
             .iter()
@@ -47,7 +47,7 @@ pub fn create_entries_for_type(overlay_type: MetricType, metrics: &[PlayerMetric
             .collect(),
         MetricType::Abs => metrics
             .iter()
-            .map(|m| (m.name.clone(), m.abs, m.total_shielding as i64))
+            .map(|m| (m.name.clone(), m.abs, m.total_shielding))
             .collect(),
     };
 
