@@ -17,7 +17,7 @@ use baras_core::directory_watcher;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, RwLock};
 
-use baras_core::context::{resolve, AppConfig, DirectoryIndex, ParsingSession};
+use baras_core::context::{resolve, AppConfig, AppConfigExt, DirectoryIndex, ParsingSession};
 use baras_core::encounter::EncounterState;
 use baras_core::encounter::summary::classify_encounter;
 use baras_core::directory_watcher::DirectoryWatcher;

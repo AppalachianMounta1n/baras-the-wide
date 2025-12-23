@@ -5,9 +5,9 @@ mod interner;
 mod parsing_session;
 
 pub use app_config::{
-    AppConfig, OverlayPositionConfig, OverlaySettings,
-    OverlayAppearanceConfig, PersonalOverlayConfig, PersonalStat, Color,
-    RaidOverlaySettings, BossHealthConfig,
+    AppConfig, AppConfigExt, BossHealthConfig, Color, HotkeySettings,
+    OverlayAppearanceConfig, OverlayPositionConfig, OverlayProfile, OverlaySettings,
+    PersonalOverlayConfig, PersonalStat, RaidOverlaySettings, MAX_PROFILES, overlay_colors,
 };
 pub use background_tasks::BackgroundTasks;
 pub use directory_index::DirectoryIndex;

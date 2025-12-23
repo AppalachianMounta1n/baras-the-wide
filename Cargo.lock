@@ -88,6 +88,7 @@ dependencies = [
 name = "app-ui"
 version = "0.1.0"
 dependencies = [
+ "baras-types",
  "dioxus",
  "dioxus-logger",
  "dirs",
@@ -390,6 +391,7 @@ dependencies = [
 name = "baras-core"
 version = "0.1.0"
 dependencies = [
+ "baras-types",
  "chrono",
  "confy",
  "dirs",
@@ -420,6 +422,13 @@ dependencies = [
  "wayland-protocols",
  "wayland-protocols-wlr",
  "windows 0.58.0",
+]
+
+[[package]]
+name = "baras-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

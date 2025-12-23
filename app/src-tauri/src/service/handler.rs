@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-use baras_core::context::{resolve, AppConfig, OverlayAppearanceConfig};
+use baras_core::context::{resolve, AppConfig, AppConfigExt, OverlayAppearanceConfig};
 use baras_core::PlayerMetrics;
 use baras_core::encounter::EncounterState;
 use baras_core::EncounterSummary;
