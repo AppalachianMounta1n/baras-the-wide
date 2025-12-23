@@ -100,26 +100,6 @@ impl MetricOverlay {
         self.frame.set_background_alpha(alpha);
     }
 
-    /// Get scaled bar height
-    fn bar_height(&self) -> f32 {
-        self.frame.scaled(BASE_BAR_HEIGHT)
-    }
-
-    /// Get scaled bar spacing
-    fn bar_spacing(&self) -> f32 {
-        self.frame.scaled(BASE_BAR_SPACING)
-    }
-
-    /// Get scaled padding
-    fn padding(&self) -> f32 {
-        self.frame.scaled(BASE_PADDING)
-    }
-
-    /// Get scaled font size
-    fn font_size(&self) -> f32 {
-        self.frame.scaled(BASE_FONT_SIZE)
-    }
-
     /// Update the metric entries
     pub fn set_entries(&mut self, entries: Vec<MetricEntry>) {
         self.entries = entries;
@@ -141,10 +121,10 @@ impl MetricOverlay {
         let height = self.frame.height() as f32;
 
         // Get scaled layout values
-        let padding = self.padding();
-        let font_size = self.font_size();
-        let ideal_bar_height = self.bar_height();
-        let bar_spacing = self.bar_spacing();
+        let padding = self.frame.scaled(BASE_PADDING);
+        let font_size = self.frame.scaled(BASE_FONT_SIZE);
+        let ideal_bar_height = self.frame.scaled(BASE_BAR_HEIGHT);
+        let bar_spacing = self.frame.scaled(BASE_BAR_SPACING);
         // Use absolute minimum bar height (not scaled) to handle extreme aspect ratios
         let min_bar_height = MIN_BAR_HEIGHT_ABSOLUTE;
 

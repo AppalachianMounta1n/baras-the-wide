@@ -71,34 +71,6 @@ impl BossHealthOverlay {
         self.data = data;
     }
 
-    fn bar_height(&self) -> f32 {
-        self.frame.scaled(BASE_BAR_HEIGHT)
-    }
-
-    fn label_height(&self) -> f32 {
-        self.frame.scaled(BASE_LABEL_HEIGHT)
-    }
-
-    fn entry_spacing(&self) -> f32 {
-        self.frame.scaled(BASE_ENTRY_SPACING)
-    }
-
-    fn label_bar_gap(&self) -> f32 {
-        self.frame.scaled(BASE_LABEL_BAR_GAP)
-    }
-
-    fn padding(&self) -> f32 {
-        self.frame.scaled(BASE_PADDING)
-    }
-
-    fn font_size(&self) -> f32 {
-        self.frame.scaled(BASE_FONT_SIZE)
-    }
-
-    fn label_font_size(&self) -> f32 {
-        self.frame.scaled(BASE_LABEL_FONT_SIZE)
-    }
-
     /// Calculate scaled font size so text fits within max_width
     fn scaled_font_for_text(&mut self, text: &str, max_width: f32, base_font_size: f32) -> f32 {
         let (text_width, _) = self.frame.measure_text(text, base_font_size);
@@ -116,13 +88,13 @@ impl BossHealthOverlay {
     pub fn render(&mut self) {
         let width = self.frame.width() as f32;
 
-        let padding = self.padding();
-        let bar_height = self.bar_height();
-        let label_height = self.label_height();
-        let entry_spacing = self.entry_spacing();
-        let label_bar_gap = self.label_bar_gap();
-        let font_size = self.font_size();
-        let label_font_size = self.label_font_size();
+        let padding = self.frame.scaled(BASE_PADDING);
+        let bar_height = self.frame.scaled(BASE_BAR_HEIGHT);
+        let label_height = self.frame.scaled(BASE_LABEL_HEIGHT);
+        let entry_spacing = self.frame.scaled(BASE_ENTRY_SPACING);
+        let label_bar_gap = self.frame.scaled(BASE_LABEL_BAR_GAP);
+        let font_size = self.frame.scaled(BASE_FONT_SIZE);
+        let label_font_size = self.frame.scaled(BASE_LABEL_FONT_SIZE);
 
         let bar_color = color_from_rgba(self.config.bar_color);
         let font_color = color_from_rgba(self.config.font_color);

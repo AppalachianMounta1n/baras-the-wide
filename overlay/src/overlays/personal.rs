@@ -82,18 +82,6 @@ impl PersonalOverlay {
         self.stats = stats;
     }
 
-    fn font_size(&self) -> f32 {
-        self.frame.scaled(BASE_FONT_SIZE)
-    }
-
-    fn line_height(&self) -> f32 {
-        self.frame.scaled(BASE_LINE_HEIGHT)
-    }
-
-    fn padding(&self) -> f32 {
-        self.frame.scaled(BASE_PADDING)
-    }
-
     /// Get the display value for a stat
     fn stat_display(&self, stat: PersonalStat) -> (&'static str, String) {
         match stat {
@@ -139,9 +127,9 @@ impl PersonalOverlay {
     pub fn render(&mut self) {
         let width = self.frame.width() as f32;
 
-        let padding = self.padding();
-        let font_size = self.font_size();
-        let line_height = self.line_height();
+        let padding = self.frame.scaled(BASE_PADDING);
+        let font_size = self.frame.scaled(BASE_FONT_SIZE);
+        let line_height = self.frame.scaled(BASE_LINE_HEIGHT);
 
         let label_color = color_from_rgba(self.config.label_color);
         let font_color = color_from_rgba(self.config.font_color);

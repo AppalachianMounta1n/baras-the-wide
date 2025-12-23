@@ -165,6 +165,7 @@ pub fn create_summary(
     history: &mut EncounterHistory,
 ) -> Option<EncounterSummary> {
     // Skip encounters that never started combat
+    #[allow(clippy::question_mark)]
     if encounter.enter_combat_time.is_none() {
         return None;
     }
