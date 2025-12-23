@@ -232,7 +232,7 @@ impl EventProcessor {
                 source_id: event.source_entity.log_id,
                 target_id: event.target_entity.log_id,
                 target_name: event.target_entity.name,
-                target_entity_type: event.target_entity.entity_type.clone(),
+                target_entity_type: event.target_entity.entity_type,
                 timestamp: event.timestamp,
             });
         }
@@ -243,7 +243,7 @@ impl EventProcessor {
                 source_id: event.source_entity.log_id,
                 target_id: event.target_entity.log_id,
                 target_name: event.target_entity.name,
-                target_entity_type: event.target_entity.entity_type.clone(),
+                target_entity_type: event.target_entity.entity_type,
                 timestamp: event.timestamp,
             });
         } else if effect_id == effect_id::TARGETCLEARED {
@@ -295,27 +295,6 @@ impl EventProcessor {
                     timestamp,
                     encounter_id: enc.id,
                 });
-            }
-        } else if effect_id == effect_id::DAMAGE {
-            let should_start = match self.last_exit_combat_time {
-                None => true,
-                Some(last_exit) => {
-                    timestamp.signed_duration_since(last_exit).num_seconds()
-                        > COMBAT_RESTART_GAP_SECONDS
-                }
-            };
-            if should_start && let Some(enc) = cache.current_encounter_mut() {
-                    enc.state = EncounterState::InCombat;
-                    enc.enter_combat_time = Some(timestamp);
-                    enc.track_event_entities(&event);
-                    enc.accumulate_data(&event);
-                    enc.events.push(event);
-
-                    signals.push(GameSignal::CombatStarted {
-                        timestamp,
-                        encounter_id: enc.id,
-                    });
-
             }
         } else {
             // Buffer non-damage events for the upcoming encounter

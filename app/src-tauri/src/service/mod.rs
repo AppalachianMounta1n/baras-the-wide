@@ -711,17 +711,14 @@ async fn build_boss_health_data(shared: &Arc<SharedState>) -> Option<BossHealthD
     let session = session.read().await;
     let cache = session.session_cache.as_ref()?;
 
-    let entries = cache.get_boss_health();
+    // If not in combat, send empty data to clear overlay (if auto_hide enabled)
     let in_combat = shared.in_combat.load(Ordering::SeqCst);
+    if !in_combat {
+        return Some(BossHealthData::default());
+    }
 
-    Some(BossHealthData {
-        entries,
-        combat_ended_at: if !in_combat {
-            Some(std::time::Instant::now())
-        } else {
-            None
-        },
-    })
+    let entries = cache.get_boss_health();
+    Some(BossHealthData { entries })
 }
 
 /// Convert an ActiveEffect (core) to RaidEffect (overlay)

@@ -279,16 +279,9 @@ pub struct BossHealthConfig {
     /// Show percentage text on bar
     #[serde(default = "default_true")]
     pub show_percent: bool,
-    /// Auto-hide bars after combat ends
-    #[serde(default = "default_true")]
-    pub auto_hide: bool,
-    /// Seconds to wait after combat ends before hiding (0-60)
-    #[serde(default = "default_auto_hide_delay")]
-    pub auto_hide_delay_secs: u32,
 }
 
 fn default_boss_bar_color() -> Color { [200, 50, 50, 255] }  // Red
-fn default_auto_hide_delay() -> u32 { 10 }
 
 impl Default for BossHealthConfig {
     fn default() -> Self {
@@ -296,8 +289,6 @@ impl Default for BossHealthConfig {
             bar_color: default_boss_bar_color(),
             font_color: default_font_color(),
             show_percent: true,
-            auto_hide: true,
-            auto_hide_delay_secs: default_auto_hide_delay(),
         }
     }
 }

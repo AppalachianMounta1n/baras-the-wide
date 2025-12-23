@@ -2,8 +2,6 @@
 //!
 //! Displays real-time health bars for boss NPCs in the current encounter.
 
-use std::time::Instant;
-
 use baras_core::context::BossHealthConfig;
 use baras_core::BossHealthEntry;
 
@@ -19,8 +17,6 @@ use crate::widgets::ProgressBar;
 pub struct BossHealthData {
     /// Current boss health entries (sorted by encounter order)
     pub entries: Vec<BossHealthEntry>,
-    /// When combat ended (None if still in combat)
-    pub combat_ended_at: Option<Instant>,
 }
 
 /// Base dimensions for scaling calculations
@@ -116,20 +112,6 @@ impl BossHealthOverlay {
         (base_font_size * scale).max(min_font)
     }
 
-    /// Check if bars should be hidden due to auto-hide timeout
-    fn should_hide(&self) -> bool {
-        if !self.config.auto_hide {
-            return false;
-        }
-
-        if let Some(ended_at) = self.data.combat_ended_at {
-            let elapsed = ended_at.elapsed().as_secs();
-            elapsed >= self.config.auto_hide_delay_secs as u64
-        } else {
-            false
-        }
-    }
-
     /// Render the overlay
     pub fn render(&mut self) {
         let width = self.frame.width() as f32;
@@ -148,8 +130,14 @@ impl BossHealthOverlay {
         // Begin frame (clear, background, border)
         self.frame.begin_frame();
 
-        // If auto-hide is active and timer expired, just show empty window
-        if self.should_hide() || self.data.entries.is_empty() {
+        // Filter out dead bosses (0% health) and collect living ones
+        let entries: Vec<_> = self.data.entries.iter()
+            .filter(|e| e.percent() > 0.0)
+            .cloned()
+            .collect();
+
+        // Nothing to render if no living bosses
+        if entries.is_empty() {
             self.frame.end_frame();
             return;
         }
@@ -158,9 +146,6 @@ impl BossHealthOverlay {
         let bar_radius = 4.0 * self.frame.scale_factor();
 
         let mut y = padding;
-
-        // Clone entries to avoid borrow conflict with mutable self methods
-        let entries = self.data.entries.clone();
 
         for entry in &entries {
             let progress = entry.percent() / 100.0;
