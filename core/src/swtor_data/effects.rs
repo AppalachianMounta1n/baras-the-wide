@@ -27,3 +27,19 @@ pub mod effect_id {
     pub const TARGETSET: i64 = 836045448953668;
     pub const TAUNT: i64 = 836045448945488;
 }
+
+// SWTOR bug: These abilities report 6 charges on ApplyEffect instead of 7
+const CHARGE_BUG_ABILITIES: [i64; 2] = [
+    999516199190528, // Trauma Probe
+    985226842996736, // Kolto Shell
+];
+
+/// Correct charge counts for abilities with known SWTOR logging bugs.
+/// Only apply to ApplyEffect events, not ModifyCharges.
+pub fn correct_apply_charges(effect_id: i64, charges: u8) -> u8 {
+    if CHARGE_BUG_ABILITIES.contains(&effect_id) {
+        charges.saturating_add(1)
+    } else {
+        charges
+    }
+}

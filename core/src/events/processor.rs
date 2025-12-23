@@ -4,12 +4,11 @@ use crate::events::signal::GameSignal;
 use crate::session::cache::SessionCache;
 use crate::encounter::EncounterState;
 use crate::encounter::entity_info::PlayerInfo;
-use crate::swtor_data::{effect_id, effect_type_id};
+use crate::swtor_data::{effect_id, effect_type_id, correct_apply_charges};
 use chrono::NaiveDateTime;
 
 // Combat state machine constants
 const COMBAT_TIMEOUT_SECONDS: i64 = 120;
-const COMBAT_RESTART_GAP_SECONDS: i64 = 15;
 const POST_COMBAT_THRESHOLD_MS: i64 = 5000;
 
 /// Processes combat events, routes them to encounters, and emits signals.
@@ -17,8 +16,6 @@ const POST_COMBAT_THRESHOLD_MS: i64 = 5000;
 pub struct EventProcessor {
     /// Grace period for trailing damage after combat ends
     post_combat_threshold_ms: i64,
-    /// Track last exit combat time for damage-based combat start detection
-    last_exit_combat_time: Option<NaiveDateTime>,
 }
 
 impl Default for EventProcessor {
@@ -31,7 +28,6 @@ impl EventProcessor {
     pub fn new() -> Self {
         Self {
             post_combat_threshold_ms: POST_COMBAT_THRESHOLD_MS,
-            last_exit_combat_time: None,
         }
     }
 
@@ -79,7 +75,7 @@ impl EventProcessor {
             }
             signals.push(GameSignal::EntityDeath {
                 entity_id: event.target_entity.log_id,
-                entity_type: event.target_entity.entity_type.clone(),
+                entity_type: event.target_entity.entity_type,
                 timestamp: event.timestamp,
             });
         } else if event.effect.effect_id == effect_id::REVIVED {
@@ -92,7 +88,7 @@ impl EventProcessor {
             }
             signals.push(GameSignal::EntityRevived {
                 entity_id: event.source_entity.log_id,
-                entity_type: event.source_entity.entity_type.clone(),
+                entity_type: event.source_entity.entity_type,
                 timestamp: event.timestamp,
             });
         }
@@ -181,7 +177,7 @@ impl EventProcessor {
                     enc.apply_effect(&event);
                 }
                 let charges = if event.details.charges > 0 {
-                    Some(event.details.charges as u8)
+                    Some(correct_apply_charges(event.effect.effect_id, event.details.charges as u8))
                 } else {
                     None
                 };
@@ -191,7 +187,7 @@ impl EventProcessor {
                     source_id: event.source_entity.log_id,
                     target_id: event.target_entity.log_id,
                     target_name: event.target_entity.name,
-                    target_entity_type: event.target_entity.entity_type.clone(),
+                    target_entity_type: event.target_entity.entity_type,
                     timestamp: event.timestamp,
                     charges,
                 });
@@ -330,7 +326,6 @@ impl EventProcessor {
                             exit_time: last_activity,
                         };
                     }
-                    self.last_exit_combat_time = Some(last_activity);
 
                     signals.push(GameSignal::CombatEnded {
                         timestamp: last_activity,
@@ -360,7 +355,6 @@ impl EventProcessor {
                     exit_time: timestamp,
                 };
             }
-            self.last_exit_combat_time = Some(timestamp);
 
             signals.push(GameSignal::CombatEnded {
                 timestamp,
@@ -379,7 +373,6 @@ impl EventProcessor {
                 };
                 enc.events.push(event);
             }
-            self.last_exit_combat_time = Some(timestamp);
 
             signals.push(GameSignal::CombatEnded {
                 timestamp,
@@ -394,7 +387,6 @@ impl EventProcessor {
                     exit_time: timestamp,
                 };
             }
-            self.last_exit_combat_time = Some(timestamp);
 
             signals.push(GameSignal::CombatEnded {
                 timestamp,

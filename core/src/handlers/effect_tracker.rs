@@ -264,7 +264,7 @@ impl EffectTracker {
         }
 
         // Log active effect count periodically
-        if self.active_effects.len() > 0 {
+        if !self.active_effects.is_empty() {
             eprintln!("[EFFECT-TRACKER] Total active effects: {}", self.active_effects.len());
         }
     }
