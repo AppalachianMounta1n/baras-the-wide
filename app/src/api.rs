@@ -334,20 +334,24 @@ pub async fn get_effect_definitions() -> Option<Vec<EffectListItem>> {
 }
 
 /// Update an existing effect
+/// Returns true on success. Tauri commands returning Result<(), String> serialize Ok(()) as null.
 pub async fn update_effect_definition(effect: &EffectListItem) -> bool {
     let args = build_args("effect", effect);
     let result = invoke("update_effect_definition", args).await;
-    !result.is_null() && !result.is_undefined()
+    // Ok(()) serializes to null, Err would throw - so null means success
+    result.is_null() || result.is_undefined()
 }
 
 /// Delete an effect
+/// Returns true on success. Tauri commands returning Result<(), String> serialize Ok(()) as null.
 pub async fn delete_effect_definition(effect_id: &str, file_path: &str) -> bool {
     let obj = js_sys::Object::new();
     js_sys::Reflect::set(&obj, &JsValue::from_str("effectId"), &JsValue::from_str(effect_id)).unwrap();
     js_sys::Reflect::set(&obj, &JsValue::from_str("filePath"), &JsValue::from_str(file_path)).unwrap();
 
     let result = invoke("delete_effect_definition", obj.into()).await;
-    !result.is_null() && !result.is_undefined()
+    // Ok(()) serializes to null, Err would throw - so null means success
+    result.is_null() || result.is_undefined()
 }
 
 /// Duplicate an effect

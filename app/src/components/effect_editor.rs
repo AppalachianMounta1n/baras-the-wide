@@ -663,10 +663,10 @@ fn IdListEditor(
                 input {
                     r#type: "text",
                     class: "id-input",
-                    placeholder: "Add ID",
+                    placeholder: "ID (Enter to add)",
                     value: "{new_id_input}",
                     oninput: move |e| new_id_input.set(e.value()),
-                    onkeypress: move |e| {
+                    onkeydown: move |e| {
                         if e.key() == Key::Enter {
                             if let Ok(id) = new_id_input().parse::<u64>() {
                                 let mut new_ids = ids.clone();

@@ -191,7 +191,7 @@ pub enum TimerTrigger {
         #[serde(default)]
         npc_id: Option<i64>,
         #[serde(default)]
-        npc_name: Option<String>,
+        boss_name: Option<String>,
     },
     AllOf {
         conditions: Vec<TimerTrigger>,

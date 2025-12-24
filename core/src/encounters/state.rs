@@ -112,7 +112,9 @@ impl BossEncounterState {
     /// - `entity_id`: Runtime instance ID (unique per spawn)
     /// - `npc_id`: Class/template ID (same for all instances of that NPC type)
     /// - `name`: Display name (fallback for configs using names)
-    pub fn update_entity_hp(&mut self, entity_id: i64, npc_id: i64, name: &str, current: i64, max: i64) -> bool {
+    ///
+    /// Returns `Some((old_hp, new_hp))` if HP changed significantly, `None` otherwise.
+    pub fn update_entity_hp(&mut self, entity_id: i64, npc_id: i64, name: &str, current: i64, max: i64) -> Option<(f32, f32)> {
         let new_percent = if max > 0 {
             (current as f32 / max as f32) * 100.0
         } else {
@@ -137,7 +139,11 @@ impl BossEncounterState {
             }
         }
 
-        (old_percent - new_percent).abs() > 0.01
+        if (old_percent - new_percent).abs() > 0.01 {
+            Some((old_percent, new_percent))
+        } else {
+            None
+        }
     }
 
     /// Get HP percentage for a specific NPC ID (most reliable)

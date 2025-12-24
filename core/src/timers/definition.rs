@@ -208,6 +208,18 @@ impl TimerDefinition {
         matches!(&self.trigger, TimerTrigger::CombatStart)
     }
 
+    /// Check if this timer triggers when boss HP crosses below a threshold
+    /// Returns true if timer has a BossHpThreshold trigger and current HP just crossed below it
+    pub fn matches_boss_hp_threshold(&self, previous_hp: f32, current_hp: f32) -> bool {
+        match &self.trigger {
+            TimerTrigger::BossHpThreshold { hp_percent } => {
+                // Trigger when HP crosses below threshold (was above, now at or below)
+                previous_hp > *hp_percent && current_hp <= *hp_percent
+            }
+            _ => false,
+        }
+    }
+
     /// Check if this timer is active for the current phase/counter state
     pub fn is_active_for_state(&self, state: &crate::encounters::BossEncounterState) -> bool {
         // Check phase filter

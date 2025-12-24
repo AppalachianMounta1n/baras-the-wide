@@ -2717,6 +2717,105 @@ details[open] .collapsible-summary::before {
   color: #ddd;
 }
 
+/* Boss Search Select (Fuzzy Search Dropdown) */
+.boss-search-select {
+  position: relative;
+  flex: 1;
+}
+
+.search-input-wrapper {
+  position: relative;
+}
+
+.boss-search-input {
+  width: 100%;
+  padding: 0.5em 0.75em;
+  background: #2a2a2f !important;
+  border: 1px solid rgba(100, 140, 200, 0.3);
+  border-radius: 4px;
+  color: #eee !important;
+  font-size: 0.9em;
+}
+
+.boss-search-input:focus {
+  outline: none;
+  border-color: rgba(100, 160, 255, 0.5);
+  box-shadow: 0 0 0 2px rgba(100, 160, 255, 0.15);
+}
+
+.boss-search-input::placeholder {
+  color: #888;
+}
+
+.selected-boss-display {
+  position: absolute;
+  left: 0.75em;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #cdf;
+  pointer-events: none;
+  font-size: 0.9em;
+}
+
+.selected-boss-display .area-hint {
+  color: #789;
+  font-size: 0.85em;
+}
+
+.boss-search-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  background: #252530;
+  border: 1px solid rgba(100, 140, 200, 0.3);
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.boss-search-dropdown .area-header {
+  padding: 0.4em 0.75em 0.3em;
+  background: rgba(60, 80, 120, 0.3);
+  color: #9bf;
+  font-size: 0.75em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-top: 1px solid rgba(100, 140, 200, 0.15);
+}
+
+.boss-search-dropdown .area-header:first-child {
+  border-top: none;
+}
+
+.boss-search-dropdown .boss-option {
+  padding: 0.5em 0.75em 0.5em 1.25em;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.boss-search-dropdown .boss-option:hover,
+.boss-search-dropdown .boss-option.highlighted {
+  background: rgba(80, 120, 180, 0.3);
+}
+
+.boss-search-dropdown .boss-option .boss-name {
+  color: #ddd;
+  font-size: 0.9em;
+}
+
+.boss-search-dropdown .no-results {
+  padding: 1em;
+  color: #888;
+  font-size: 0.85em;
+  text-align: center;
+  font-style: italic;
+}
+
 .btn-cancel {
   padding: 0.4em 0.8em;
   background: rgba(60, 60, 65, 0.6);
@@ -2868,9 +2967,15 @@ details[open] .collapsible-summary::before {
 /* ID List Editor */
 .id-list-editor {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
   gap: 0.4em;
+  width: 100%;
+}
+
+.id-label-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
 }
 
 .id-label {
@@ -2878,22 +2983,57 @@ details[open] .collapsible-summary::before {
   font-size: 0.8em;
 }
 
+.id-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  background: rgba(100, 140, 200, 0.3);
+  border-radius: 50%;
+  color: #9bf;
+  font-size: 0.7em;
+  cursor: help;
+}
+
 .id-chips {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.3em;
+  min-height: 1.5em;
+}
+
+.id-add-row {
+  display: flex;
+  gap: 0.4em;
+  align-items: center;
 }
 
 .id-input {
-  width: 100px;
-  padding: 0.25em 0.4em;
+  width: 140px;
+  padding: 0.3em 0.5em;
   background: #2a2a2f !important;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 3px;
   color: #eee !important;
-  font-size: 0.8em;
+  font-size: 0.85em;
   font-family: monospace;
+}
+
+.btn-add-id {
+  padding: 0.3em 0.6em;
+  background: rgba(60, 120, 80, 0.5);
+  border: 1px solid rgba(100, 180, 120, 0.3);
+  border-radius: 3px;
+  color: #afa;
+  font-size: 0.85em;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-add-id:hover {
+  background: rgba(70, 140, 90, 0.6);
 }
 
 /* Trigger section styling */

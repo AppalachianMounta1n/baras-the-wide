@@ -9,9 +9,11 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
 use baras_core::effects::{DefinitionConfig, EffectCategory, EffectDefinition, EntityFilter};
+
+use crate::service::ServiceHandle;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types for Frontend
@@ -289,6 +291,7 @@ pub async fn get_effect_definitions(app_handle: AppHandle) -> Result<Vec<EffectL
 #[tauri::command]
 pub async fn update_effect_definition(
     app_handle: AppHandle,
+    service: State<'_, ServiceHandle>,
     effect: EffectListItem,
 ) -> Result<(), String> {
     let effects = load_user_effects(&app_handle)?;
@@ -316,6 +319,10 @@ pub async fn update_effect_definition(
     }
 
     save_effects_to_file(&file_effects, &file_path)?;
+
+    // Reload definitions in the running service
+    let _ = service.reload_effect_definitions().await;
+
     Ok(())
 }
 
@@ -323,6 +330,7 @@ pub async fn update_effect_definition(
 #[tauri::command]
 pub async fn create_effect_definition(
     app_handle: AppHandle,
+    service: State<'_, ServiceHandle>,
     effect: EffectListItem,
 ) -> Result<EffectListItem, String> {
     let effects = load_user_effects(&app_handle)?;
@@ -344,6 +352,10 @@ pub async fn create_effect_definition(
     file_effects.push(effect.to_definition());
 
     save_effects_to_file(&file_effects, &file_path)?;
+
+    // Reload definitions in the running service
+    let _ = service.reload_effect_definitions().await;
+
     Ok(effect)
 }
 
@@ -351,6 +363,7 @@ pub async fn create_effect_definition(
 #[tauri::command]
 pub async fn delete_effect_definition(
     app_handle: AppHandle,
+    service: State<'_, ServiceHandle>,
     effect_id: String,
     file_path: String,
 ) -> Result<(), String> {
@@ -375,6 +388,10 @@ pub async fn delete_effect_definition(
     }
 
     save_effects_to_file(&new_effects, &file_path_buf)?;
+
+    // Reload definitions in the running service
+    let _ = service.reload_effect_definitions().await;
+
     Ok(())
 }
 
@@ -382,6 +399,7 @@ pub async fn delete_effect_definition(
 #[tauri::command]
 pub async fn duplicate_effect_definition(
     app_handle: AppHandle,
+    service: State<'_, ServiceHandle>,
     effect_id: String,
     file_path: String,
 ) -> Result<EffectListItem, String> {
@@ -417,6 +435,9 @@ pub async fn duplicate_effect_definition(
     file_effects.push(new_effect.clone());
 
     save_effects_to_file(&file_effects, &file_path_buf)?;
+
+    // Reload definitions in the running service
+    let _ = service.reload_effect_definitions().await;
 
     Ok(EffectListItem::from_definition(&new_effect, &file_path_buf))
 }

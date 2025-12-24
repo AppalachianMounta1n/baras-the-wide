@@ -93,19 +93,37 @@ impl TimerManager {
     }
 
     /// Load boss definitions (indexed by area name for quick lookup)
+    /// Also extracts boss timers into the main definitions map
     pub fn load_boss_definitions(&mut self, bosses: Vec<BossDefinition>) {
         self.boss_definitions.clear();
+
+        // Clear existing boss-related timer definitions (keep generic ones)
+        // We'll re-add them from the fresh boss definitions
+        self.definitions.retain(|id, _| !id.contains('_') || id.starts_with("generic_"));
+
+        let mut timer_count = 0;
         for boss in bosses {
+            // Extract boss timers and convert to TimerDefinition
+            for boss_timer in &boss.timers {
+                if boss_timer.enabled {
+                    let timer_def = convert_boss_timer_to_definition(boss_timer, &boss);
+                    self.definitions.insert(timer_def.id.clone(), timer_def);
+                    timer_count += 1;
+                }
+            }
+
             self.boss_definitions
                 .entry(boss.area_name.clone())
                 .or_default()
                 .push(boss);
         }
+
         let boss_count: usize = self.boss_definitions.values().map(|v| v.len()).sum();
         eprintln!(
-            "TimerManager: loaded {} bosses across {} areas",
+            "TimerManager: loaded {} bosses across {} areas, {} boss timers",
             boss_count,
-            self.boss_definitions.len()
+            self.boss_definitions.len(),
+            timer_count
         );
     }
 
@@ -290,6 +308,26 @@ impl TimerManager {
         }
     }
 
+    /// Handle boss HP change - check for HP threshold triggers
+    fn handle_boss_hp_change(&mut self, previous_hp: f32, current_hp: f32, timestamp: NaiveDateTime) {
+        let matching: Vec<_> = self.definitions
+            .values()
+            .filter(|d| d.matches_boss_hp_threshold(previous_hp, current_hp) && self.is_definition_active(d))
+            .cloned()
+            .collect();
+
+        for def in matching {
+            eprintln!("[TIMER] Starting HP threshold timer '{}' (HP crossed below {}%)",
+                def.name,
+                match &def.trigger {
+                    super::TimerTrigger::BossHpThreshold { hp_percent } => *hp_percent,
+                    _ => 0.0,
+                }
+            );
+            self.start_timer(&def, timestamp, None);
+        }
+    }
+
     /// Handle combat start
     fn handle_combat_start(&mut self, timestamp: NaiveDateTime) {
         self.in_combat = true;
@@ -324,39 +362,56 @@ impl TimerManager {
 
     /// Detect boss from NPC name and activate boss definition
     fn detect_boss(&mut self, npc_name: &str) {
-        // Look up bosses for current area
-        let Some(ref area_name) = self.context.encounter_name else {
-            return;
-        };
+        // If we have an area, search only that area first
+        if let Some(ref area_name) = self.context.encounter_name {
+            if let Some(bosses) = self.boss_definitions.get(area_name) {
+                if let Some(boss_def) = bosses.iter().find(|b| b.matches_npc_name(npc_name)) {
+                    eprintln!("[TIMER] Boss detected by name: {} ({}) in {}", boss_def.name, boss_def.id, area_name);
+                    self.active_boss_def = Some(boss_def.clone());
+                    self.context.boss_name = Some(boss_def.name.clone());
+                    return;
+                }
+            }
+        }
 
-        let Some(bosses) = self.boss_definitions.get(area_name) else {
-            return;
-        };
-
-        // Check if this NPC is a known boss (by name)
-        if let Some(boss_def) = bosses.iter().find(|b| b.matches_npc_name(npc_name)) {
-            eprintln!("[TIMER] Boss detected by name: {} ({})", boss_def.name, boss_def.id);
-            self.active_boss_def = Some(boss_def.clone());
-            self.context.boss_name = Some(boss_def.name.clone());
+        // No area set or boss not found in current area - search ALL areas
+        for (area_name, bosses) in &self.boss_definitions {
+            if let Some(boss_def) = bosses.iter().find(|b| b.matches_npc_name(npc_name)) {
+                eprintln!("[TIMER] Boss detected by name: {} ({}) - inferred area: {}",
+                    boss_def.name, boss_def.id, area_name);
+                self.active_boss_def = Some(boss_def.clone());
+                self.context.boss_name = Some(boss_def.name.clone());
+                self.context.encounter_name = Some(area_name.clone());
+                return;
+            }
         }
     }
 
     /// Detect boss from NPC ID (more reliable than name)
     fn detect_boss_by_npc_id(&mut self, npc_id: i64) {
-        // Look up bosses for current area
-        let Some(ref area_name) = self.context.encounter_name else {
-            return;
-        };
+        // If we have an area, search only that area first
+        if let Some(ref area_name) = self.context.encounter_name {
+            if let Some(bosses) = self.boss_definitions.get(area_name) {
+                if let Some(boss_def) = bosses.iter().find(|b| b.matches_npc_id(npc_id)) {
+                    eprintln!("[TIMER] Boss detected by NPC ID {}: {} ({}) in {}",
+                        npc_id, boss_def.name, boss_def.id, area_name);
+                    self.active_boss_def = Some(boss_def.clone());
+                    self.context.boss_name = Some(boss_def.name.clone());
+                    return;
+                }
+            }
+        }
 
-        let Some(bosses) = self.boss_definitions.get(area_name) else {
-            return;
-        };
-
-        // Check if this NPC ID is a known boss
-        if let Some(boss_def) = bosses.iter().find(|b| b.matches_npc_id(npc_id)) {
-            eprintln!("[TIMER] Boss detected by NPC ID {}: {} ({})", npc_id, boss_def.name, boss_def.id);
-            self.active_boss_def = Some(boss_def.clone());
-            self.context.boss_name = Some(boss_def.name.clone());
+        // No area set or boss not found in current area - search ALL areas
+        for (area_name, bosses) in &self.boss_definitions {
+            if let Some(boss_def) = bosses.iter().find(|b| b.matches_npc_id(npc_id)) {
+                eprintln!("[TIMER] Boss detected by NPC ID {}: {} ({}) - inferred area: {}",
+                    npc_id, boss_def.name, boss_def.id, area_name);
+                self.active_boss_def = Some(boss_def.clone());
+                self.context.boss_name = Some(boss_def.name.clone());
+                self.context.encounter_name = Some(area_name.clone());
+                return;
+            }
         }
     }
 
@@ -514,7 +569,8 @@ impl SignalHandler for TimerManager {
 
             GameSignal::BossHpChanged { entity_id, npc_id, entity_name, current_hp, max_hp, timestamp } => {
                 // Update per-entity HP tracking (by entity ID, NPC ID, and name)
-                let hp_changed = self.encounter_state.update_entity_hp(
+                // Returns Some((old_hp, new_hp)) if HP changed significantly
+                let hp_change = self.encounter_state.update_entity_hp(
                     *entity_id,
                     *npc_id,
                     entity_name,
@@ -527,7 +583,10 @@ impl SignalHandler for TimerManager {
                     self.detect_boss_by_npc_id(*npc_id);
                 }
 
-                if hp_changed {
+                if let Some((old_hp, new_hp)) = hp_change {
+                    // Check for HP threshold timer triggers
+                    self.handle_boss_hp_change(old_hp, new_hp, *timestamp);
+                    // Check for phase transitions
                     self.check_phase_transitions(*timestamp);
                 }
             }
@@ -572,5 +631,107 @@ fn signal_timestamp(signal: &GameSignal) -> Option<NaiveDateTime> {
         GameSignal::BossHpChanged { timestamp, .. } => Some(*timestamp),
         GameSignal::PhaseChanged { timestamp, .. } => Some(*timestamp),
         GameSignal::CounterChanged { timestamp, .. } => Some(*timestamp),
+    }
+}
+
+/// Convert a BossTimerDefinition to a TimerDefinition
+/// This bridges the boss-specific timer format to the generic timer system
+fn convert_boss_timer_to_definition(
+    boss_timer: &crate::encounters::BossTimerDefinition,
+    boss: &BossDefinition,
+) -> TimerDefinition {
+    use crate::encounters::BossTimerTrigger;
+
+    // Convert trigger type
+    let trigger = match &boss_timer.trigger {
+        BossTimerTrigger::CombatStart => super::TimerTrigger::CombatStart,
+        BossTimerTrigger::AbilityCast { ability_ids } => {
+            super::TimerTrigger::AbilityCast { ability_ids: ability_ids.clone() }
+        }
+        BossTimerTrigger::EffectApplied { effect_ids } => {
+            super::TimerTrigger::EffectApplied { effect_ids: effect_ids.clone() }
+        }
+        BossTimerTrigger::EffectRemoved { effect_ids } => {
+            super::TimerTrigger::EffectRemoved { effect_ids: effect_ids.clone() }
+        }
+        BossTimerTrigger::TimerExpires { timer_id } => {
+            super::TimerTrigger::TimerExpires { timer_id: timer_id.clone() }
+        }
+        BossTimerTrigger::PhaseEntered { .. } => {
+            // Phase-entered triggers need special handling - not yet implemented
+            super::TimerTrigger::Manual
+        }
+        BossTimerTrigger::BossHpBelow { hp_percent, .. } => {
+            super::TimerTrigger::BossHpThreshold { hp_percent: *hp_percent }
+        }
+        BossTimerTrigger::AllOf { conditions } => {
+            super::TimerTrigger::AllOf {
+                conditions: conditions.iter().map(|c| convert_boss_trigger(c)).collect()
+            }
+        }
+        BossTimerTrigger::AnyOf { conditions } => {
+            super::TimerTrigger::AnyOf {
+                conditions: conditions.iter().map(|c| convert_boss_trigger(c)).collect()
+            }
+        }
+    };
+
+    TimerDefinition {
+        id: boss_timer.id.clone(),
+        name: boss_timer.name.clone(),
+        enabled: boss_timer.enabled,
+        trigger,
+        source: Default::default(),
+        target: Default::default(),
+        duration_secs: boss_timer.duration_secs,
+        can_be_refreshed: boss_timer.can_be_refreshed,
+        repeats: boss_timer.repeats,
+        color: boss_timer.color,
+        show_on_raid_frames: boss_timer.show_on_raid_frames,
+        alert_at_secs: boss_timer.alert_at_secs,
+        alert_text: None,
+        audio_file: None,
+        triggers_timer: boss_timer.chains_to.clone(),
+        // Context: tie to this boss's area and name
+        encounters: vec![boss.area_name.clone()],
+        boss: Some(boss.name.clone()),
+        difficulties: boss_timer.difficulties.clone(),
+        phases: boss_timer.phases.clone(),
+        counter_condition: boss_timer.counter_condition.clone(),
+    }
+}
+
+/// Convert a single BossTimerTrigger to TimerTrigger (for nested conditions)
+fn convert_boss_trigger(trigger: &crate::encounters::BossTimerTrigger) -> super::TimerTrigger {
+    use crate::encounters::BossTimerTrigger;
+
+    match trigger {
+        BossTimerTrigger::CombatStart => super::TimerTrigger::CombatStart,
+        BossTimerTrigger::AbilityCast { ability_ids } => {
+            super::TimerTrigger::AbilityCast { ability_ids: ability_ids.clone() }
+        }
+        BossTimerTrigger::EffectApplied { effect_ids } => {
+            super::TimerTrigger::EffectApplied { effect_ids: effect_ids.clone() }
+        }
+        BossTimerTrigger::EffectRemoved { effect_ids } => {
+            super::TimerTrigger::EffectRemoved { effect_ids: effect_ids.clone() }
+        }
+        BossTimerTrigger::TimerExpires { timer_id } => {
+            super::TimerTrigger::TimerExpires { timer_id: timer_id.clone() }
+        }
+        BossTimerTrigger::PhaseEntered { .. } => super::TimerTrigger::Manual,
+        BossTimerTrigger::BossHpBelow { hp_percent, .. } => {
+            super::TimerTrigger::BossHpThreshold { hp_percent: *hp_percent }
+        }
+        BossTimerTrigger::AllOf { conditions } => {
+            super::TimerTrigger::AllOf {
+                conditions: conditions.iter().map(|c| convert_boss_trigger(c)).collect()
+            }
+        }
+        BossTimerTrigger::AnyOf { conditions } => {
+            super::TimerTrigger::AnyOf {
+                conditions: conditions.iter().map(|c| convert_boss_trigger(c)).collect()
+            }
+        }
     }
 }

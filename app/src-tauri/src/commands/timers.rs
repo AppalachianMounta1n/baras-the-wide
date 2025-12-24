@@ -10,12 +10,14 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
 use baras_core::encounters::{
     load_bosses_with_paths, save_bosses_to_file, BossTimerDefinition,
     BossTimerTrigger, BossWithPath,
 };
+
+use crate::service::ServiceHandle;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types for Frontend
@@ -221,6 +223,7 @@ pub async fn get_encounter_timers(app_handle: AppHandle) -> Result<Vec<TimerList
 #[tauri::command]
 pub async fn update_encounter_timer(
     app_handle: AppHandle,
+    service: State<'_, ServiceHandle>,
     timer: TimerListItem,
 ) -> Result<(), String> {
     let mut bosses = load_user_bosses(&app_handle)?;
@@ -259,6 +262,9 @@ pub async fn update_encounter_timer(
 
     save_bosses_to_file(&file_bosses, &file_path)?;
 
+    // Reload definitions into the running session
+    let _ = service.reload_timer_definitions().await;
+
     Ok(())
 }
 
@@ -266,24 +272,49 @@ pub async fn update_encounter_timer(
 #[tauri::command]
 pub async fn create_encounter_timer(
     app_handle: AppHandle,
-    boss_id: String,
-    file_path: String,
-    timer: BossTimerDefinition,
+    service: State<'_, ServiceHandle>,
+    timer: TimerListItem,
 ) -> Result<TimerListItem, String> {
     let mut bosses = load_user_bosses(&app_handle)?;
-    let file_path_buf = PathBuf::from(&file_path);
+    let file_path_buf = PathBuf::from(&timer.file_path);
+    let boss_id = &timer.boss_id;
+
+    // Generate a unique timer ID if not provided (prefixed with boss_id)
+    let timer_id = if timer.timer_id.is_empty() {
+        generate_timer_id(boss_id, &timer.name)
+    } else {
+        timer.timer_id.clone()
+    };
+
+    // Convert to BossTimerDefinition
+    let new_timer = BossTimerDefinition {
+        id: timer_id.clone(),
+        name: timer.name.clone(),
+        trigger: timer.trigger.clone(),
+        duration_secs: timer.duration_secs,
+        color: timer.color,
+        phases: timer.phases.clone(),
+        counter_condition: None,
+        difficulties: timer.difficulties.clone(),
+        enabled: timer.enabled,
+        can_be_refreshed: timer.can_be_refreshed,
+        repeats: timer.repeats,
+        chains_to: timer.chains_to.clone(),
+        alert_at_secs: timer.alert_at_secs,
+        show_on_raid_frames: timer.show_on_raid_frames,
+    };
 
     // Find the boss and add the timer
     let mut created_item: Option<TimerListItem> = None;
     for boss_with_path in &mut bosses {
-        if boss_with_path.boss.id == boss_id && boss_with_path.file_path == file_path_buf {
+        if boss_with_path.boss.id == *boss_id && boss_with_path.file_path == file_path_buf {
             // Check for duplicate ID
-            if boss_with_path.boss.timers.iter().any(|t| t.id == timer.id) {
-                return Err(format!("Timer with ID '{}' already exists", timer.id));
+            if boss_with_path.boss.timers.iter().any(|t| t.id == timer_id) {
+                return Err(format!("Timer with ID '{}' already exists", timer_id));
             }
 
-            boss_with_path.boss.timers.push(timer.clone());
-            created_item = Some(TimerListItem::from_boss_timer(boss_with_path, &timer));
+            boss_with_path.boss.timers.push(new_timer.clone());
+            created_item = Some(TimerListItem::from_boss_timer(boss_with_path, &new_timer));
             break;
         }
     }
@@ -299,13 +330,33 @@ pub async fn create_encounter_timer(
 
     save_bosses_to_file(&file_bosses, &file_path_buf)?;
 
+    // Reload definitions into the running session
+    let _ = service.reload_timer_definitions().await;
+
     Ok(item)
+}
+
+/// Generate a timer ID from boss ID and timer name (snake_case, safe for TOML)
+/// Format: {boss_id}_{timer_name_snake_case}
+fn generate_timer_id(boss_id: &str, name: &str) -> String {
+    let name_part: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect::<String>()
+        .split('_')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("_");
+
+    format!("{}_{}", boss_id, name_part)
 }
 
 /// Delete a timer
 #[tauri::command]
 pub async fn delete_encounter_timer(
     app_handle: AppHandle,
+    service: State<'_, ServiceHandle>,
     timer_id: String,
     boss_id: String,
     file_path: String,
@@ -340,6 +391,9 @@ pub async fn delete_encounter_timer(
 
     save_bosses_to_file(&file_bosses, &file_path_buf)?;
 
+    // Reload definitions into the running session
+    let _ = service.reload_timer_definitions().await;
+
     Ok(())
 }
 
@@ -347,6 +401,7 @@ pub async fn delete_encounter_timer(
 #[tauri::command]
 pub async fn duplicate_encounter_timer(
     app_handle: AppHandle,
+    service: State<'_, ServiceHandle>,
     timer_id: String,
     boss_id: String,
     file_path: String,
@@ -405,6 +460,9 @@ pub async fn duplicate_encounter_timer(
         .collect();
 
     save_bosses_to_file(&file_bosses, &file_path_buf)?;
+
+    // Reload definitions into the running session
+    let _ = service.reload_timer_definitions().await;
 
     Ok(item)
 }

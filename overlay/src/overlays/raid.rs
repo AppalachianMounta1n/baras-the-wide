@@ -1080,12 +1080,6 @@ impl RaidOverlay {
 impl Overlay for RaidOverlay {
     fn update_data(&mut self, data: OverlayData) {
         if let OverlayData::Raid(raid_data) = data {
-            let frame_count = raid_data.frames.len();
-            let effect_count: usize = raid_data.frames.iter().map(|f| f.effects.len()).sum();
-            if frame_count > 0 || effect_count > 0 {
-                eprintln!("[RAID-OVERLAY] Received {} frames with {} total effects",
-                    frame_count, effect_count);
-            }
             self.set_frames(raid_data.frames);
         }
     }

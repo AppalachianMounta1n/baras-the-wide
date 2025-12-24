@@ -249,4 +249,24 @@ impl ServiceHandle {
             registry.clear();
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Timer Operations
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Reload timer/boss definitions from disk and update active session
+    pub async fn reload_timer_definitions(&self) -> Result<(), String> {
+        self.cmd_tx
+            .send(ServiceCommand::ReloadTimerDefinitions)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Reload effect definitions from disk and update active session
+    pub async fn reload_effect_definitions(&self) -> Result<(), String> {
+        self.cmd_tx
+            .send(ServiceCommand::ReloadEffectDefinitions)
+            .await
+            .map_err(|e| e.to_string())
+    }
 }

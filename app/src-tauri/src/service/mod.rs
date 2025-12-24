@@ -40,6 +40,10 @@ pub enum ServiceCommand {
     FileDetected(PathBuf),
     FileRemoved(PathBuf),
     DirectoryChanged,
+    /// Reload timer/boss definitions from disk and update active session
+    ReloadTimerDefinitions,
+    /// Reload effect definitions from disk and update active session
+    ReloadEffectDefinitions,
 }
 
 /// Updates sent to the overlay system
@@ -324,7 +328,45 @@ impl CombatService {
                 ServiceCommand::DirectoryChanged => {
                     self.on_directory_changed().await;
                 }
+                ServiceCommand::ReloadTimerDefinitions => {
+                    self.reload_timer_definitions().await;
+                }
+                ServiceCommand::ReloadEffectDefinitions => {
+                    self.reload_effect_definitions().await;
+                }
             }
+        }
+    }
+
+    /// Reload effect definitions from disk and update the active session
+    async fn reload_effect_definitions(&mut self) {
+        eprintln!("[SERVICE] Reloading effect definitions...");
+
+        // Reload from disk
+        self.definitions = Self::load_effect_definitions(&self.app_handle);
+        eprintln!("[SERVICE] Loaded {} effect definitions", self.definitions.effects.len());
+
+        // Update the active session if one exists
+        if let Some(session) = self.shared.session.read().await.as_ref() {
+            let session = session.read().await;
+            session.set_definitions(self.definitions.clone());
+            eprintln!("[SERVICE] Updated active session with new effect definitions");
+        }
+    }
+
+    /// Reload timer and boss definitions from disk and update the active session
+    async fn reload_timer_definitions(&mut self) {
+        eprintln!("[SERVICE] Reloading timer definitions...");
+
+        // Reload from disk
+        self.boss_definitions = Self::load_boss_definitions(&self.app_handle);
+        eprintln!("[SERVICE] Loaded {} boss definitions", self.boss_definitions.len());
+
+        // Update the active session if one exists
+        if let Some(session) = self.shared.session.read().await.as_ref() {
+            let session = session.read().await;
+            session.set_boss_definitions(self.boss_definitions.clone());
+            eprintln!("[SERVICE] Updated active session with new definitions");
         }
     }
 

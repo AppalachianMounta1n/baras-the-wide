@@ -732,7 +732,7 @@ fn SimpleTriggerEditor(
                         "effect_removed" => TimerTrigger::EffectRemoved { effect_ids: vec![] },
                         "timer_expires" => TimerTrigger::TimerExpires { timer_id: String::new() },
                         "phase_entered" => TimerTrigger::PhaseEntered { phase_id: String::new() },
-                        "boss_hp_below" => TimerTrigger::BossHpBelow { hp_percent: 50.0, npc_id: None, npc_name: None },
+                        "boss_hp_below" => TimerTrigger::BossHpBelow { hp_percent: 50.0, npc_id: None, boss_name: None },
                         _ => trigger.clone(),
                     };
                     on_change.call(new_trigger);
@@ -793,7 +793,7 @@ fn SimpleTriggerEditor(
                             }
                         }
                     },
-                    TimerTrigger::BossHpBelow { hp_percent, npc_id, npc_name } => rsx! {
+                    TimerTrigger::BossHpBelow { hp_percent, npc_id, boss_name } => rsx! {
                         div { class: "trigger-field",
                             label { "HP %" }
                             input {
@@ -807,7 +807,7 @@ fn SimpleTriggerEditor(
                                         on_change.call(TimerTrigger::BossHpBelow {
                                             hp_percent: val,
                                             npc_id,
-                                            npc_name: npc_name.clone(),
+                                            boss_name: boss_name.clone(),
                                         });
                                     }
                                 }
@@ -830,9 +830,24 @@ fn IdListEditor(
 ) -> Element {
     let mut new_id_input = use_signal(String::new);
 
+    let hint = match label {
+        "Ability IDs" => "Find in combat log: AbilityActivate {...guid=\"XXXXXXXX\"...}",
+        "Effect IDs" => "Find in combat log: ApplyEffect {...effectGuid=\"XXXXXXXX\"...}",
+        _ => "",
+    };
+
+    // Clone for each handler that needs it
+    let ids_for_keydown = ids.clone();
+    let ids_for_click = ids.clone();
+
     rsx! {
         div { class: "id-list-editor",
-            span { class: "id-label", "{label}:" }
+            div { class: "id-label-row",
+                span { class: "id-label", "{label}:" }
+                if !hint.is_empty() {
+                    span { class: "id-hint", title: "{hint}", "?" }
+                }
+            }
             div { class: "id-chips",
                 for (idx, id) in ids.iter().enumerate() {
                     {
@@ -853,16 +868,18 @@ fn IdListEditor(
                         }
                     }
                 }
+            }
+            div { class: "id-add-row",
                 input {
                     r#type: "text",
                     class: "id-input",
-                    placeholder: "Add ID",
+                    placeholder: "ID (Enter to add)",
                     value: "{new_id_input}",
                     oninput: move |e| new_id_input.set(e.value()),
-                    onkeypress: move |e| {
+                    onkeydown: move |e| {
                         if e.key() == Key::Enter {
                             if let Ok(id) = new_id_input().parse::<u64>() {
-                                let mut new_ids = ids.clone();
+                                let mut new_ids = ids_for_keydown.clone();
                                 if !new_ids.contains(&id) {
                                     new_ids.push(id);
                                     on_change.call(new_ids);
@@ -871,6 +888,20 @@ fn IdListEditor(
                             }
                         }
                     }
+                }
+                button {
+                    class: "btn-add-id",
+                    onclick: move |_| {
+                        if let Ok(id) = new_id_input().parse::<u64>() {
+                            let mut new_ids = ids_for_click.clone();
+                            if !new_ids.contains(&id) {
+                                new_ids.push(id);
+                                on_change.call(new_ids);
+                            }
+                            new_id_input.set(String::new());
+                        }
+                    },
+                    "Add"
                 }
             }
         }
@@ -897,10 +928,6 @@ fn NewTimerForm(
     let selected_boss = bosses.iter().find(|b| b.id == selected_boss_id()).cloned();
     let color_hex = format!("#{:02x}{:02x}{:02x}", color()[0], color()[1], color()[2]);
 
-    // Sort bosses by name
-    let mut sorted_bosses = bosses.clone();
-    sorted_bosses.sort_by(|a, b| a.name.cmp(&b.name));
-
     rsx! {
         div { class: "new-timer-form",
             div { class: "new-timer-header",
@@ -912,22 +939,13 @@ fn NewTimerForm(
                 }
             }
 
-            // Boss selector - simple flat list sorted by name
+            // Searchable boss selector
             div { class: "form-row",
                 label { "Boss" }
-                select {
-                    class: "boss-select",
-                    onchange: move |e| {
-                        let val = e.value();
-                        selected_boss_id.set(val);
-                    },
-                    option { value: "", "-- Select a boss --" }
-                    for boss in sorted_bosses.iter() {
-                        option {
-                            value: "{boss.id}",
-                            "{boss.name} - {boss.area_name}"
-                        }
-                    }
+                BossSearchSelect {
+                    bosses: bosses.clone(),
+                    selected_id: selected_boss_id(),
+                    on_select: move |id| selected_boss_id.set(id)
                 }
             }
 
@@ -1062,5 +1080,174 @@ fn parse_hex_color(hex: &str) -> Option<[u8; 4]> {
         Some([r, g, b, 255])
     } else {
         None
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Boss Search Select Component
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[component]
+fn BossSearchSelect(
+    bosses: Vec<BossListItem>,
+    selected_id: String,
+    on_select: EventHandler<String>,
+) -> Element {
+    let mut search_query = use_signal(String::new);
+    let mut is_open = use_signal(|| false);
+    let mut highlighted_index = use_signal(|| 0usize);
+
+    // Find selected boss for display (clone to avoid lifetime issues)
+    let selected_boss = bosses.iter().find(|b| b.id == selected_id).cloned();
+
+    // Filter and sort bosses based on search query (owned data)
+    let query = search_query().to_lowercase();
+    let mut filtered_bosses: Vec<BossListItem> = bosses
+        .iter()
+        .filter(|b| {
+            if query.is_empty() {
+                true
+            } else {
+                // Fuzzy match: check name, area, and category
+                b.name.to_lowercase().contains(&query)
+                    || b.area_name.to_lowercase().contains(&query)
+                    || b.category.to_lowercase().contains(&query)
+            }
+        })
+        .cloned()
+        .collect();
+
+    // Sort by relevance: exact name match first, then name contains, then area contains
+    filtered_bosses.sort_by(|a, b| {
+        let a_name = a.name.to_lowercase();
+        let b_name = b.name.to_lowercase();
+
+        // Exact match gets priority
+        let a_exact = a_name == query;
+        let b_exact = b_name == query;
+        if a_exact != b_exact {
+            return b_exact.cmp(&a_exact);
+        }
+
+        // Name starts with query gets next priority
+        let a_starts = a_name.starts_with(&query);
+        let b_starts = b_name.starts_with(&query);
+        if a_starts != b_starts {
+            return b_starts.cmp(&a_starts);
+        }
+
+        // Then sort alphabetically by area, then name
+        match a.area_name.cmp(&b.area_name) {
+            std::cmp::Ordering::Equal => a.name.cmp(&b.name),
+            other => other,
+        }
+    });
+
+    let results_len = filtered_bosses.len();
+    let has_results = !filtered_bosses.is_empty();
+    let query_empty = search_query().is_empty();
+
+    // Pre-compute display items with headers
+    let display_items: Vec<(bool, String, String, String)> = {
+        let mut prev_area = String::new();
+        filtered_bosses.iter().map(|boss| {
+            let show_header = boss.area_name != prev_area;
+            prev_area = boss.area_name.clone();
+            (show_header, boss.id.clone(), boss.name.clone(), boss.area_name.clone())
+        }).collect()
+    };
+
+    // For keyboard selection
+    let boss_ids: Vec<String> = filtered_bosses.iter().map(|b| b.id.clone()).collect();
+
+    rsx! {
+        div { class: "boss-search-select",
+            // Input field
+            div { class: "search-input-wrapper",
+                input {
+                    r#type: "text",
+                    class: "boss-search-input",
+                    placeholder: match &selected_boss {
+                        Some(b) => format!("{} - {}", b.name, b.area_name),
+                        None => "Search for a boss...".to_string(),
+                    },
+                    value: "{search_query}",
+                    onfocus: move |_| is_open.set(true),
+                    oninput: move |e| {
+                        search_query.set(e.value());
+                        is_open.set(true);
+                        highlighted_index.set(0);
+                    },
+                    onkeydown: move |e| {
+                        match e.key() {
+                            Key::ArrowDown => {
+                                e.prevent_default();
+                                let idx = highlighted_index();
+                                if idx < results_len.saturating_sub(1) {
+                                    highlighted_index.set(idx + 1);
+                                }
+                            }
+                            Key::ArrowUp => {
+                                e.prevent_default();
+                                let idx = highlighted_index();
+                                if idx > 0 {
+                                    highlighted_index.set(idx - 1);
+                                }
+                            }
+                            Key::Enter => {
+                                e.prevent_default();
+                                if let Some(id) = boss_ids.get(highlighted_index()) {
+                                    on_select.call(id.clone());
+                                    search_query.set(String::new());
+                                    is_open.set(false);
+                                }
+                            }
+                            Key::Escape => {
+                                search_query.set(String::new());
+                                is_open.set(false);
+                            }
+                            _ => {}
+                        }
+                    },
+                }
+                if let Some(ref boss) = selected_boss {
+                    if query_empty {
+                        span { class: "selected-boss-display",
+                            "{boss.name}"
+                            span { class: "area-hint", " ({boss.area_name})" }
+                        }
+                    }
+                }
+            }
+
+            // Dropdown results
+            if is_open() && has_results {
+                div { class: "boss-search-dropdown",
+                    for (idx, (show_header, boss_id, boss_name, area_name)) in display_items.into_iter().enumerate() {
+                        if show_header {
+                            div { class: "area-header", "{area_name}" }
+                        }
+                        div {
+                            class: if idx == highlighted_index() { "boss-option highlighted" } else { "boss-option" },
+                            onmouseenter: move |_| highlighted_index.set(idx),
+                            onmousedown: move |e| {
+                                e.prevent_default();
+                                on_select.call(boss_id.clone());
+                                search_query.set(String::new());
+                                is_open.set(false);
+                            },
+                            span { class: "boss-name", "{boss_name}" }
+                        }
+                    }
+                }
+            }
+
+            // No results message
+            if is_open() && !has_results && !query_empty {
+                div { class: "boss-search-dropdown",
+                    div { class: "no-results", "No bosses found" }
+                }
+            }
+        }
     }
 }

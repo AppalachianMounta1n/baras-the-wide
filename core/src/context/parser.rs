@@ -173,6 +173,33 @@ impl ParsingSession {
             timer_mgr.load_boss_definitions(bosses);
         }
     }
+
+    /// Sync timer context from session cache (call after initial file parse).
+    ///
+    /// This ensures the TimerManager knows the current area even if parsing
+    /// started mid-session (no AreaEntered signal was received).
+    pub fn sync_timer_context(&self) {
+        let Some(cache) = &self.session_cache else {
+            return;
+        };
+
+        let area = &cache.current_area;
+        if area.area_name.is_empty() {
+            return;
+        }
+
+        let difficulty = crate::game_data::Difficulty::from_game_string(&area.difficulty_name);
+
+        if let Ok(mut timer_mgr) = self.timer_manager.lock() {
+            timer_mgr.set_context(
+                Some(area.area_name.clone()),
+                None, // Boss will be detected on target change
+                difficulty,
+            );
+            eprintln!("[TIMER] Synced initial context from cache: area={}, difficulty={:?}",
+                area.area_name, difficulty);
+        }
+    }
 }
 
 /// Resolve a log file path, joining with log_directory if relative.
@@ -219,6 +246,8 @@ pub async fn parse_file(state: Arc<RwLock<ParsingSession>>) -> Result<ParseResul
         let mut s = state.write().await;
         s.current_byte = Some(end_pos);
         s.process_events(events);
+        // Sync area context to timer manager (handles mid-session starts)
+        s.sync_timer_context();
     }
 
     Ok(ParseResult {
