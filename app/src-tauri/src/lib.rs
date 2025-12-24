@@ -16,6 +16,7 @@ pub mod overlay;
 mod router;
 pub mod service;
 pub mod state;
+mod tray;
 
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -86,10 +87,38 @@ pub fn run() {
                 #[cfg(not(target_os = "linux"))]
                 hotkeys::spawn_register_hotkeys(app.handle().clone(), overlay_state.clone(), handle);
 
+                // Set up system tray
+                if let Err(e) = tray::setup_tray(app.handle()) {
+                    eprintln!("[TRAY] Failed to set up system tray: {}", e);
+                }
+
                 Ok(())
             }
         })
         .manage(overlay_state)
+        .on_window_event(|window, event| {
+            // Minimize to tray on close instead of quitting (if enabled)
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Check if minimize_to_tray is enabled
+                let minimize_to_tray = window
+                    .app_handle()
+                    .try_state::<ServiceHandle>()
+                    .map(|handle| {
+                        tauri::async_runtime::block_on(async {
+                            handle.config().await.minimize_to_tray
+                        })
+                    })
+                    .unwrap_or(true);
+
+                if minimize_to_tray {
+                    // Hide the window instead of closing
+                    let _ = window.hide();
+                    // Prevent the default close behavior
+                    api.prevent_close();
+                }
+                // If minimize_to_tray is false, allow normal close (app quits)
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             // Overlay commands
             commands::show_overlay,

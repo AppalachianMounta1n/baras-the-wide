@@ -83,7 +83,7 @@ impl TimerManager {
             if def.enabled {
                 self.definitions.insert(def.id.clone(), def);
             }
-        }
+      }
         eprintln!("TimerManager: loaded {} enabled definitions", self.definitions.len());
     }
 

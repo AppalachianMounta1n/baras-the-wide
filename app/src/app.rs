@@ -60,6 +60,9 @@ pub fn App() -> Element {
     let mut retention_days = use_signal(|| 21u32);
     let mut cleanup_status = use_signal(String::new);
 
+    // Application settings
+    let mut minimize_to_tray = use_signal(|| true);
+
     // Profile state
     let mut profile_names = use_signal(Vec::<String>::new);
     let mut active_profile = use_signal(|| None::<String>);
@@ -80,6 +83,7 @@ pub fn App() -> Element {
             auto_delete_empty.set(config.auto_delete_empty_files);
             auto_delete_old.set(config.auto_delete_old_files);
             retention_days.set(config.log_retention_days);
+            minimize_to_tray.set(config.minimize_to_tray);
         }
 
         log_dir_size.set(api::get_log_directory_size().await);
@@ -647,6 +651,28 @@ pub fn App() -> Element {
                                         span { class: "save-status", "{cleanup_status}" }
                                     }
                                 }
+                            }
+
+                            div { class: "settings-section",
+                                h4 { "Application" }
+                                div { class: "setting-row",
+                                    label { "Minimize to tray on close" }
+                                    input {
+                                        r#type: "checkbox",
+                                        checked: minimize_to_tray(),
+                                        onchange: move |e| {
+                                            let checked = e.checked();
+                                            minimize_to_tray.set(checked);
+                                            spawn(async move {
+                                                if let Some(mut cfg) = api::get_config().await {
+                                                    cfg.minimize_to_tray = checked;
+                                                    api::update_config(&cfg).await;
+                                                }
+                                            });
+                                        }
+                                    }
+                                }
+                                p { class: "hint", "When enabled, closing the window hides to system tray instead of quitting." }
                             }
 
                             div { class: "settings-section",
