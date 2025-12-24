@@ -44,6 +44,10 @@ pub enum ServiceCommand {
     ReloadTimerDefinitions,
     /// Reload effect definitions from disk and update active session
     ReloadEffectDefinitions,
+    /// Open a historical file (pauses live tailing)
+    OpenHistoricalFile(PathBuf),
+    /// Resume live tailing (switch to newest file)
+    ResumeLiveTailing,
 }
 
 /// Updates sent to the overlay system
@@ -59,6 +63,8 @@ pub enum OverlayUpdate {
     BossHealthUpdated(BossHealthData),
     /// Timer data for timer overlay
     TimersUpdated(TimerData),
+    /// Clear all overlay data (sent when switching files)
+    ClearAllData,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -334,6 +340,22 @@ impl CombatService {
                 ServiceCommand::ReloadEffectDefinitions => {
                     self.reload_effect_definitions().await;
                 }
+                ServiceCommand::OpenHistoricalFile(path) => {
+                    // Pause live tailing and open the historical file
+                    self.shared.is_live_tailing.store(false, Ordering::SeqCst);
+                    self.start_tailing(path).await;
+                }
+                ServiceCommand::ResumeLiveTailing => {
+                    // Resume live tailing and switch to newest file
+                    self.shared.is_live_tailing.store(true, Ordering::SeqCst);
+                    let newest = {
+                        let index = self.shared.directory_index.read().await;
+                        index.newest_file().map(|f| f.path.clone())
+                    };
+                    if let Some(path) = newest {
+                        self.start_tailing(path).await;
+                    }
+                }
             }
         }
     }
@@ -385,21 +407,26 @@ impl CombatService {
         self.start_watcher().await;
     }
     async fn file_detected(&mut self, path: PathBuf) {
+        // Always update the index
         {
-        let mut index = self.shared.directory_index.write().await;
-        index.add_file(&path);
+            let mut index = self.shared.directory_index.write().await;
+            index.add_file(&path);
         }
 
-                  let should_switch = {
-                      let index = self.shared.directory_index.read().await;
-                      index.newest_file().map(|f| f.path == path).unwrap_or(false)
-                  };
+        // Only auto-switch if in live tailing mode
+        if !self.shared.is_live_tailing.load(Ordering::SeqCst) {
+            return;
+        }
 
-                  if should_switch {
-                    //method calls stop_tailing at beginning so wont create two tailing tasks
-                      self.start_tailing(path).await;
-                  }
+        let should_switch = {
+            let index = self.shared.directory_index.read().await;
+            index.newest_file().map(|f| f.path == path).unwrap_or(false)
+        };
 
+        if should_switch {
+            // Method calls stop_tailing at beginning so won't create duplicate tasks
+            self.start_tailing(path).await;
+        }
     }
 
     async fn file_removed(&mut self, path: PathBuf) {
@@ -492,6 +519,9 @@ impl CombatService {
 
     async fn start_tailing(&mut self, path: PathBuf) {
         self.stop_tailing().await;
+
+        // Clear all overlay data when switching files
+        let _ = self.overlay_tx.try_send(OverlayUpdate::ClearAllData);
 
         // Clear raid registry when switching files (new session = fresh state)
         if let Ok(mut registry) = self.shared.raid_registry.lock() {

@@ -149,6 +149,10 @@ pub fn run() {
             commands::get_active_file,
             commands::get_session_info,
             commands::get_encounter_history,
+            // File browser commands
+            commands::open_historical_file,
+            commands::resume_live_tailing,
+            commands::is_live_tailing,
             // Profile commands
             commands::get_profile_names,
             commands::get_active_profile,
@@ -170,6 +174,8 @@ pub fn run() {
             commands::delete_effect_definition,
             commands::duplicate_effect_definition,
             commands::get_effect_files,
+            // Parsely upload
+            commands::upload_to_parsely,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

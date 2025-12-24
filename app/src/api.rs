@@ -25,6 +25,9 @@ extern "C" {
 
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "app"], js_name = "getVersion")]
     pub async fn get_version() -> JsValue;
+
+    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "opener"], js_name = "openUrl")]
+    pub async fn open_url(url: &str) -> JsValue;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -214,6 +217,28 @@ pub async fn cleanup_logs(delete_empty: bool, retention_days: Option<u32>) -> (u
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// File Browser Commands
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Open a historical log file (pauses live tailing)
+pub async fn open_historical_file(path: &str) -> bool {
+    let result = invoke("open_historical_file", build_args("path", &path)).await;
+    result.is_undefined() || result.is_null()
+}
+
+/// Resume live tailing mode
+pub async fn resume_live_tailing() -> bool {
+    let result = invoke("resume_live_tailing", JsValue::NULL).await;
+    result.is_undefined() || result.is_null()
+}
+
+/// Check if in live tailing mode
+pub async fn is_live_tailing() -> bool {
+    let result = invoke("is_live_tailing", JsValue::NULL).await;
+    from_js(result).unwrap_or(true)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Profile Commands
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -386,5 +411,23 @@ pub async fn create_effect_definition(effect: &EffectListItem) -> Option<EffectL
 /// Get list of effect files for "New Effect" file selection
 pub async fn get_effect_files() -> Option<Vec<String>> {
     let result = invoke("get_effect_files", JsValue::NULL).await;
+    from_js(result)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Parsely Upload
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Response from Parsely upload
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ParselyUploadResponse {
+    pub success: bool,
+    pub link: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Upload a log file to Parsely.io
+pub async fn upload_to_parsely(path: &str) -> Option<ParselyUploadResponse> {
+    let result = invoke("upload_to_parsely", build_args("path", &path)).await;
     from_js(result)
 }

@@ -51,6 +51,17 @@ pub struct OverlayStatus {
     pub rearrange_mode: bool,
 }
 
+/// Log file metadata for file browser
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LogFileInfo {
+    pub path: String,
+    pub display_name: String,
+    pub character_name: Option<String>,
+    pub date: String,
+    pub is_empty: bool,
+    pub file_size: u64,
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Metric Types
 // ─────────────────────────────────────────────────────────────────────────────

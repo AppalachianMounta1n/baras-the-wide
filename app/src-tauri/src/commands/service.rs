@@ -80,6 +80,28 @@ pub async fn get_active_file(handle: State<'_, ServiceHandle>) -> Result<Option<
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// File Browser Commands
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn open_historical_file(
+    path: PathBuf,
+    handle: State<'_, ServiceHandle>,
+) -> Result<(), String> {
+    handle.open_historical_file(path).await
+}
+
+#[tauri::command]
+pub async fn resume_live_tailing(handle: State<'_, ServiceHandle>) -> Result<(), String> {
+    handle.resume_live_tailing().await
+}
+
+#[tauri::command]
+pub fn is_live_tailing(handle: State<'_, ServiceHandle>) -> Result<bool, String> {
+    Ok(handle.is_live_tailing())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Config Commands
 // ─────────────────────────────────────────────────────────────────────────────
 

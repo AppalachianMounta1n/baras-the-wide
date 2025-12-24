@@ -6,7 +6,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::api;
 use crate::components::{EffectEditorPanel, HistoryPanel, SettingsPanel, TimerEditorPanel};
-use crate::types::{MetricType, OverlaySettings, OverlayStatus, OverlayType, SessionInfo};
+use crate::types::{LogFileInfo, MetricType, OverlaySettings, OverlayStatus, OverlayType, SessionInfo};
 
 static CSS: Asset = asset!("/assets/styles.css");
 static LOGO: Asset = asset!("/assets/logo.png");
@@ -34,7 +34,13 @@ pub fn App() -> Element {
     let mut log_directory = use_signal(String::new);
     let mut active_file = use_signal(String::new);
     let mut is_watching = use_signal(|| false);
+    let mut is_live_tailing = use_signal(|| true);
     let mut session_info = use_signal(|| None::<SessionInfo>);
+
+    // File browser state
+    let mut file_browser_open = use_signal(|| false);
+    let mut log_files = use_signal(Vec::<LogFileInfo>::new);
+    let mut upload_status = use_signal(|| None::<(String, bool, String)>); // (path, success, message)
 
     // UI state
     let mut active_tab = use_signal(|| "session".to_string());
@@ -70,6 +76,12 @@ pub fn App() -> Element {
     let mut profile_names = use_signal(Vec::<String>::new);
     let mut active_profile = use_signal(|| None::<String>);
 
+    // Parsely settings
+    let mut parsely_username = use_signal(String::new);
+    let mut parsely_password = use_signal(String::new);
+    let mut parsely_guild = use_signal(String::new);
+    let mut parsely_save_status = use_signal(String::new);
+
     // ─────────────────────────────────────────────────────────────────────────
     // Initial Load
     // ─────────────────────────────────────────────────────────────────────────
@@ -87,11 +99,20 @@ pub fn App() -> Element {
             auto_delete_old.set(config.auto_delete_old_files);
             retention_days.set(config.log_retention_days);
             minimize_to_tray.set(config.minimize_to_tray);
+            parsely_username.set(config.parsely.username);
+            parsely_password.set(config.parsely.password);
+            parsely_guild.set(config.parsely.guild);
         }
 
         app_version.set(api::get_app_version().await);
         log_dir_size.set(api::get_log_directory_size().await);
         log_file_count.set(api::get_log_file_count().await);
+
+        // Fetch log files list for Latest/Current display
+        let result = api::get_log_files().await;
+        if let Ok(files) = serde_wasm_bindgen::from_value::<Vec<LogFileInfo>>(result) {
+            log_files.set(files);
+        }
 
         is_watching.set(api::get_watching_status().await);
         if let Some(file) = api::get_active_file().await {
@@ -120,12 +141,19 @@ pub fn App() -> Element {
         closure.forget();
     });
 
-    // Poll session info
+    // Poll session info, tailing status, and file list
     use_future(move || async move {
         loop {
             gloo_timers::future::TimeoutFuture::new(2000).await;
             session_info.set(api::get_session_info().await);
             is_watching.set(api::get_watching_status().await);
+            is_live_tailing.set(api::is_live_tailing().await);
+
+            // Refresh file list to keep Latest/Current display up to date
+            let result = api::get_log_files().await;
+            if let Ok(files) = serde_wasm_bindgen::from_value::<Vec<LogFileInfo>>(result) {
+                log_files.set(files);
+            }
         }
     });
 
@@ -145,8 +173,8 @@ pub fn App() -> Element {
     let is_rearrange = rearrange_mode();
     let current_dir = log_directory();
     let watching = is_watching();
+    let live_tailing = is_live_tailing();
     let current_file = active_file();
-    let filename = current_file.rsplit(['/', '\\']).next().unwrap_or(&current_file).to_string();
     let session = session_info();
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -169,10 +197,28 @@ pub fn App() -> Element {
                     }
                     p { class: "subtitle", "Battle Analysis and Raid Assessment System" }
                 }
-                button {
-                    class: "btn btn-header-settings",
-                    onclick: move |_| general_settings_open.set(true),
-                    i { class: "fa-solid fa-gear" }
+                div { class: "header-buttons",
+                    button {
+                        class: "btn btn-header-files",
+                        title: "Browse log files",
+                        onclick: move |_| {
+                            file_browser_open.set(true);
+                            // Fetch files when opening
+                            spawn(async move {
+                                let result = api::get_log_files().await;
+                                if let Ok(files) = serde_wasm_bindgen::from_value::<Vec<LogFileInfo>>(result) {
+                                    log_files.set(files);
+                                }
+                            });
+                        },
+                        i { class: "fa-solid fa-folder-open" }
+                    }
+                    button {
+                        class: "btn btn-header-settings",
+                        title: "Settings",
+                        onclick: move |_| general_settings_open.set(true),
+                        i { class: "fa-solid fa-gear" }
+                    }
                 }
             }
 
@@ -258,19 +304,48 @@ pub fn App() -> Element {
                     }
 
                     section { class: "active-file-panel",
-                        div { class: "file-info",
-                            span { class: "label", i { class: "fa-solid fa-folder-open" } " Directory: " }
-                            span { class: "value", "{current_dir}" }
+                        // Latest file (newest in directory)
+                        {
+                            let latest = log_files().first().cloned();
+                            let latest_display = format_file_info(&latest);
+                            rsx! {
+                                div { class: "file-info",
+                                    span { class: "label", i { class: "fa-solid fa-clock" } " Latest: " }
+                                    span { class: "value", "{latest_display}" }
+                                }
+                            }
                         }
-                        if !current_file.is_empty() {
-                            div { class: "file-info",
-                                span { class: "label", i { class: "fa-solid fa-file-lines" } " Active: " }
-                                span { class: "value filename", "{filename}" }
+                        // Current file (the one being viewed)
+                        {
+                            let current_meta = log_files().iter().find(|f| f.path == current_file).cloned();
+                            let current_display = format_file_info(&current_meta);
+                            rsx! {
+                                div { class: "file-info",
+                                    span { class: "label", i { class: "fa-solid fa-file-lines" } " Viewing: " }
+                                    span { class: "value", "{current_display}" }
+                                }
                             }
                         }
                         div { class: "watcher-status",
-                            span { class: if watching { "status-dot watching" } else { "status-dot not-watching" } }
-                            span { class: "status-text", if watching { "Watching" } else { "Not Watching" } }
+                            if live_tailing {
+                                span { class: if watching { "status-dot watching" } else { "status-dot not-watching" } }
+                                span { class: "status-text", if watching { "Watching" } else { "Not Watching" } }
+                            } else {
+                                span { class: "status-dot paused" }
+                                span { class: "status-text", "Paused" }
+                                button {
+                                    class: "btn btn-resume-live",
+                                    title: "Resume live tailing",
+                                    onclick: move |_| {
+                                        spawn(async move {
+                                            api::resume_live_tailing().await;
+                                            is_live_tailing.set(true);
+                                        });
+                                    },
+                                    i { class: "fa-solid fa-play" }
+                                    " Resume Live"
+                                }
+                            }
                             button {
                                 class: "btn-restart-watcher",
                                 title: "Restart watcher",
@@ -729,6 +804,188 @@ pub fn App() -> Element {
                                     span { class: "save-status", "{hotkey_save_status}" }
                                 }
                             }
+
+                            div { class: "settings-section",
+                                h4 { "Parsely.io" }
+                                p { class: "hint", "Upload logs to parsely.io for leaderboards and detailed analysis." }
+                                div { class: "setting-row",
+                                    label { "Username" }
+                                    input {
+                                        r#type: "text",
+                                        placeholder: "Optional",
+                                        value: parsely_username,
+                                        oninput: move |e| parsely_username.set(e.value())
+                                    }
+                                }
+                                div { class: "setting-row",
+                                    label { "Password" }
+                                    input {
+                                        r#type: "password",
+                                        placeholder: "Optional",
+                                        value: parsely_password,
+                                        oninput: move |e| parsely_password.set(e.value())
+                                    }
+                                }
+                                div { class: "setting-row",
+                                    label { "Guild" }
+                                    input {
+                                        r#type: "text",
+                                        placeholder: "Optional",
+                                        value: parsely_guild,
+                                        oninput: move |e| parsely_guild.set(e.value())
+                                    }
+                                }
+                                div { class: "settings-footer",
+                                    button {
+                                        class: "btn btn-save",
+                                        onclick: move |_| {
+                                            let u = parsely_username();
+                                            let p = parsely_password();
+                                            let g = parsely_guild();
+                                            spawn(async move {
+                                                if let Some(mut cfg) = api::get_config().await {
+                                                    cfg.parsely.username = u;
+                                                    cfg.parsely.password = p;
+                                                    cfg.parsely.guild = g;
+                                                    if api::update_config(&cfg).await {
+                                                        parsely_save_status.set("Saved!".to_string());
+                                                    }
+                                                }
+                                            });
+                                        },
+                                        "Save Parsely Settings"
+                                    }
+                                    span { class: "save-status", "{parsely_save_status}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // File browser modal
+            if file_browser_open() {
+                div {
+                    class: "modal-backdrop",
+                    onclick: move |_| file_browser_open.set(false),
+                    div {
+                        class: "file-browser-modal",
+                        onclick: move |e| e.stop_propagation(),
+
+                        div { class: "file-browser-header",
+                            h3 {
+                                i { class: "fa-solid fa-folder-open" }
+                                " Log Files"
+                            }
+                            button {
+                                class: "btn btn-close",
+                                onclick: move |_| file_browser_open.set(false),
+                                "X"
+                            }
+                        }
+
+                        div { class: "file-browser-list",
+                            if log_files().is_empty() {
+                                div { class: "file-browser-empty",
+                                    i { class: "fa-solid fa-spinner fa-spin" }
+                                    " Loading files..."
+                                }
+                            } else {
+                                for file in log_files().iter() {
+                                    {
+                                        let path = file.path.clone();
+                                        let path_for_upload = file.path.clone();
+                                        let display_name = file.display_name.clone();
+                                        let char_name = file.character_name.clone().unwrap_or_else(|| "Unknown".to_string());
+                                        let date = file.date.clone();
+                                        let size_kb = file.file_size / 1024;
+                                        let is_empty = file.is_empty;
+                                        let upload_st = upload_status();
+                                        let is_uploading = upload_st.as_ref().map(|(p, _, _)| p == &path).unwrap_or(false);
+                                        rsx! {
+                                            div {
+                                                class: if is_empty { "file-item empty" } else { "file-item" },
+                                                div { class: "file-info",
+                                                    span { class: "file-name", "{display_name}" }
+                                                    div { class: "file-meta",
+                                                        span { class: "file-char", "{char_name}" }
+                                                        span { class: "file-date", "{date}" }
+                                                        span { class: "file-size", "{size_kb} KB" }
+                                                    }
+                                                    // Show upload result for this file
+                                                    if let Some((ref p, success, ref msg)) = upload_st {
+                                                        if p == &path {
+                                                            if success && msg != "Uploading..." {
+                                                                // Show clickable link that opens in browser
+                                                                {
+                                                                    let url = msg.clone();
+                                                                    rsx! {
+                                                                        button {
+                                                                            class: "upload-link",
+                                                                            title: "Open in browser",
+                                                                            onclick: move |_| {
+                                                                                let u = url.clone();
+                                                                                spawn(async move {
+                                                                                    api::open_url(&u).await;
+                                                                                });
+                                                                            },
+                                                                            i { class: "fa-solid fa-external-link-alt" }
+                                                                            " {msg}"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            } else if success {
+                                                                span { class: "upload-status", "{msg}" }
+                                                            } else {
+                                                                span { class: "upload-status error", "{msg}" }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                div { class: "file-actions",
+                                                    button {
+                                                        class: "btn btn-open",
+                                                        disabled: is_empty,
+                                                        onclick: move |_| {
+                                                            let p = path.clone();
+                                                            file_browser_open.set(false);
+                                                            spawn(async move {
+                                                                api::open_historical_file(&p).await;
+                                                                is_live_tailing.set(false);
+                                                            });
+                                                        },
+                                                        i { class: "fa-solid fa-eye" }
+                                                        " Open"
+                                                    }
+                                                    button {
+                                                        class: "btn btn-upload",
+                                                        disabled: is_empty || is_uploading,
+                                                        title: "Upload to Parsely.io",
+                                                        onclick: move |_| {
+                                                            let p = path_for_upload.clone();
+                                                            upload_status.set(Some((p.clone(), true, "Uploading...".to_string())));
+                                                            spawn(async move {
+                                                                if let Some(resp) = api::upload_to_parsely(&p).await {
+                                                                    if resp.success {
+                                                                        let link = resp.link.unwrap_or_default();
+                                                                        upload_status.set(Some((p, true, link)));
+                                                                    } else {
+                                                                        let err = resp.error.unwrap_or_else(|| "Upload failed".to_string());
+                                                                        upload_status.set(Some((p, false, err)));
+                                                                    }
+                                                                } else {
+                                                                    upload_status.set(Some((p, false, "Upload failed".to_string())));
+                                                                }
+                                                            });
+                                                        },
+                                                        i { class: "fa-solid fa-cloud-arrow-up" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -740,6 +997,31 @@ pub fn App() -> Element {
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Format file info as "Name - Date Time" (e.g., "Jerran Zeva - 2025-12-23 05:08")
+fn format_file_info(file: &Option<LogFileInfo>) -> String {
+    let Some(file) = file else {
+        return "Loading...".to_string();
+    };
+
+    // Extract time from filename: combat_2025-12-23_05_08_23_179323.txt -> 05:08
+    let time = file.path
+        .rsplit(['/', '\\'])
+        .next()
+        .and_then(|filename| {
+            let parts: Vec<&str> = filename.split('_').collect();
+            // parts: ["combat", "2025-12-23", "05", "08", "23", "179323.txt"]
+            if parts.len() >= 4 {
+                Some(format!("{}:{}", parts[2], parts[3]))
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+
+    let name = file.character_name.as_deref().unwrap_or("Unknown");
+    format!("{} - {} {}", name, file.date, time)
+}
 
 #[allow(clippy::too_many_arguments)]
 fn apply_status(

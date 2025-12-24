@@ -512,6 +512,17 @@ impl OverlaySettings {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Application configuration.
+/// Parsely.io upload settings
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ParselySettings {
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default)]
+    pub guild: String,
+}
+
 ///
 /// Note: Persistence methods (load/save) are provided by baras-core via the
 /// `AppConfigExt` trait, as they require platform-specific dependencies.
@@ -536,6 +547,8 @@ pub struct AppConfig {
     pub profiles: Vec<OverlayProfile>,
     #[serde(default)]
     pub active_profile_name: Option<String>,
+    #[serde(default)]
+    pub parsely: ParselySettings,
 }
 
 fn default_retention_days() -> u32 { 21 }
@@ -554,6 +567,7 @@ impl AppConfig {
             hotkeys: HotkeySettings::default(),
             profiles: Vec::new(),
             active_profile_name: None,
+            parsely: ParselySettings::default(),
         }
     }
 }

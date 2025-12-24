@@ -144,6 +144,54 @@ async fn process_overlay_update(overlay_state: &SharedOverlayState, update: Over
         OverlayUpdate::CombatEnded => {
             // Could hide overlay or freeze display
         }
+        OverlayUpdate::ClearAllData => {
+            // Clear all overlay data when switching files
+            // Collect channels while holding lock, then release before awaiting
+            use baras_overlay::RaidFrameData;
+
+            let channels: Vec<_> = {
+                let state = match overlay_state.lock() {
+                    Ok(s) => s,
+                    Err(_) => return,
+                };
+
+                let mut channels = Vec::new();
+
+                // Collect metric overlay channels
+                for metric_type in MetricType::all() {
+                    if let Some(tx) = state.get_tx(OverlayType::Metric(*metric_type)) {
+                        channels.push((tx.clone(), OverlayData::Metrics(vec![])));
+                    }
+                }
+
+                // Personal overlay
+                if let Some(tx) = state.get_personal_tx() {
+                    channels.push((tx.clone(), OverlayData::Personal(Default::default())));
+                }
+
+                // Raid overlay
+                if let Some(tx) = state.get_raid_tx() {
+                    channels.push((tx.clone(), OverlayData::Raid(RaidFrameData { frames: vec![] })));
+                }
+
+                // Boss health overlay
+                if let Some(tx) = state.get_boss_health_tx() {
+                    channels.push((tx.clone(), OverlayData::BossHealth(Default::default())));
+                }
+
+                // Timer overlay
+                if let Some(tx) = state.get_timers_tx() {
+                    channels.push((tx.clone(), OverlayData::Timers(Default::default())));
+                }
+
+                channels
+            }; // Lock released here
+
+            // Now send to all channels (outside lock scope)
+            for (tx, data) in channels {
+                let _ = tx.send(OverlayCommand::UpdateData(data)).await;
+            }
+        }
     }
 }
 

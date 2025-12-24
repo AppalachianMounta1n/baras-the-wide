@@ -269,4 +269,29 @@ impl ServiceHandle {
             .await
             .map_err(|e| e.to_string())
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // File Browser Operations
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Open a historical file (pauses live tailing)
+    pub async fn open_historical_file(&self, path: PathBuf) -> Result<(), String> {
+        self.cmd_tx
+            .send(ServiceCommand::OpenHistoricalFile(path))
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Resume live tailing (switch to newest file)
+    pub async fn resume_live_tailing(&self) -> Result<(), String> {
+        self.cmd_tx
+            .send(ServiceCommand::ResumeLiveTailing)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Check if in live tailing mode
+    pub fn is_live_tailing(&self) -> bool {
+        self.shared.is_live_tailing.load(Ordering::SeqCst)
+    }
 }

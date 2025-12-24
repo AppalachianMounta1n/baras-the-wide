@@ -33,6 +33,8 @@ pub struct SharedState {
     pub in_combat: AtomicBool,
     /// Whether the directory watcher is active
     pub watching: AtomicBool,
+    /// Whether we're in live tailing mode (vs viewing historical file)
+    pub is_live_tailing: AtomicBool,
     /// Raid frame slot assignments (persists player positions)
     pub raid_registry: Mutex<RaidSlotRegistry>,
 }
@@ -45,6 +47,7 @@ impl SharedState {
             session: RwLock::new(None),
             in_combat: AtomicBool::new(false),
             watching: AtomicBool::new(false),
+            is_live_tailing: AtomicBool::new(true), // Start in live tailing mode
             raid_registry: Mutex::new(RaidSlotRegistry::new(8)), // Default 8 slots (2x4 grid)
         }
     }
