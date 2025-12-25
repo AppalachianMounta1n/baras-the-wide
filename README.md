@@ -93,15 +93,14 @@ The **Battle Analysis and Raid Assessment System** (BARAS) is the ultimate compa
 ### Windows
 
 1. Download the latest release from the [Releases page](https://github.com/baras-app/baras/releases)
-2. Extract the archive
-3. Run `baras.exe`
+3. Run the `.exe`
 
 ### Linux
 
-1. Download the latest release from the [Releases page](https://github.com/baras-app/baras/releases)
-2. Extract the archive
-3. Make executable: `chmod +x baras`
-4. Run `./baras`
+1. Download the latest AppImage from the [Releases page](https://github.com/baras-app/baras/releases)
+2. Make executable: `chmod +x baras`
+3. Run the AppImage
+   
 
 ## Quick Start
 
