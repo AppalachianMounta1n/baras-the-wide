@@ -6,7 +6,7 @@ use super::Encounter;
 /// Grace period when another shield is still active (tighter window)
 const ABSORPTION_INSIDE_DELAY_MS: i64 = 500;
 /// Grace period when no other shields active (more lenient for log lag)
-const ABSORPTION_OUTSIDE_DELAY_MS: i64 = 4000;
+const ABSORPTION_OUTSIDE_DELAY_MS: i64 = 3000;
 
 /// A damage event with absorption waiting to be attributed to a shield
 #[derive(Debug, Clone)]
@@ -14,6 +14,13 @@ pub struct PendingAbsorption {
     pub timestamp: NaiveDateTime,
     pub absorbed: i64,
     pub source_id: i64, // who to credit when resolved
+}
+
+/// Shield info extracted for attribution (avoids borrow conflicts)
+struct ShieldInfo {
+    source_id: i64,
+    effect_id: i64,
+    is_removed: bool,
 }
 
 impl Encounter {
@@ -27,32 +34,62 @@ impl Encounter {
         }
 
         let target_id = event.target_entity.log_id;
-        let Some(effects) = self.effects.get(&target_id) else {
-            return;
-        };
 
-        // Find active shields at this timestamp
-        let active_shields: Vec<&EffectInstance> = effects
-            .iter()
-            .filter(|e| {
-                e.is_shield
-                    && !e.has_absorbed
-                    && e.applied_at < event.timestamp
-                    && is_shield_active_at(e, event.timestamp, false)
-            })
-            .collect();
+        // Collect shield info to avoid borrow conflicts
+        let (active_shields, recently_closed) = {
+            let Some(effects) = self.effects.get(&target_id) else {
+                return;
+            };
+
+            let active: Vec<ShieldInfo> = effects
+                .iter()
+                .filter(|e| {
+                    e.is_shield
+                        && !e.has_absorbed
+                        && e.applied_at < event.timestamp
+                        && is_shield_active_at(e, event.timestamp, false)
+                })
+                .map(|e| ShieldInfo {
+                    source_id: e.source_id,
+                    effect_id: e.effect_id,
+                    is_removed: e.removed_at.is_some(),
+                })
+                .collect();
+
+            let closed = if active.is_empty() {
+                find_recently_closed_shield(effects, event.timestamp)
+                    .map(|e| e.source_id)
+            } else {
+                None
+            };
+
+            (active, closed)
+        };
 
         match active_shields.len() {
             0 => {
                 // No active shields - try to find a recently closed one
-                if let Some(shield) = find_recently_closed_shield(effects, event.timestamp) {
-                    let acc = self.accumulated_data.entry(shield.source_id).or_default();
+                if let Some(source_id) = recently_closed {
+                    let acc = self.accumulated_data.entry(source_id).or_default();
                     acc.shielding_given += absorbed;
                 }
             }
             1 => {
                 // Single shield: attribute immediately
-                let shield = active_shields[0];
+                let shield = &active_shields[0];
+
+                // Mark as consumed if the shield was removed (depleted) and damage got through
+                // This prevents double-counting via find_recently_closed_shield later
+                if shield.is_removed && event.details.dmg_effective > 0 {
+                    if let Some(effects) = self.effects.get_mut(&target_id) {
+                        if let Some(effect) = effects.iter_mut().find(|e| {
+                            e.is_shield && e.effect_id == shield.effect_id
+                        }) {
+                            effect.has_absorbed = true;
+                        }
+                    }
+                }
+
                 let acc = self.accumulated_data.entry(shield.source_id).or_default();
                 acc.shielding_given += absorbed;
             }

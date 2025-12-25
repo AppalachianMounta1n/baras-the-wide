@@ -286,7 +286,7 @@ impl Encounter {
     pub fn accumulate_data(&mut self, event: &CombatEvent) {
         let avoid = resolve(event.details.avoid_type);
         let is_defense = matches!(avoid, "dodge" | "parry" | "resist" | "deflect");
-        let is_natural_shield = avoid == "shield";
+        let is_natural_shield = avoid == "shield" && event.details.dmg_effective == event.details.dmg_amount;
 
         // Source accumulation (damage/healing dealt)
         {
@@ -337,7 +337,7 @@ impl Encounter {
             // Effect shield absorption (Static Barrier, etc.)
             // Note: dmg_absorbed is independent of is_natural_shield.
             // A hit can have BOTH shield chance proc (-shield) AND absorption effect (absorbed).
-            if event.details.dmg_absorbed > 0 {
+            if event.details.dmg_absorbed > 0 && !is_natural_shield {
                 self.attribute_shield_absorption(event);
             }
         }
