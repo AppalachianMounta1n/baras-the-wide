@@ -18,7 +18,7 @@ env:
 jobs:
   build-linux:
     if: ${{ inputs.build_linux }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -45,12 +45,6 @@ jobs:
 
       - name: Install Dioxus and Tauri CLIs
         run: cargo binstall dioxus-cli tauri-cli --no-confirm
-
-      - name: Set version to current date
-        run: |
-          VERSION=$(date +%Y.%m.%d)
-          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" app/src-tauri/tauri.conf.json
-          echo "Version set to $VERSION"
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -88,15 +82,6 @@ jobs:
 
       - name: Install Dioxus and Tauri CLIs
         run: cargo binstall dioxus-cli tauri-cli --no-confirm
-
-      - name: Set version to current date
-        shell: pwsh
-        run: |
-          $version = Get-Date -Format "yyyy.MM.dd"
-          $conf = Get-Content app/src-tauri/tauri.conf.json -Raw
-          $conf = $conf -replace '"version": "[^"]*"', "`"version`": `"$version`""
-          Set-Content app/src-tauri/tauri.conf.json $conf
-          Write-Host "Version set to $version"
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
