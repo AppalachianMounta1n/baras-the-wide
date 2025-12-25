@@ -12,7 +12,7 @@ The **Battle Analysis and Raid Assessment System** (BARAS) is the ultimate compa
 
 ### General
 
-**No Auto-updates, no "anonymous" statistics, no bloat**
+**Full of features. No bloat**
 
 - **Lean** - Unlike Darth Baras the Wide, BARAS is tiny. Pure Rust, event-driven, smart caching that only loads the data you need.
 - **Fast** - BARAS will chew through even the largest log files quicker than you can blink.
