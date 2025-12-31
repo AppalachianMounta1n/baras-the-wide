@@ -94,19 +94,15 @@ impl RaidSlotRegistry {
     /// Update player's name (if we get better info later)
     pub fn update_name(&mut self, entity_id: i64, name: String) {
         if let Some(&slot) = self.entity_to_slot.get(&entity_id)
-            && let Some(player) = self.slots.get_mut(&slot) {
-                player.name = name;
+            && let Some(player) = self.slots.get_mut(&slot)
+        {
+            player.name = name;
         }
     }
 
     /// Find the first available slot (lowest numbered empty slot)
     fn find_first_available_slot(&self) -> Option<u8> {
-        for slot in 0..self.max_slots {
-            if !self.slots.contains_key(&slot) {
-                return Some(slot);
-            }
-        }
-        None // All slots full
+        (0..self.max_slots).find(|&s| !self.slots.contains_key(&s))
     }
 
     /// Swap two slots (user-initiated rearrange)
@@ -186,7 +182,7 @@ impl RaidSlotRegistry {
         let mut displaced: Vec<RegisteredPlayer> = Vec::new();
         let mut slots_to_remove = Vec::new();
 
-        for (&slot, _) in &self.slots {
+        for &slot in self.slots.keys() {
             if slot >= new_max {
                 slots_to_remove.push(slot);
             }

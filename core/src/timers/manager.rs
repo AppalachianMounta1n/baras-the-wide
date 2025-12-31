@@ -3,27 +3,49 @@
 //! Manages boss mechanic and ability cooldown timers.
 //! Reacts to signals to start, refresh, and expire timers.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use chrono::{Local, NaiveDateTime};
 
-use crate::boss_timers::{BossDefinition, BossEncounterState};
-use crate::events::{GameSignal, SignalHandler};
+use crate::boss::BossEncounterDefinition;
+use crate::combat_log::EntityType;
+use crate::signal_processor::{GameSignal, SignalHandler};
 use crate::game_data::Difficulty;
+use crate::context::IStr;
 
-use super::{ActiveTimer, TimerDefinition, TimerKey};
+use super::{ActiveTimer, TimerDefinition, TimerKey, TimerTrigger, TimerPreferences};
+use super::matching::{is_definition_active, matches_source_target_filters};
+use super::signal_handlers;
 
-/// Maximum age (in minutes) for events to be processed by timers.
+/// Maximum age (in minutes) for events to be processed by timers in live mode.
 /// Events older than this are skipped since timers are only useful for recent/live events.
+/// This is only checked when `live_mode` is true (after initial batch load).
 const TIMER_RECENCY_THRESHOLD_MINS: i64 = 5;
 
 /// Current encounter context for filtering timers
 #[derive(Debug, Clone, Default)]
 pub struct EncounterContext {
+    /// Area name from game (for display/logging)
     pub encounter_name: Option<String>,
+    /// Area ID from game (primary matching key - more reliable than name)
+    pub area_id: Option<i64>,
     pub boss_name: Option<String>,
     pub difficulty: Option<Difficulty>,
+}
+
+/// A fired alert (ephemeral notification, not a countdown timer)
+#[derive(Debug, Clone)]
+pub struct FiredAlert {
+    pub id: String,
+    pub name: String,
+    pub text: String,
+    pub color: Option<[u8; 4]>,
+    pub timestamp: NaiveDateTime,
+    /// Whether audio is enabled for this alert
+    pub audio_enabled: bool,
+    /// Optional custom audio file for this alert (relative path)
+    pub audio_file: Option<String>,
 }
 
 /// Manages ability cooldown and buff timers.
@@ -31,32 +53,62 @@ pub struct EncounterContext {
 #[derive(Debug)]
 pub struct TimerManager {
     /// Timer definitions indexed by ID
-    definitions: HashMap<String, TimerDefinition>,
+    pub(super) definitions: HashMap<String, TimerDefinition>,
 
-    /// Currently active timers
-    active_timers: HashMap<TimerKey, ActiveTimer>,
+    /// User preferences (color, audio, enabled overrides)
+    preferences: TimerPreferences,
+
+    /// Currently active timers (countdown timers with duration > 0)
+    pub(super) active_timers: HashMap<TimerKey, ActiveTimer>,
+
+    /// Fired alerts (ephemeral notifications, not countdown timers)
+    pub(super) fired_alerts: Vec<FiredAlert>,
 
     /// Timers that expired this tick (for chaining)
     expired_this_tick: Vec<String>,
 
     /// Current encounter context for filtering
-    context: EncounterContext,
+    pub(super) context: EncounterContext,
 
     /// Whether we're currently in combat
-    in_combat: bool,
+    pub(super) in_combat: bool,
 
     /// Last known game timestamp
     last_timestamp: Option<NaiveDateTime>,
 
-    // ─── Boss Encounter State ──────────────────────────────────────────────────
-    /// Boss definitions indexed by area name (area -> [bosses in that area])
-    boss_definitions: HashMap<String, Vec<BossDefinition>>,
+    /// When true, apply recency threshold to skip old events.
+    live_mode: bool,
 
-    /// Current boss encounter runtime state
-    encounter_state: BossEncounterState,
+    // ─── Boss Encounter State (from signals) ───────────────────────────────────
+    /// Boss definitions indexed by area name (for timer extraction)
+    boss_definitions: HashMap<String, Vec<BossEncounterDefinition>>,
 
-    /// Active boss definition (if fighting a known boss)
-    active_boss_def: Option<BossDefinition>,
+    /// Current phase (from PhaseChanged signals)
+    pub(super) current_phase: Option<String>,
+
+    /// Counter values (from CounterChanged signals)
+    pub(super) counters: HashMap<String, u32>,
+
+    /// Boss HP by NPC ID (from BossHpChanged signals)
+    pub(super) boss_hp_by_npc: HashMap<i64, f32>,
+
+    /// Combat start time (for TimeElapsed triggers)
+    pub(super) combat_start_time: Option<NaiveDateTime>,
+
+    /// Last checked combat time in seconds (for crossing detection)
+    pub(super) last_combat_secs: f32,
+
+    // ─── Entity Filter State ─────────────────────────────────────────────────
+    /// Local player's entity ID (for LocalPlayer filter)
+    pub(super) local_player_id: Option<i64>,
+
+    /// Boss entity IDs currently in combat (for Boss filter)
+    /// These are runtime entity IDs (log_id), not NPC class IDs
+    pub(super) boss_entity_ids: HashSet<i64>,
+
+    /// Boss NPC class IDs for the active encounter (to detect additional boss entities)
+    /// When NPCs with these class IDs are first seen, add their entity_id to boss_entity_ids
+    boss_npc_class_ids: HashSet<i64>,
 }
 
 impl Default for TimerManager {
@@ -69,15 +121,51 @@ impl TimerManager {
     pub fn new() -> Self {
         Self {
             definitions: HashMap::new(),
+            preferences: TimerPreferences::new(),
             active_timers: HashMap::new(),
+            fired_alerts: Vec::new(),
             expired_this_tick: Vec::new(),
             context: EncounterContext::default(),
             in_combat: false,
             last_timestamp: None,
+            live_mode: true, // Default: apply recency threshold (skip old events)
             boss_definitions: HashMap::new(),
-            encounter_state: BossEncounterState::default(),
-            active_boss_def: None,
+            current_phase: None,
+            counters: HashMap::new(),
+            boss_hp_by_npc: HashMap::new(),
+            combat_start_time: None,
+            last_combat_secs: 0.0,
+            local_player_id: None,
+            boss_entity_ids: HashSet::new(),
+            boss_npc_class_ids: HashSet::new(),
         }
+    }
+
+    /// Load timer preferences from a file
+    pub fn load_preferences(&mut self, path: &std::path::Path) -> Result<(), super::PreferencesError> {
+        self.preferences = TimerPreferences::load(path)?;
+        eprintln!("TimerManager: loaded {} timer preferences", self.preferences.timers.len());
+        Ok(())
+    }
+
+    /// Set timer preferences directly
+    pub fn set_preferences(&mut self, preferences: TimerPreferences) {
+        self.preferences = preferences;
+    }
+
+    /// Get a reference to current preferences
+    pub fn preferences(&self) -> &TimerPreferences {
+        &self.preferences
+    }
+
+    /// Get a mutable reference to preferences (for updating)
+    pub fn preferences_mut(&mut self) -> &mut TimerPreferences {
+        &mut self.preferences
+    }
+
+    /// Clear boss NPC class IDs (called when encounter ends)
+    pub(super) fn clear_boss_npc_class_ids(&mut self) {
+        self.boss_npc_class_ids.clear();
     }
 
     /// Load timer definitions
@@ -115,7 +203,7 @@ impl TimerManager {
 
     /// Load boss definitions (indexed by area name for quick lookup)
     /// Also extracts boss timers into the main definitions map
-    pub fn load_boss_definitions(&mut self, bosses: Vec<BossDefinition>) {
+    pub fn load_boss_definitions(&mut self, bosses: Vec<BossEncounterDefinition>) {
         self.boss_definitions.clear();
 
         // Clear existing boss-related timer definitions (keep generic ones)
@@ -128,7 +216,7 @@ impl TimerManager {
             // Extract boss timers and convert to TimerDefinition
             for boss_timer in &boss.timers {
                 if boss_timer.enabled {
-                    let timer_def = convert_boss_timer_to_definition(boss_timer, &boss);
+                    let timer_def = boss_timer.to_timer_definition(boss.area_id, &boss.area_name, &boss.name);
 
                     // Check for duplicate ID - warn and skip instead of silent overwrite
                     if let Some(existing) = self.definitions.get(&timer_def.id) {
@@ -176,16 +264,27 @@ impl TimerManager {
         self.validate_timer_chains();
     }
 
+    /// Enable live mode (apply recency threshold to skip old events).
+    /// Call this after the initial batch load to prevent stale log events from triggering timers.
+    pub fn set_live_mode(&mut self, enabled: bool) {
+        self.live_mode = enabled;
+    }
+
+    /// Set the local player's entity ID (for LocalPlayer filter matching).
+    /// Call this when the local player is identified during log parsing.
+    pub fn set_local_player_id(&mut self, entity_id: i64) {
+        self.local_player_id = Some(entity_id);
+    }
+
     /// Validate that all timer chain references (triggers_timer/chains_to) point to existing timers
     fn validate_timer_chains(&self) {
         let mut broken_chains = Vec::new();
 
         for (id, def) in &self.definitions {
-            if let Some(ref chain_to) = def.triggers_timer {
-                if !self.definitions.contains_key(chain_to) {
+            if let Some(ref chain_to) = def.triggers_timer
+                && !self.definitions.contains_key(chain_to) {
                     broken_chains.push((id.clone(), chain_to.clone()));
                 }
-            }
         }
 
         if !broken_chains.is_empty() {
@@ -202,9 +301,14 @@ impl TimerManager {
         }
     }
 
-    /// Get current encounter state (for external queries)
-    pub fn encounter_state(&self) -> &BossEncounterState {
-        &self.encounter_state
+    /// Get the current boss phase (if any)
+    pub fn current_phase(&self) -> Option<&str> {
+        self.current_phase.as_deref()
+    }
+
+    /// Get the current value of a counter
+    pub fn counter_value(&self, counter_id: &str) -> u32 {
+        self.counters.get(counter_id).copied().unwrap_or(0)
     }
 
     /// Tick to process timer expirations based on real time.
@@ -229,43 +333,125 @@ impl TimerManager {
             .collect()
     }
 
-    /// Set encounter context for filtering
-    pub fn set_context(&mut self, encounter: Option<String>, boss: Option<String>, difficulty: Option<Difficulty>) {
+    /// Check all active timers for countdown announcements
+    ///
+    /// Returns a list of (timer_name, seconds, voice_pack) for each countdown that should be announced.
+    /// This mutates the timers to mark countdowns as announced so they won't repeat.
+    /// Uses realtime (system Instant) for accurate audio synchronization.
+    /// Skips timers with audio_enabled=false.
+    pub fn check_all_countdowns(&mut self) -> Vec<(String, u8, String)> {
+        self.active_timers
+            .values_mut()
+            .filter(|timer| timer.audio_enabled)
+            .filter_map(|timer| {
+                timer.check_countdown()
+                    .map(|secs| (timer.name.clone(), secs, timer.countdown_voice.clone()))
+            })
+            .collect()
+    }
+
+    /// Check all active timers for audio offset triggers
+    ///
+    /// Returns FiredAlerts for timers where remaining time crossed below audio_offset.
+    /// This is for "early warning" sounds that play before the timer expires.
+    /// Skips timers with audio_enabled=false.
+    pub fn check_audio_offsets(&mut self) -> Vec<FiredAlert> {
+        let now = Local::now().naive_local();
+        self.active_timers
+            .values_mut()
+            .filter(|timer| timer.audio_enabled)
+            .filter_map(|timer| {
+                if timer.check_audio_offset() {
+                    Some(FiredAlert {
+                        id: timer.definition_id.clone(),
+                        name: timer.name.clone(),
+                        text: timer.name.clone(),
+                        color: Some(timer.color),
+                        timestamp: now,
+                        audio_enabled: true, // Already filtered by audio_enabled
+                        audio_file: timer.audio_file.clone(),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Take all fired alerts, clearing the internal buffer.
+    /// Call this after processing signals to capture ephemeral notifications.
+    pub fn take_fired_alerts(&mut self) -> Vec<FiredAlert> {
+        std::mem::take(&mut self.fired_alerts)
+    }
+
+    /// Peek at fired alerts without clearing (for validation/debugging)
+    pub fn fired_alerts(&self) -> &[FiredAlert] {
+        &self.fired_alerts
+    }
+
+    /// Set encounter context for filtering (legacy - prefer using signals)
+    pub fn set_context(&mut self, area_id: Option<i64>, encounter: Option<String>, boss: Option<String>, difficulty: Option<Difficulty>) {
         self.context = EncounterContext {
+            area_id,
             encounter_name: encounter,
             boss_name: boss,
             difficulty,
         };
     }
 
-    /// Check if a timer definition is active for current context
-    fn is_definition_active(&self, def: &TimerDefinition) -> bool {
-        // First check basic context (encounter, boss, difficulty)
-        if !def.enabled || !def.is_active_for_context(
-            self.context.encounter_name.as_deref(),
-            self.context.boss_name.as_deref(),
-            self.context.difficulty,
-        ) {
+    /// Check if a timer definition is active for current context (delegates to matching module)
+    /// Also checks preference override for enabled state
+    pub(super) fn is_definition_active(&self, def: &TimerDefinition) -> bool {
+        // Check preference override first - user can disable timers via preferences
+        if !self.preferences.is_enabled(def) {
             return false;
         }
-
-        // Then check phase/counter conditions if specified
-        def.is_active_for_state(&self.encounter_state)
+        is_definition_active(def, &self.context, self.current_phase.as_deref(), &self.counters)
     }
 
     /// Start a timer from a definition
-    fn start_timer(&mut self, def: &TimerDefinition, timestamp: NaiveDateTime, target_id: Option<i64>) {
+    pub(super) fn start_timer(&mut self, def: &TimerDefinition, timestamp: NaiveDateTime, target_id: Option<i64>) {
+        // Apply preference overrides
+        let color = self.preferences.get_color(def);
+        let audio_enabled = self.preferences.is_audio_enabled(def);
+        let audio_file = self.preferences.get_audio_file(def);
+
+        // Alerts are ephemeral notifications, not countdown timers
+        if def.is_alert {
+            self.fired_alerts.push(FiredAlert {
+                id: def.id.clone(),
+                name: def.name.clone(),
+                text: def.alert_text.clone().unwrap_or_else(|| def.name.clone()),
+                color: Some(color),
+                timestamp,
+                audio_enabled,
+                audio_file,
+            });
+            return;
+        }
+
         let key = TimerKey::new(&def.id, target_id);
 
         // Check if timer already exists and can be refreshed
         if let Some(existing) = self.active_timers.get_mut(&key) {
             if def.can_be_refreshed {
                 existing.refresh(timestamp);
+                // Still need to cancel timers that depend on this one
+                self.cancel_timers_on_start(&def.id);
                 return;
             }
             // Timer exists and can't be refreshed - ignore
             return;
         }
+
+        // Build audio config with preference overrides
+        let audio_with_prefs = crate::audio::AudioConfig {
+            enabled: audio_enabled,
+            file: audio_file,
+            offset: def.audio.offset,
+            countdown_start: def.audio.countdown_start,
+            countdown_voice: def.audio.countdown_voice.clone(),
+        };
 
         // Create new timer
         let timer = ActiveTimer::new(
@@ -275,36 +461,115 @@ impl TimerManager {
             timestamp,
             Duration::from_secs_f32(def.duration_secs),
             def.repeats,
-            def.color,
+            color,
             def.triggers_timer.clone(),
             def.show_on_raid_frames,
+            def.show_at_secs,
+            &audio_with_prefs,
         );
 
-        self.active_timers.insert(key, timer);
+        self.active_timers.insert(key.clone(), timer);
+
+        // Cancel any timers that have cancel_on_timer pointing to this timer
+        self.cancel_timers_on_start(&def.id);
     }
 
-    /// Process timer expirations and chains
+    /// Cancel active timers that have cancel_on_timer matching the started timer ID
+    fn cancel_timers_on_start(&mut self, started_timer_id: &str) {
+        // Find keys to remove - check for TimerStarted cancel triggers
+        let keys_to_cancel: Vec<_> = self.active_timers
+            .iter()
+            .filter_map(|(key, timer)| {
+                if let Some(def) = self.definitions.get(&timer.definition_id)
+                    && let Some(ref cancel_trigger) = def.cancel_trigger
+                    && matches!(cancel_trigger, TimerTrigger::TimerStarted { timer_id } if timer_id == started_timer_id) {
+                        Some(key.clone())
+                    } else {
+                        None
+                    }
+            })
+            .collect();
+
+        // Remove cancelled timers
+        for key in keys_to_cancel {
+            self.active_timers.remove(&key);
+        }
+    }
+
+    /// Cancel active timers whose cancel_trigger matches the given predicate
+    pub(super) fn cancel_timers_matching<F>(&mut self, trigger_matches: F, _reason: &str)
+    where
+        F: Fn(&TimerTrigger) -> bool,
+    {
+        let keys_to_cancel: Vec<_> = self.active_timers
+            .iter()
+            .filter_map(|(key, timer)| {
+                if let Some(def) = self.definitions.get(&timer.definition_id)
+                    && let Some(ref cancel_trigger) = def.cancel_trigger
+                    && trigger_matches(cancel_trigger) {
+                        Some(key.clone())
+                    } else {
+                        None
+                    }
+            })
+            .collect();
+
+        for key in keys_to_cancel {
+            self.active_timers.remove(&key);
+        }
+    }
+
+    /// Process timer expirations, repeats, and chains
     fn process_expirations(&mut self, current_time: NaiveDateTime) {
         self.expired_this_tick.clear();
 
-        // Find expired timers
+        // Find expired timer keys
         let expired_keys: Vec<_> = self.active_timers
             .iter()
             .filter(|(_, timer)| timer.has_expired(current_time))
-            .map(|(key, timer)| (key.clone(), timer.triggers_timer.clone()))
+            .map(|(key, _)| key.clone())
             .collect();
 
-        // Remove expired timers and collect chain triggers
-        for (key, chain_timer_id) in expired_keys {
-            if let Some(timer) = self.active_timers.remove(&key) {
-                self.expired_this_tick.push(timer.definition_id.clone());
+        // Collect chain triggers from timers that won't repeat
+        let mut chains_to_start: Vec<(String, Option<i64>)> = Vec::new();
 
-                // Handle chaining
-                if let Some(next_timer_id) = chain_timer_id
-                    && let Some(next_def) = self.definitions.get(&next_timer_id).cloned()
-                        && self.is_definition_active(&next_def) {
-                            self.start_timer(&next_def, current_time, timer.target_entity_id);
+        for key in expired_keys {
+            // Always record the expiration for TimerExpires triggers
+            self.expired_this_tick.push(key.definition_id.clone());
+
+            // Check if timer can repeat
+            if let Some(timer) = self.active_timers.get_mut(&key)
+                && timer.can_repeat()
+            {
+                timer.repeat(current_time);
+            } else if let Some(timer) = self.active_timers.remove(&key) {
+                // Timer exhausted repeats - fire expiration alert if audio is configured
+                // Only fire on expiration if audio_offset == 0 (otherwise it already played at offset)
+                // Skip if audio_enabled == false
+                if timer.audio_enabled && timer.audio_file.is_some() && timer.audio_offset == 0 {
+                    self.fired_alerts.push(FiredAlert {
+                        id: timer.definition_id.clone(),
+                        name: timer.name.clone(),
+                        text: timer.name.clone(),
+                        color: Some(timer.color),
+                        timestamp: current_time,
+                        audio_enabled: true, // Already checked above
+                        audio_file: timer.audio_file.clone(),
+                    });
                 }
+                // Prepare chain to next timer
+                if let Some(next_timer_id) = timer.triggers_timer.clone() {
+                    chains_to_start.push((next_timer_id, timer.target_entity_id));
+                }
+            }
+        }
+
+        // Start chained timers (outside the borrow)
+        for (next_timer_id, target_id) in chains_to_start {
+            if let Some(next_def) = self.definitions.get(&next_timer_id).cloned()
+                && self.is_definition_active(&next_def)
+            {
+                self.start_timer(&next_def, current_time, target_id);
             }
         }
 
@@ -323,361 +588,278 @@ impl TimerManager {
         }
     }
 
-    /// Handle ability activation
-    fn handle_ability(&mut self, ability_id: i64, _source_id: i64, target_id: i64, timestamp: NaiveDateTime) {
-        // Convert i64 to u64 for matching (game IDs are always positive)
-        let ability_id = ability_id as u64;
+    // ─── Entity Filter Matching (delegates to matching module) ─────────────────
 
-        let matching: Vec<_> = self.definitions
-            .values()
-            .filter(|d| {
-                let matches_ability = d.matches_ability(ability_id);
-                let is_active = self.is_definition_active(d);
-                if matches_ability && !is_active {
-                    let diff_str = self.context.difficulty.map(|d| d.config_key()).unwrap_or("none");
-                    eprintln!("[TIMER] Ability {} matches timer '{}' but context filter failed (enc={:?}, boss={:?}, diff={})",
-                        ability_id, d.name, self.context.encounter_name, self.context.boss_name, diff_str);
-                }
-                matches_ability && is_active
-            })
-            .cloned()
-            .collect();
-
-        for def in matching {
-            eprintln!("[TIMER] Starting timer '{}' (ability {})", def.name, ability_id);
-            self.start_timer(&def, timestamp, Some(target_id));
-        }
+    /// Check if source/target filters pass for a trigger
+    pub(super) fn matches_source_target_filters(
+        &self,
+        trigger: &TimerTrigger,
+        source_id: i64,
+        source_type: EntityType,
+        source_name: IStr,
+        source_npc_id: i64,
+        target_id: i64,
+        target_type: EntityType,
+        target_name: IStr,
+        target_npc_id: i64,
+    ) -> bool {
+        matches_source_target_filters(
+            trigger,
+            source_id, source_type, source_name, source_npc_id,
+            target_id, target_type, target_name, target_npc_id,
+            self.local_player_id, &self.boss_entity_ids,
+        )
     }
 
-    /// Handle effect applied
-    fn handle_effect_applied(&mut self, effect_id: i64, _source_id: i64, target_id: i64, timestamp: NaiveDateTime) {
-        // Convert i64 to u64 for matching (game IDs are always positive)
-        let effect_id = effect_id as u64;
-
-        let matching: Vec<_> = self.definitions
-            .values()
-            .filter(|d| d.matches_effect_applied(effect_id) && self.is_definition_active(d))
-            .cloned()
-            .collect();
-
-        for def in matching {
-            self.start_timer(&def, timestamp, Some(target_id));
-        }
-    }
-
-    /// Handle effect removed
-    fn handle_effect_removed(&mut self, effect_id: i64, target_id: i64, timestamp: NaiveDateTime) {
-        // Convert i64 to u64 for matching (game IDs are always positive)
-        let effect_id = effect_id as u64;
-
-        let matching: Vec<_> = self.definitions
-            .values()
-            .filter(|d| d.matches_effect_removed(effect_id) && self.is_definition_active(d))
-            .cloned()
-            .collect();
-
-        for def in matching {
-            self.start_timer(&def, timestamp, Some(target_id));
-        }
-    }
-
-    /// Handle boss HP change - check for HP threshold triggers
-    fn handle_boss_hp_change(&mut self, previous_hp: f32, current_hp: f32, timestamp: NaiveDateTime) {
-        let matching: Vec<_> = self.definitions
-            .values()
-            .filter(|d| d.matches_boss_hp_threshold(previous_hp, current_hp) && self.is_definition_active(d))
-            .cloned()
-            .collect();
-
-        for def in matching {
-            eprintln!("[TIMER] Starting HP threshold timer '{}' (HP crossed below {}%)",
-                def.name,
-                match &def.trigger {
-                    super::TimerTrigger::BossHpThreshold { hp_percent } => *hp_percent,
-                    _ => 0.0,
-                }
-            );
-            self.start_timer(&def, timestamp, None);
-        }
-    }
-
-    /// Handle combat start
-    fn handle_combat_start(&mut self, timestamp: NaiveDateTime) {
-        self.in_combat = true;
-        self.encounter_state.start_combat(timestamp);
-
-        // If we have an active boss, set initial phase
-        if let Some(ref boss_def) = self.active_boss_def {
-            if let Some(initial_phase) = boss_def.initial_phase() {
-                self.encounter_state.set_phase(&initial_phase.id);
-                eprintln!("[TIMER] Boss fight started, initial phase: {}", initial_phase.name);
-            }
-        }
-
-        let matching: Vec<_> = self.definitions
-            .values()
-            .filter(|d| d.triggers_on_combat_start() && self.is_definition_active(d))
-            .cloned()
-            .collect();
-
-        for def in matching {
-            self.start_timer(&def, timestamp, None);
-        }
-    }
-
-    /// Clear all combat-scoped timers
-    fn clear_combat_timers(&mut self) {
-        self.in_combat = false;
-        self.active_timers.clear();
-        self.encounter_state.reset();
-        self.active_boss_def = None;
-    }
-
-    /// Detect boss from NPC name and activate boss definition
-    fn detect_boss(&mut self, npc_name: &str) {
-        // If we have an area, search only that area first
-        if let Some(ref area_name) = self.context.encounter_name {
-            if let Some(bosses) = self.boss_definitions.get(area_name) {
-                if let Some(boss_def) = bosses.iter().find(|b| b.matches_npc_name(npc_name)) {
-                    eprintln!("[TIMER] Boss detected by name: {} ({}) in {}", boss_def.name, boss_def.id, area_name);
-                    self.active_boss_def = Some(boss_def.clone());
-                    self.context.boss_name = Some(boss_def.name.clone());
-                    return;
-                }
-            }
-        }
-
-        // No area set or boss not found in current area - search ALL areas
-        for (area_name, bosses) in &self.boss_definitions {
-            if let Some(boss_def) = bosses.iter().find(|b| b.matches_npc_name(npc_name)) {
-                eprintln!("[TIMER] Boss detected by name: {} ({}) - inferred area: {}",
-                    boss_def.name, boss_def.id, area_name);
-                self.active_boss_def = Some(boss_def.clone());
-                self.context.boss_name = Some(boss_def.name.clone());
-                self.context.encounter_name = Some(area_name.clone());
-                return;
-            }
-        }
-    }
-
-    /// Detect boss from NPC ID (more reliable than name)
-    fn detect_boss_by_npc_id(&mut self, npc_id: i64) {
-        // If we have an area, search only that area first
-        if let Some(ref area_name) = self.context.encounter_name {
-            if let Some(bosses) = self.boss_definitions.get(area_name) {
-                if let Some(boss_def) = bosses.iter().find(|b| b.matches_npc_id(npc_id)) {
-                    eprintln!("[TIMER] Boss detected by NPC ID {}: {} ({}) in {}",
-                        npc_id, boss_def.name, boss_def.id, area_name);
-                    self.active_boss_def = Some(boss_def.clone());
-                    self.context.boss_name = Some(boss_def.name.clone());
-                    return;
-                }
-            }
-        }
-
-        // No area set or boss not found in current area - search ALL areas
-        for (area_name, bosses) in &self.boss_definitions {
-            if let Some(boss_def) = bosses.iter().find(|b| b.matches_npc_id(npc_id)) {
-                eprintln!("[TIMER] Boss detected by NPC ID {}: {} ({}) - inferred area: {}",
-                    npc_id, boss_def.name, boss_def.id, area_name);
-                self.active_boss_def = Some(boss_def.clone());
-                self.context.boss_name = Some(boss_def.name.clone());
-                self.context.encounter_name = Some(area_name.clone());
-                return;
-            }
-        }
-    }
-
-    /// Update boss HP and check for phase transitions
-    pub fn update_boss_hp(&mut self, current_hp: i64, max_hp: i64, timestamp: NaiveDateTime) {
-        let hp_changed = self.encounter_state.update_boss_hp(current_hp, max_hp);
-
-        if hp_changed {
-            self.check_phase_transitions(timestamp);
-        }
-    }
-
-    /// Check for HP-triggered phase transitions
-    fn check_phase_transitions(&mut self, _timestamp: NaiveDateTime) {
-        let Some(ref boss_def) = self.active_boss_def else {
-            return;
-        };
-
-        let current_phase = self.encounter_state.current_phase.clone();
-
-        // Check each phase for HP threshold triggers
-        for phase in &boss_def.phases {
-            // Skip if we're already in this phase
-            if current_phase.as_deref() == Some(&phase.id) {
-                continue;
-            }
-
-            let should_transition = match &phase.trigger {
-                crate::boss_timers::PhaseTrigger::BossHpBelow { hp_percent, npc_id, boss_name } => {
-                    // Priority: NPC ID > name > any boss
-                    self.encounter_state.is_boss_hp_below(*npc_id, boss_name.as_deref(), *hp_percent)
-                }
-                crate::boss_timers::PhaseTrigger::BossHpAbove { hp_percent, npc_id, boss_name } => {
-                    self.encounter_state.is_boss_hp_above(*npc_id, boss_name.as_deref(), *hp_percent)
-                }
-                _ => false,
-            };
-
-            if should_transition {
-                let hp_display = match &phase.trigger {
-                    crate::boss_timers::PhaseTrigger::BossHpBelow { boss_name, .. } |
-                    crate::boss_timers::PhaseTrigger::BossHpAbove { boss_name, .. } => {
-                        boss_name.as_ref()
-                            .and_then(|n| self.encounter_state.get_boss_hp(n))
-                            .unwrap_or(self.encounter_state.boss_hp_percent)
-                    }
-                    _ => self.encounter_state.boss_hp_percent,
-                };
-
-                eprintln!("[TIMER] Phase transition: {:?} -> {} (HP: {:.1}%)",
-                    current_phase, phase.name, hp_display);
-
-                // Reset counters specified for this phase
-                self.encounter_state.reset_counters(&phase.resets_counters);
-
-                // Set new phase
-                self.encounter_state.set_phase(&phase.id);
-
-                // Start any timers triggered by phase entry
-                // TODO: Implement PhaseEntered trigger for boss timers
-                break;
-            }
-        }
-    }
-
-    /// Pause timers for a dead entity
-    fn pause_entity_timers(&mut self, _entity_id: i64) {
-        // For now, we don't pause - just let them expire naturally
-        // Could implement pause/resume logic if needed
-    }
 }
 
 impl SignalHandler for TimerManager {
     fn handle_signal(&mut self, signal: &GameSignal) {
-        // Skip if no definitions loaded (historical mode or empty config)
-        if self.definitions.is_empty() && self.boss_definitions.is_empty() {
-            return;
-        }
-
-        // Skip old events - timers only matter for recent/live events
-        if let Some(ts) = signal_timestamp(signal) {
-            let now = Local::now().naive_local();
-            let age_mins = (now - ts).num_minutes();
-            if age_mins > TIMER_RECENCY_THRESHOLD_MINS {
+        // ─── Context-setting signals: always process (bypass recency filter) ───
+        // These establish context for future timer matching, not trigger timers directly.
+        match signal {
+            GameSignal::PlayerInitialized { entity_id, .. } => {
+                self.local_player_id = Some(*entity_id);
                 return;
             }
-            self.last_timestamp = Some(ts);
-        }
-
-        match signal {
-            GameSignal::AbilityActivated {
-                ability_id,
-                source_id,
-                target_id,
-                timestamp,
-                ..
-            } => {
-                self.handle_ability(*ability_id, *source_id, *target_id, *timestamp);
-            }
-
-            GameSignal::EffectApplied {
-                effect_id,
-                source_id,
-                target_id,
-                timestamp,
-                ..
-            } => {
-                self.handle_effect_applied(*effect_id, *source_id, *target_id, *timestamp);
-            }
-
-            GameSignal::EffectRemoved {
-                effect_id,
-                target_id,
-                timestamp,
-                ..
-            } => {
-                self.handle_effect_removed(*effect_id, *target_id, *timestamp);
-            }
-
-            GameSignal::CombatStarted { timestamp, .. } => {
-                self.handle_combat_start(*timestamp);
-            }
-
-            GameSignal::CombatEnded { .. } => {
-                self.clear_combat_timers();
-            }
-
-            GameSignal::EntityDeath { entity_id, .. } => {
-                self.pause_entity_timers(*entity_id);
-            }
-
-            GameSignal::AreaEntered { area_name, difficulty_name, .. } => {
-                // Update encounter context from area
+            GameSignal::AreaEntered { area_id, area_name, difficulty_name, .. } => {
+                self.context.area_id = Some(*area_id);
                 self.context.encounter_name = Some(area_name.clone());
                 self.context.difficulty = if difficulty_name.is_empty() {
                     None
                 } else {
                     Difficulty::from_game_string(difficulty_name)
                 };
-                eprintln!("[TIMER] Area entered: {} (difficulty: {:?})", area_name, self.context.difficulty);
+                return;
             }
+            _ => {}
+        }
 
-            GameSignal::TargetChanged { target_name, target_npc_id, target_entity_type, .. } => {
-                // Update boss context when targeting an NPC (bosses are NPCs)
-                if matches!(target_entity_type, crate::EntityType::Npc) {
-                    let name = crate::context::resolve(*target_name);
-                    eprintln!("[TIMER] Target changed to NPC: {} (ID: {})", name, target_npc_id);
-                    self.context.boss_name = Some(name.to_string());
+        // Skip timer-triggering signals if no definitions loaded
+        if self.definitions.is_empty() && self.boss_definitions.is_empty() {
+            return;
+        }
 
-                    // Try to detect if this is a known boss (prefer NPC ID over name)
-                    if *target_npc_id != 0 {
-                        self.detect_boss_by_npc_id(*target_npc_id);
-                    }
-                    // Fall back to name detection if NPC ID didn't match
-                    if self.active_boss_def.is_none() {
-                        self.detect_boss(name);
-                    }
-                }
+        // In live mode, skip old events - timers only matter for recent/live events.
+        // In historical mode (validation), process all events regardless of age.
+        let ts = signal.timestamp();
+        if self.live_mode {
+            let now = Local::now().naive_local();
+            let age_mins = (now - ts).num_minutes();
+            if age_mins > TIMER_RECENCY_THRESHOLD_MINS {
+                return;
             }
+        }
+        self.last_timestamp = Some(ts);
 
-            GameSignal::TargetCleared { .. } => {
-                // Clear boss context when target is cleared
-                self.context.boss_name = None;
-            }
+        match signal {
+            // Context signals already handled above
+            GameSignal::PlayerInitialized { .. } | GameSignal::AreaEntered { .. } => {}
 
-            GameSignal::BossHpChanged { entity_id, npc_id, entity_name, current_hp, max_hp, timestamp } => {
-                // Update per-entity HP tracking (by entity ID, NPC ID, and name)
-                // Returns Some((old_hp, new_hp)) if HP changed significantly
-                let hp_change = self.encounter_state.update_entity_hp(
-                    *entity_id,
-                    *npc_id,
-                    entity_name,
-                    *current_hp,
-                    *max_hp,
+            GameSignal::AbilityActivated {
+                ability_id,
+                ability_name,
+                source_id,
+                source_entity_type,
+                source_name,
+                source_npc_id,
+                target_id,
+                target_entity_type,
+                target_name,
+                target_npc_id,
+                timestamp,
+            } => {
+                signal_handlers::handle_ability(
+                    self,
+                    *ability_id,
+                    *ability_name,
+                    *source_id, *source_entity_type, *source_name, *source_npc_id,
+                    *target_id, *target_entity_type, *target_name, *target_npc_id,
+                    *timestamp,
                 );
+            }
 
-                // Try to detect boss by NPC ID if not already detected
-                if self.active_boss_def.is_none() && *npc_id != 0 {
-                    self.detect_boss_by_npc_id(*npc_id);
+            GameSignal::EffectApplied {
+                effect_id,
+                source_id,
+                source_entity_type,
+                source_name,
+                source_npc_id,
+                target_id,
+                target_entity_type,
+                target_name,
+                target_npc_id,
+                timestamp,
+                ..
+            } => {
+                signal_handlers::handle_effect_applied(
+                    self,
+                    *effect_id,
+                    *source_id, *source_entity_type, *source_name, *source_npc_id,
+                    *target_id, *target_entity_type, *target_name, *target_npc_id,
+                    *timestamp,
+                );
+            }
+
+            GameSignal::EffectRemoved {
+                effect_id,
+                source_id,
+                source_entity_type,
+                source_name,
+                target_id,
+                target_entity_type,
+                target_name,
+                timestamp,
+                ..
+            } => {
+                // EffectRemoved doesn't include npc_ids in the game log, pass 0
+                signal_handlers::handle_effect_removed(
+                    self,
+                    *effect_id,
+                    *source_id, *source_entity_type, *source_name, 0,
+                    *target_id, *target_entity_type, *target_name, 0,
+                    *timestamp,
+                );
+            }
+
+            GameSignal::CombatStarted { timestamp, .. } => {
+                signal_handlers::handle_combat_start(self, *timestamp);
+            }
+
+            GameSignal::CombatEnded { .. } => {
+                signal_handlers::clear_combat_timers(self);
+            }
+
+            GameSignal::EntityDeath { npc_id, entity_name, timestamp, .. } => {
+                signal_handlers::handle_entity_death(self, *npc_id, entity_name, *timestamp);
+            }
+
+            GameSignal::NpcFirstSeen { entity_id, npc_id, entity_name, timestamp, .. } => {
+                // Track boss entities for multi-boss fights (e.g., Zorn & Toth)
+                if self.boss_npc_class_ids.contains(npc_id) && !self.boss_entity_ids.contains(entity_id) {
+                    self.boss_entity_ids.insert(*entity_id);
+                }
+                signal_handlers::handle_npc_first_seen(self, *npc_id, entity_name, *timestamp);
+            }
+
+            // Note: We intentionally DON'T update boss_name from TargetChanged/TargetCleared.
+            // The boss encounter context (set by BossEncounterDetected) should persist
+            // throughout the fight, regardless of what the player is currently targeting.
+            // This ensures timers like "Mighty Leap" work even when the player isn't
+            // targeting the boss.
+            GameSignal::TargetChanged {
+                source_id,
+                source_npc_id,
+                source_name,
+                target_id,
+                target_entity_type,
+                target_name,
+                timestamp,
+                ..
+            } => {
+                // Check for TargetSet triggers (e.g., sphere targeting player)
+                signal_handlers::handle_target_set(
+                    self,
+                    *source_id,
+                    *source_npc_id,
+                    *source_name,
+                    *target_id,
+                    *target_entity_type,
+                    *target_name,
+                    *timestamp,
+                );
+            }
+            GameSignal::TargetCleared { .. } => {
+                // No-op for timer manager
+            }
+
+            GameSignal::DamageTaken {
+                ability_id,
+                ability_name,
+                source_id,
+                source_entity_type,
+                source_name,
+                source_npc_id,
+                target_id,
+                target_entity_type,
+                target_name,
+                timestamp,
+            } => {
+                signal_handlers::handle_damage_taken(
+                    self,
+                    *ability_id,
+                    *ability_name,
+                    *source_id, *source_entity_type, *source_name, *source_npc_id,
+                    *target_id, *target_entity_type, *target_name,
+                    *timestamp,
+                );
+            }
+
+            // ─── Boss Encounter Signals (from EventProcessor) ─────────────────────
+            GameSignal::BossEncounterDetected { boss_name, entity_id, timestamp, .. } => {
+                self.context.boss_name = Some(boss_name.clone());
+
+                // Track boss entity ID for source/target "boss" filter
+                self.boss_entity_ids.insert(*entity_id);
+
+                // Also store boss NPC class IDs so we can track additional boss entities
+                // (e.g., in a multi-boss fight like Zorn & Toth)
+                self.boss_npc_class_ids.clear();
+                if let Some(area_name) = &self.context.encounter_name {
+                    if let Some(boss_defs) = self.boss_definitions.get(area_name) {
+                        if let Some(def) = boss_defs.iter().find(|d| &d.name == boss_name) {
+                            for boss_class_id in def.boss_npc_ids() {
+                                self.boss_npc_class_ids.insert(boss_class_id);
+                            }
+                        }
+                    }
                 }
 
-                if let Some((old_hp, new_hp)) = hp_change {
-                    // Check for HP threshold timer triggers
-                    self.handle_boss_hp_change(old_hp, new_hp, *timestamp);
-                    // Check for phase transitions
-                    self.check_phase_transitions(*timestamp);
+                // Reset phase and counters for new encounter
+                self.current_phase = None;
+                self.counters.clear();
+                self.boss_hp_by_npc.clear();
+                // Start combat-start timers
+                signal_handlers::handle_combat_start(self, *timestamp);
+            }
+
+            GameSignal::BossHpChanged { npc_id, entity_name, current_hp, max_hp, timestamp, .. } => {
+                let new_hp = if *max_hp > 0 {
+                    (*current_hp as f32 / *max_hp as f32) * 100.0
+                } else {
+                    100.0
+                };
+                let old_hp = self.boss_hp_by_npc.get(npc_id).copied().unwrap_or(100.0);
+                self.boss_hp_by_npc.insert(*npc_id, new_hp);
+
+                // Check for HP threshold timer triggers
+                if (old_hp - new_hp).abs() > 0.01 {
+                    signal_handlers::handle_boss_hp_change(self, *npc_id, entity_name, old_hp, new_hp, *timestamp);
                 }
             }
 
-            // Informational signals - no action needed in TimerManager
-            GameSignal::PhaseChanged { .. } | GameSignal::CounterChanged { .. } => {}
+            GameSignal::PhaseChanged { old_phase, new_phase, timestamp, .. } => {
+                // Handle the old phase ending first (if any)
+                if let Some(ended_phase) = old_phase {
+                    signal_handlers::handle_phase_ended(self, ended_phase, *timestamp);
+                }
+                self.current_phase = Some(new_phase.clone());
+                // Trigger phase-entered timers
+                signal_handlers::handle_phase_change(self, new_phase, *timestamp);
+            }
+
+            GameSignal::CounterChanged { counter_id, old_value, new_value, timestamp, .. } => {
+                self.counters.insert(counter_id.clone(), *new_value);
+                // Trigger counter-based timers
+                signal_handlers::handle_counter_change(self, counter_id, *old_value, *new_value, *timestamp);
+            }
 
             _ => {}
+        }
+
+        // Check for time-elapsed triggers if we're in combat
+        if let Some(ts) = self.last_timestamp {
+            signal_handlers::handle_time_elapsed(self, ts);
         }
 
         // Process expirations after handling signal
@@ -691,130 +873,7 @@ impl SignalHandler for TimerManager {
     }
 
     fn on_encounter_end(&mut self, _encounter_id: u64) {
-        self.clear_combat_timers();
+        signal_handlers::clear_combat_timers(self);
     }
 }
 
-/// Extract timestamp from a signal (if available)
-fn signal_timestamp(signal: &GameSignal) -> Option<NaiveDateTime> {
-    match signal {
-        GameSignal::CombatStarted { timestamp, .. } => Some(*timestamp),
-        GameSignal::CombatEnded { timestamp, .. } => Some(*timestamp),
-        GameSignal::EntityDeath { timestamp, .. } => Some(*timestamp),
-        GameSignal::EntityRevived { timestamp, .. } => Some(*timestamp),
-        GameSignal::EffectApplied { timestamp, .. } => Some(*timestamp),
-        GameSignal::EffectRemoved { timestamp, .. } => Some(*timestamp),
-        GameSignal::EffectChargesChanged { timestamp, .. } => Some(*timestamp),
-        GameSignal::AbilityActivated { timestamp, .. } => Some(*timestamp),
-        GameSignal::TargetChanged { timestamp, .. } => Some(*timestamp),
-        GameSignal::TargetCleared { timestamp, .. } => Some(*timestamp),
-        GameSignal::AreaEntered { timestamp, .. } => Some(*timestamp),
-        GameSignal::PlayerInitialized { timestamp, .. } => Some(*timestamp),
-        GameSignal::DisciplineChanged { timestamp, .. } => Some(*timestamp),
-        GameSignal::BossHpChanged { timestamp, .. } => Some(*timestamp),
-        GameSignal::PhaseChanged { timestamp, .. } => Some(*timestamp),
-        GameSignal::CounterChanged { timestamp, .. } => Some(*timestamp),
-    }
-}
-
-/// Convert a BossTimerDefinition to a TimerDefinition
-/// This bridges the boss-specific timer format to the generic timer system
-fn convert_boss_timer_to_definition(
-    boss_timer: &crate::boss_timers::BossTimerDefinition,
-    boss: &BossDefinition,
-) -> TimerDefinition {
-    use crate::boss_timers::BossTimerTrigger;
-
-    // Convert trigger type
-    let trigger = match &boss_timer.trigger {
-        BossTimerTrigger::CombatStart => super::TimerTrigger::CombatStart,
-        BossTimerTrigger::AbilityCast { ability_ids } => {
-            super::TimerTrigger::AbilityCast { ability_ids: ability_ids.clone() }
-        }
-        BossTimerTrigger::EffectApplied { effect_ids } => {
-            super::TimerTrigger::EffectApplied { effect_ids: effect_ids.clone() }
-        }
-        BossTimerTrigger::EffectRemoved { effect_ids } => {
-            super::TimerTrigger::EffectRemoved { effect_ids: effect_ids.clone() }
-        }
-        BossTimerTrigger::TimerExpires { timer_id } => {
-            super::TimerTrigger::TimerExpires { timer_id: timer_id.clone() }
-        }
-        BossTimerTrigger::PhaseEntered { .. } => {
-            // Phase-entered triggers need special handling - not yet implemented
-            super::TimerTrigger::Manual
-        }
-        BossTimerTrigger::BossHpBelow { hp_percent, .. } => {
-            super::TimerTrigger::BossHpThreshold { hp_percent: *hp_percent }
-        }
-        BossTimerTrigger::AllOf { conditions } => {
-            super::TimerTrigger::AllOf {
-                conditions: conditions.iter().map(|c| convert_boss_trigger(c)).collect()
-            }
-        }
-        BossTimerTrigger::AnyOf { conditions } => {
-            super::TimerTrigger::AnyOf {
-                conditions: conditions.iter().map(|c| convert_boss_trigger(c)).collect()
-            }
-        }
-    };
-
-    TimerDefinition {
-        id: boss_timer.id.clone(),
-        name: boss_timer.name.clone(),
-        enabled: boss_timer.enabled,
-        trigger,
-        source: Default::default(),
-        target: Default::default(),
-        duration_secs: boss_timer.duration_secs,
-        can_be_refreshed: boss_timer.can_be_refreshed,
-        repeats: boss_timer.repeats,
-        color: boss_timer.color,
-        show_on_raid_frames: boss_timer.show_on_raid_frames,
-        alert_at_secs: boss_timer.alert_at_secs,
-        alert_text: None,
-        audio_file: None,
-        triggers_timer: boss_timer.chains_to.clone(),
-        // Context: tie to this boss's area and name
-        encounters: vec![boss.area_name.clone()],
-        boss: Some(boss.name.clone()),
-        difficulties: boss_timer.difficulties.clone(),
-        phases: boss_timer.phases.clone(),
-        counter_condition: boss_timer.counter_condition.clone(),
-    }
-}
-
-/// Convert a single BossTimerTrigger to TimerTrigger (for nested conditions)
-fn convert_boss_trigger(trigger: &crate::boss_timers::BossTimerTrigger) -> super::TimerTrigger {
-    use crate::boss_timers::BossTimerTrigger;
-
-    match trigger {
-        BossTimerTrigger::CombatStart => super::TimerTrigger::CombatStart,
-        BossTimerTrigger::AbilityCast { ability_ids } => {
-            super::TimerTrigger::AbilityCast { ability_ids: ability_ids.clone() }
-        }
-        BossTimerTrigger::EffectApplied { effect_ids } => {
-            super::TimerTrigger::EffectApplied { effect_ids: effect_ids.clone() }
-        }
-        BossTimerTrigger::EffectRemoved { effect_ids } => {
-            super::TimerTrigger::EffectRemoved { effect_ids: effect_ids.clone() }
-        }
-        BossTimerTrigger::TimerExpires { timer_id } => {
-            super::TimerTrigger::TimerExpires { timer_id: timer_id.clone() }
-        }
-        BossTimerTrigger::PhaseEntered { .. } => super::TimerTrigger::Manual,
-        BossTimerTrigger::BossHpBelow { hp_percent, .. } => {
-            super::TimerTrigger::BossHpThreshold { hp_percent: *hp_percent }
-        }
-        BossTimerTrigger::AllOf { conditions } => {
-            super::TimerTrigger::AllOf {
-                conditions: conditions.iter().map(|c| convert_boss_trigger(c)).collect()
-            }
-        }
-        BossTimerTrigger::AnyOf { conditions } => {
-            super::TimerTrigger::AnyOf {
-                conditions: conditions.iter().map(|c| convert_boss_trigger(c)).collect()
-            }
-        }
-    }
-}

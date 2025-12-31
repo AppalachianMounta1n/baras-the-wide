@@ -1,8 +1,11 @@
+pub mod challenge;
 pub mod metrics;
 pub mod effect_instance;
 pub mod shielding;
 pub mod entity_info;
 pub mod summary;
+
+pub use challenge::{ChallengeTracker, ChallengeValue};
 use crate::is_boss;
 use crate::combat_log::{CombatEvent, Entity, EntityType};
 use crate::context::{resolve, IStr};
@@ -73,6 +76,8 @@ pub struct Encounter {
     pub accumulated_data: HashMap<i64, MetricAccumulator>,
     /// Pending shield absorptions waiting for resolution (target_id -> pending events)
     pub pending_absorptions: HashMap<i64, Vec<shielding::PendingAbsorption>>,
+    /// Challenge metrics accumulated during boss encounters
+    pub challenge_tracker: ChallengeTracker,
 }
 
 impl Encounter {
@@ -90,6 +95,7 @@ impl Encounter {
             all_players_dead: false,
             accumulated_data: HashMap::new(),
             pending_absorptions: HashMap::new(),
+            challenge_tracker: ChallengeTracker::new(),
         }
     }
 
@@ -156,18 +162,6 @@ impl Encounter {
     }
         self.try_track_entity(&event.source_entity, event.timestamp);
         self.try_track_entity(&event.target_entity, event.timestamp);
-
-        // Update health for NPCs on every event
-        self.update_npc_health(&event.source_entity);
-        self.update_npc_health(&event.target_entity);
-    }
-
-    /// Update NPC health from entity data (called on every combat event)
-    #[inline]
-    fn update_npc_health(&mut self, entity: &Entity) {
-        if let Some(npc) = self.npcs.get_mut(&entity.log_id) {
-            npc.health = entity.health;
-        }
     }
 
     #[inline]
@@ -189,7 +183,6 @@ impl Encounter {
                     log_id: entity.log_id,
                     class_id: entity.class_id,
                     first_seen_at: Some(timestamp),
-                    health: entity.health,
                     ..Default::default()
                 });
             }
@@ -235,7 +228,7 @@ impl Encounter {
         } else {
             self.npcs
                 .get(&id)
-                .map(|e| e.entity_type.clone())
+                .map(|e| e.entity_type)
         }
     }
 

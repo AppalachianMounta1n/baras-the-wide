@@ -7,8 +7,8 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::console;
 
 use crate::api;
-use crate::components::{EffectEditorPanel, HistoryPanel, SettingsPanel, TimerEditorPanel};
-use crate::types::{LogFileInfo, MetricType, OverlaySettings, OverlayStatus, OverlayType, SessionInfo};
+use crate::components::{EffectEditorPanel, EncounterEditorPanel, HistoryPanel, SettingsPanel};
+use crate::types::{LogFileInfo, MetricType, OverlaySettings, OverlayStatus, OverlayType, SessionInfo, UpdateInfo};
 
 static CSS: Asset = asset!("/assets/styles.css");
 static LOGO: Asset = asset!("/assets/logo.png");
@@ -28,6 +28,7 @@ pub fn App() -> Element {
     let mut boss_health_enabled = use_signal(|| false);
     let mut timers_enabled = use_signal(|| false);
     let mut effects_enabled = use_signal(|| false);
+    let mut challenges_enabled = use_signal(|| false);
     let mut overlays_visible = use_signal(|| true);
     let mut move_mode = use_signal(|| false);
     let mut rearrange_mode = use_signal(|| false);
@@ -69,6 +70,16 @@ pub fn App() -> Element {
     let mut minimize_to_tray = use_signal(|| true);
     let mut app_version = use_signal(String::new);
 
+    // Update state
+    let mut update_available = use_signal(|| None::<UpdateInfo>);
+    let mut update_installing = use_signal(|| false);
+
+    // Audio settings
+    let mut audio_enabled = use_signal(|| true);
+    let mut audio_volume = use_signal(|| 80u8);
+    let mut audio_countdown_enabled = use_signal(|| true);
+    let mut audio_alerts_enabled = use_signal(|| true);
+
     // Profile state
     let mut profile_names = use_signal(Vec::<String>::new);
     let mut active_profile = use_signal(|| None::<String>);
@@ -99,6 +110,11 @@ pub fn App() -> Element {
             parsely_username.set(config.parsely.username);
             parsely_password.set(config.parsely.password);
             parsely_guild.set(config.parsely.guild);
+            // Audio settings
+            audio_enabled.set(config.audio.enabled);
+            audio_volume.set(config.audio.volume);
+            audio_countdown_enabled.set(config.audio.countdown_enabled);
+            audio_alerts_enabled.set(config.audio.alerts_enabled);
         }
 
         app_version.set(api::get_app_version().await);
@@ -119,6 +135,7 @@ pub fn App() -> Element {
         if let Some(status) = api::get_overlay_status().await {
             apply_status(&status, &mut metric_overlays_enabled, &mut personal_enabled,
                 &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
+                &mut effects_enabled, &mut challenges_enabled,
                 &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
         }
 
@@ -173,6 +190,19 @@ pub fn App() -> Element {
         closure.forget();
     });
 
+    // Listen for app updates
+    use_future(move || async move {
+        let closure = Closure::new(move |event: JsValue| {
+            if let Ok(payload) = js_sys::Reflect::get(&event, &JsValue::from_str("payload")) {
+                if let Ok(info) = serde_wasm_bindgen::from_value::<UpdateInfo>(payload) {
+                    update_available.set(Some(info));
+                }
+            }
+        });
+        api::tauri_listen("update-available", &closure).await;
+        closure.forget();
+    });
+
     // ─────────────────────────────────────────────────────────────────────────
     // Computed Values
     // ─────────────────────────────────────────────────────────────────────────
@@ -183,7 +213,8 @@ pub fn App() -> Element {
     let boss_health_on = boss_health_enabled();
     let timers_on = timers_enabled();
     let effects_on = effects_enabled();
-    let any_enabled = enabled_map.values().any(|&v| v) || personal_on || raid_on || boss_health_on || timers_on || effects_on;
+    let challenges_on = challenges_enabled();
+    let any_enabled = enabled_map.values().any(|&v| v) || personal_on || raid_on || boss_health_on || timers_on || effects_on || challenges_on;
     let is_visible = overlays_visible();
     let is_move_mode = move_mode();
     let is_rearrange = rearrange_mode();
@@ -209,7 +240,34 @@ pub fn App() -> Element {
                     h1 { "BARAS" }
                     img { class: "header-logo", src: LOGO, alt: "BARAS mascot" }
                     if !app_version().is_empty() {
-                        span { class: "header-version", "v{app_version}" }
+                        if let Some(ref update) = update_available() {
+                            // Update available - show clickable notification
+                            button {
+                                class: if update_installing() { "header-version update-available updating" } else { "header-version update-available" },
+                                title: update.notes.as_deref().unwrap_or("Update available"),
+                                disabled: update_installing(),
+                                onclick: move |_| {
+                                    update_installing.set(true);
+                                    spawn(async move {
+                                        if let Err(e) = api::install_update().await {
+                                            console::error_1(&format!("Update failed: {}", e).into());
+                                            update_installing.set(false);
+                                        }
+                                        // On success, app will restart automatically
+                                    });
+                                },
+                                if update_installing() {
+                                    i { class: "fa-solid fa-spinner fa-spin" }
+                                    " Updating..."
+                                } else {
+                                    i { class: "fa-solid fa-download" }
+                                    " v{update.version}"
+                                }
+                            }
+                        } else {
+                            // No update - show current version
+                            span { class: "header-version", "v{app_version}" }
+                        }
                     }
                     p { class: "subtitle", "Battle Analysis and Raid Assessment System" }
                 }
@@ -233,6 +291,7 @@ pub fn App() -> Element {
                                         if let Some(status) = api::get_overlay_status().await {
                                             apply_status(&status, &mut metric_overlays_enabled, &mut personal_enabled,
                                                 &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
+                                                &mut effects_enabled, &mut challenges_enabled,
                                                 &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
                                         }
                                     }
@@ -330,8 +389,8 @@ pub fn App() -> Element {
                 button {
                     class: if active_tab() == "timers" { "tab-btn active" } else { "tab-btn" },
                     onclick: move |_| active_tab.set("timers".to_string()),
-                    i { class: "fa-solid fa-stopwatch" }
-                    " Timers"
+                    i { class: "fa-solid fa-skull" }
+                    " Boss Encounters"
                 }
                 button {
                     class: if active_tab() == "effects" { "tab-btn active" } else { "tab-btn" },
@@ -480,6 +539,7 @@ pub fn App() -> Element {
                                                     if let Some(status) = api::get_overlay_status().await {
                                                         apply_status(&status, &mut metric_overlays_enabled, &mut personal_enabled,
                                                             &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
+                                                            &mut effects_enabled, &mut challenges_enabled,
                                                             &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
                                                     }
                                                 }
@@ -602,6 +662,15 @@ pub fn App() -> Element {
                                 }); },
                                 "Effects Countdown"
                             }
+                            button {
+                                class: if challenges_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                onclick: move |_| { spawn(async move {
+                                    if api::toggle_overlay(OverlayType::Challenges, challenges_on).await {
+                                        challenges_enabled.set(!challenges_on);
+                                    }
+                                }); },
+                                "Challenges"
+                            }
                         }
 
                         // Metric overlays
@@ -655,10 +724,10 @@ pub fn App() -> Element {
                 }
 
                 // ─────────────────────────────────────────────────────────────
-                // Timers Tab
+                // Encounter Editor Tab
                 // ─────────────────────────────────────────────────────────────
                 if active_tab() == "timers" {
-                    TimerEditorPanel {}
+                    EncounterEditorPanel {}
                 }
 
                 // ─────────────────────────────────────────────────────────────
@@ -881,6 +950,92 @@ pub fn App() -> Element {
                                     }
                                     span { class: "save-status", "{hotkey_save_status}" }
                                 }
+                            }
+
+                            div { class: "settings-section",
+                                h4 { "Audio" }
+                                p { class: "hint", "TTS audio for timer countdowns and alerts." }
+
+                                div { class: "setting-row",
+                                    label { "Enable Audio" }
+                                    input {
+                                        r#type: "checkbox",
+                                        checked: audio_enabled(),
+                                        onchange: move |e| {
+                                            let checked = e.checked();
+                                            audio_enabled.set(checked);
+                                            spawn(async move {
+                                                if let Some(mut cfg) = api::get_config().await {
+                                                    cfg.audio.enabled = checked;
+                                                    api::update_config(&cfg).await;
+                                                }
+                                            });
+                                        }
+                                    }
+                                }
+
+                                div { class: "setting-row",
+                                    label { "Volume" }
+                                    input {
+                                        r#type: "range",
+                                        min: "0",
+                                        max: "100",
+                                        value: "{audio_volume()}",
+                                        disabled: !audio_enabled(),
+                                        oninput: move |e| {
+                                            if let Ok(val) = e.value().parse::<u8>() {
+                                                audio_volume.set(val);
+                                                spawn(async move {
+                                                    if let Some(mut cfg) = api::get_config().await {
+                                                        cfg.audio.volume = val;
+                                                        api::update_config(&cfg).await;
+                                                    }
+                                                });
+                                            }
+                                        }
+                                    }
+                                    span { class: "value", "{audio_volume()}%" }
+                                }
+
+                                div { class: "setting-row",
+                                    label { "Countdown Audio" }
+                                    input {
+                                        r#type: "checkbox",
+                                        checked: audio_countdown_enabled(),
+                                        disabled: !audio_enabled(),
+                                        onchange: move |e| {
+                                            let checked = e.checked();
+                                            audio_countdown_enabled.set(checked);
+                                            spawn(async move {
+                                                if let Some(mut cfg) = api::get_config().await {
+                                                    cfg.audio.countdown_enabled = checked;
+                                                    api::update_config(&cfg).await;
+                                                }
+                                            });
+                                        }
+                                    }
+                                }
+
+                                div { class: "setting-row",
+                                    label { "Alert Audio" }
+                                    input {
+                                        r#type: "checkbox",
+                                        checked: audio_alerts_enabled(),
+                                        disabled: !audio_enabled(),
+                                        onchange: move |e| {
+                                            let checked = e.checked();
+                                            audio_alerts_enabled.set(checked);
+                                            spawn(async move {
+                                                if let Some(mut cfg) = api::get_config().await {
+                                                    cfg.audio.alerts_enabled = checked;
+                                                    api::update_config(&cfg).await;
+                                                }
+                                            });
+                                        }
+                                    }
+                                }
+
+                                p { class: "hint hint-subtle", "Countdowns speak timer name + seconds (e.g., \"Shield 3... 2... 1...\")" }
                             }
 
                             div { class: "settings-section",
@@ -1115,6 +1270,8 @@ fn apply_status(
     raid_enabled: &mut Signal<bool>,
     boss_health_enabled: &mut Signal<bool>,
     timers_enabled: &mut Signal<bool>,
+    effects_enabled: &mut Signal<bool>,
+    challenges_enabled: &mut Signal<bool>,
     overlays_visible: &mut Signal<bool>,
     move_mode: &mut Signal<bool>,
     rearrange_mode: &mut Signal<bool>,
@@ -1128,6 +1285,8 @@ fn apply_status(
     raid_enabled.set(status.raid_enabled);
     boss_health_enabled.set(status.boss_health_enabled);
     timers_enabled.set(status.timers_enabled);
+    effects_enabled.set(status.effects_enabled);
+    challenges_enabled.set(status.challenges_enabled);
     overlays_visible.set(status.overlays_visible);
     move_mode.set(status.move_mode);
     rearrange_mode.set(status.rearrange_mode);

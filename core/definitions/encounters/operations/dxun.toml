@@ -1,0 +1,97 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Dxun - The Nature of Progress
+# ═══════════════════════════════════════════════════════════════════════════════
+# 4 main bosses: Red, Trandosians, Huntmaster, Apex Vanguard
+
+[area]
+name = "Dxun"
+id = 833571547775792
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 1: Red
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "red"
+name = "Red"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Red"
+ids = [4330233272467456, 4246176467517440, 4382185196879872]
+is_boss = true
+is_kill_target = true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 2: Trandosians (Pack Leader)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "trandosians"
+name = "Trandosians"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Titax"
+ids = [4245970309087232]
+is_boss = true
+is_kill_target = true
+
+[[boss.entities]]
+name = "Greus"
+ids = [4245978899021824]
+is_boss = true
+is_kill_target = true
+
+[[boss.entities]]
+name = "Kronissus"
+ids = [4245983193989120]
+is_boss = true
+is_kill_target = true
+
+[[boss.entities]]
+name = "Hissyphus"
+ids = [4245987488956416]
+is_boss = true
+is_kill_target = true
+
+[[boss.entities]]
+name = "The Ultimate Hunter"
+ids = [4381150109761536]
+is_boss = true
+is_kill_target = true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 3: Huntmaster
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "huntmaster"
+name = "Huntmaster"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Huntmaster"
+ids = [4265104388390912]
+is_boss = true
+is_kill_target = false
+
+[[boss.entitites]]
+name = "Shelleigh"
+ids = [4281661487316992, 4330237567434752]
+is_boss = true
+is_kill_target = true
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 4: Apex Vanguard
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "apex_vanguard"
+name = "Apex Vanguard"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Apex Vanguard"
+ids = [4282872668094464, 4350020186800128]
+is_boss = true
+is_kill_target = true

@@ -1,0 +1,102 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# The Dread Palace - Operation
+# ═══════════════════════════════════════════════════════════════════════════════
+# Companion to Dread Fortress. 5 bosses (4 Dread Masters + Council).
+
+[area]
+name = "The Dread Palace"
+id = 137438993410
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 1: Dread Master Bestia
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "bestia"
+name = "Dread Master Bestia"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Dread Master Bestia"
+ids = [3273941900591104]
+is_boss = true
+is_kill_target = true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 2: Dread Master Tyrans
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "tyrans"
+name = "Dread Master Tyrans"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Dread Master Tyrans"
+ids = [3273954785492992]
+is_boss = true
+is_kill_target = true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 3: Dread Master Calphayus
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "calphayus"
+name = "Dread Master Calphayus"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Dread Master Calphayus"
+ids = [3273946195558400, 3284949901770752, 3284954196738048, 3312991743246336, 3349812497874944, 3312983153311744, 3312996038213632, 3312987448279040]
+is_boss = true
+is_kill_target = true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 4: Dread Master Raptus
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "raptus"
+name = "Dread Master Raptus"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Dread Master Raptus"
+ids = [3303555700097024, 3273950490525696, 3303559995064320, 3302902865068032]
+is_boss = true
+is_kill_target = true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 5: The Dread Council
+# ═══════════════════════════════════════════════════════════════════════════════
+# Final encounter - all four Dread Masters together.
+
+[[boss]]
+id = "dread_council"
+name = "The Dread Council"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Dread Master Bestia"
+ids = [3273941900591104]
+is_boss = true
+is_kill_target = true
+
+[[boss.entities]]
+name = "Dread Master Tyrans"
+ids = [3273954785492992]
+is_boss = true
+is_kill_target = true
+
+[[boss.entities]]
+name = "Dread Master Calphayus"
+ids = [3273946195558400]
+is_boss = true
+is_kill_target = true
+
+[[boss.entities]]
+name = "Dread Master Raptus"
+ids = [3273950490525696]
+is_boss = true
+is_kill_target = true

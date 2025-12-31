@@ -34,6 +34,8 @@ pub struct PersonalStats {
     pub damage_crit_pct: f32,
     pub heal_crit_pct: f32,
     pub effective_heal_pct: f32,
+    pub current_phase: Option<String>,
+    pub phase_time_secs: f32,
 }
 
 /// Base dimensions for scaling calculations
@@ -121,6 +123,19 @@ impl PersonalOverlay {
                     .unwrap_or_else(|| "Unknown".to_string());
                 ("Spec", value)
             }
+            PersonalStat::Phase => {
+                let phase = self.stats.current_phase.as_deref().unwrap_or("");
+                ("Phase", phase.to_string())
+            }
+            PersonalStat::PhaseTime => {
+                // Only show phase time if there's an active phase
+                let time_str = if self.stats.current_phase.is_some() {
+                    format_time(self.stats.phase_time_secs as u64)
+                } else {
+                    String::new()
+                };
+                ("Phase Time", time_str)
+            }
         }
     }
 
@@ -163,9 +178,12 @@ impl PersonalOverlay {
 // ─────────────────────────────────────────────────────────────────────────────
 
 impl Overlay for PersonalOverlay {
-    fn update_data(&mut self, data: OverlayData) {
+    fn update_data(&mut self, data: OverlayData) -> bool {
         if let OverlayData::Personal(stats) = data {
             self.set_stats(stats);
+            true // Personal stats always render when updated
+        } else {
+            false
         }
     }
 

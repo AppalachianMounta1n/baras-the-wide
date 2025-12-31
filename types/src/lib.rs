@@ -14,6 +14,334 @@ use std::collections::HashMap;
 pub type Color = [u8; 4];
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Selectors (unified ID-or-Name matching)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Selector for effects - can match by ID or name.
+/// Uses untagged serde for clean serialization: numbers as IDs, strings as names.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum EffectSelector {
+    Id(u64),
+    Name(String),
+}
+
+impl EffectSelector {
+    /// Parse from user input - tries ID first, falls back to name.
+    pub fn from_input(input: &str) -> Self {
+        match input.trim().parse::<u64>() {
+            Ok(id) => Self::Id(id),
+            Err(_) => Self::Name(input.trim().to_string()),
+        }
+    }
+
+    /// Returns the display string for this selector.
+    pub fn display(&self) -> String {
+        match self {
+            Self::Id(id) => id.to_string(),
+            Self::Name(name) => name.clone(),
+        }
+    }
+
+    /// Check if this selector matches the given ID or name.
+    pub fn matches(&self, id: u64, name: Option<&str>) -> bool {
+        match self {
+            Self::Id(expected) => *expected == id,
+            Self::Name(expected) => {
+                name.map(|n| n.eq_ignore_ascii_case(expected)).unwrap_or(false)
+            }
+        }
+    }
+}
+
+/// Selector for abilities - can match by ID or name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AbilitySelector {
+    Id(u64),
+    Name(String),
+}
+
+impl AbilitySelector {
+    /// Parse from user input - tries ID first, falls back to name.
+    pub fn from_input(input: &str) -> Self {
+        match input.trim().parse::<u64>() {
+            Ok(id) => Self::Id(id),
+            Err(_) => Self::Name(input.trim().to_string()),
+        }
+    }
+
+    /// Returns the display string for this selector.
+    pub fn display(&self) -> String {
+        match self {
+            Self::Id(id) => id.to_string(),
+            Self::Name(name) => name.clone(),
+        }
+    }
+
+    /// Check if this selector matches the given ID or name.
+    pub fn matches(&self, id: u64, name: Option<&str>) -> bool {
+        match self {
+            Self::Id(expected) => *expected == id,
+            Self::Name(expected) => {
+                name.map(|n| n.eq_ignore_ascii_case(expected)).unwrap_or(false)
+            }
+        }
+    }
+}
+
+/// Selector for entities - can match by NPC ID, roster alias, or name.
+/// Uses untagged serde: numbers as IDs, strings as roster alias or name.
+/// Priority when matching: Roster Alias → NPC ID → Name (resolved at runtime).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum EntitySelector {
+    Id(i64),
+    Name(String),
+}
+
+impl EntitySelector {
+    /// Parse from user input - tries NPC ID first, falls back to name/alias.
+    pub fn from_input(input: &str) -> Self {
+        match input.trim().parse::<i64>() {
+            Ok(id) => Self::Id(id),
+            Err(_) => Self::Name(input.trim().to_string()),
+        }
+    }
+
+    /// Returns the display string for this selector.
+    pub fn display(&self) -> String {
+        match self {
+            Self::Id(id) => id.to_string(),
+            Self::Name(name) => name.clone(),
+        }
+    }
+}
+
+/// Wrapper for entity selectors used in source/target filters.
+/// Matches the backend's EntityMatcher serialization format.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct EntityMatcher {
+    #[serde(default)]
+    pub selector: Vec<EntitySelector>,
+}
+
+impl EntityMatcher {
+    pub fn new(selector: Vec<EntitySelector>) -> Self {
+        Self { selector }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.selector.is_empty()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trigger Types (shared across timers, phases, counters)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Unified trigger type for timers, phases, and counters.
+///
+/// Different systems use different subsets:
+/// - `[T]` = Timer only
+/// - `[P]` = Phase only
+/// - `[C]` = Counter only
+/// - `[TPC]` = All systems
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Trigger {
+    // ─── Combat State [TPC] ────────────────────────────────────────────────
+
+    /// Combat starts. [TPC]
+    CombatStart,
+
+    /// Combat ends. [C only]
+    CombatEnd,
+
+    // ─── Abilities & Effects [TPC] ─────────────────────────────────────────
+
+    /// Ability is cast. [TPC]
+    AbilityCast {
+        #[serde(default)]
+        abilities: Vec<AbilitySelector>,
+        #[serde(default)]
+        source: EntityFilter,
+    },
+
+    /// Effect/buff is applied. [TPC]
+    EffectApplied {
+        #[serde(default)]
+        effects: Vec<EffectSelector>,
+        #[serde(default)]
+        source: EntityFilter,
+        #[serde(default)]
+        target: EntityFilter,
+    },
+
+    /// Effect/buff is removed. [TPC]
+    EffectRemoved {
+        #[serde(default)]
+        effects: Vec<EffectSelector>,
+        #[serde(default)]
+        source: EntityFilter,
+        #[serde(default)]
+        target: EntityFilter,
+    },
+
+    /// Damage is taken from an ability. [TPC]
+    DamageTaken {
+        #[serde(default)]
+        abilities: Vec<AbilitySelector>,
+        #[serde(default)]
+        source: EntityFilter,
+        #[serde(default)]
+        target: EntityFilter,
+    },
+
+    // ─── HP Thresholds [TPC] ───────────────────────────────────────────────
+
+    /// Boss HP drops below threshold. [TPC]
+    BossHpBelow {
+        hp_percent: f32,
+        #[serde(default)]
+        selector: Vec<EntitySelector>,
+    },
+
+    /// Boss HP rises above threshold. [P only]
+    BossHpAbove {
+        hp_percent: f32,
+        #[serde(default)]
+        selector: Vec<EntitySelector>,
+    },
+
+    // ─── Entity Lifecycle [TPC] ────────────────────────────────────────────
+
+    /// NPC appears (first seen in combat). [TPC]
+    NpcAppears {
+        #[serde(default)]
+        selector: Vec<EntitySelector>,
+    },
+
+    /// Entity dies. [TPC]
+    EntityDeath {
+        #[serde(default)]
+        selector: Vec<EntitySelector>,
+    },
+
+    /// NPC sets its target. [T only]
+    TargetSet {
+        #[serde(default)]
+        selector: Vec<EntitySelector>,
+        #[serde(default)]
+        target: EntityFilter,
+    },
+
+    // ─── Phase Events [TPC] ────────────────────────────────────────────────
+
+    /// Phase is entered. [TC]
+    PhaseEntered { phase_id: String },
+
+    /// Phase ends. [TPC]
+    PhaseEnded { phase_id: String },
+
+    /// Any phase change occurs. [C only]
+    AnyPhaseChange,
+
+    // ─── Counter Events [TP] ───────────────────────────────────────────────
+
+    /// Counter reaches a specific value. [TP]
+    CounterReaches { counter_id: String, value: u32 },
+
+    // ─── Timer Events [T only] ─────────────────────────────────────────────
+
+    /// Another timer expires (chaining). [T only]
+    TimerExpires { timer_id: String },
+
+    /// Another timer starts (for cancellation). [T only]
+    TimerStarted { timer_id: String },
+
+    // ─── Time-based [TP] ───────────────────────────────────────────────────
+
+    /// Time elapsed since combat start. [TP]
+    TimeElapsed { secs: f32 },
+
+    // ─── System-specific ───────────────────────────────────────────────────
+
+    /// Manual/debug trigger. [T only]
+    Manual,
+
+    /// Never triggers. [C only]
+    Never,
+
+    // ─── Composition [TPC] ─────────────────────────────────────────────────
+
+    /// Any condition suffices (OR logic). [TPC]
+    AnyOf { conditions: Vec<Trigger> },
+}
+
+impl Trigger {
+    /// Returns a human-readable label for this trigger type.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::CombatStart => "Combat Start",
+            Self::CombatEnd => "Combat End",
+            Self::AbilityCast { .. } => "Ability Cast",
+            Self::EffectApplied { .. } => "Effect Applied",
+            Self::EffectRemoved { .. } => "Effect Removed",
+            Self::DamageTaken { .. } => "Damage Taken",
+            Self::BossHpBelow { .. } => "Boss HP Below",
+            Self::BossHpAbove { .. } => "Boss HP Above",
+            Self::NpcAppears { .. } => "NPC Appears",
+            Self::EntityDeath { .. } => "Entity Death",
+            Self::TargetSet { .. } => "Target Set",
+            Self::PhaseEntered { .. } => "Phase Entered",
+            Self::PhaseEnded { .. } => "Phase Ended",
+            Self::AnyPhaseChange => "Any Phase Change",
+            Self::CounterReaches { .. } => "Counter Reaches",
+            Self::TimerExpires { .. } => "Timer Expires",
+            Self::TimerStarted { .. } => "Timer Started",
+            Self::TimeElapsed { .. } => "Time Elapsed",
+            Self::Manual => "Manual",
+            Self::Never => "Never",
+            Self::AnyOf { .. } => "Any Of (OR)",
+        }
+    }
+
+    /// Returns the snake_case type name for this trigger.
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Self::CombatStart => "combat_start",
+            Self::CombatEnd => "combat_end",
+            Self::AbilityCast { .. } => "ability_cast",
+            Self::EffectApplied { .. } => "effect_applied",
+            Self::EffectRemoved { .. } => "effect_removed",
+            Self::DamageTaken { .. } => "damage_taken",
+            Self::BossHpBelow { .. } => "boss_hp_below",
+            Self::BossHpAbove { .. } => "boss_hp_above",
+            Self::NpcAppears { .. } => "npc_appears",
+            Self::EntityDeath { .. } => "entity_death",
+            Self::TargetSet { .. } => "target_set",
+            Self::PhaseEntered { .. } => "phase_entered",
+            Self::PhaseEnded { .. } => "phase_ended",
+            Self::AnyPhaseChange => "any_phase_change",
+            Self::CounterReaches { .. } => "counter_reaches",
+            Self::TimerExpires { .. } => "timer_expires",
+            Self::TimerStarted { .. } => "timer_started",
+            Self::TimeElapsed { .. } => "time_elapsed",
+            Self::Manual => "manual",
+            Self::Never => "never",
+            Self::AnyOf { .. } => "any_of",
+        }
+    }
+}
+
+impl Default for Trigger {
+    fn default() -> Self {
+        Self::CombatStart
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Default Color Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -74,6 +402,10 @@ pub struct OverlayAppearanceConfig {
     pub show_total: bool,
     #[serde(default = "default_true")]
     pub show_per_second: bool,
+    #[serde(default = "default_true")]
+    pub show_percent: bool,
+    #[serde(default = "default_true")]
+    pub show_duration: bool,
 }
 
 fn default_font_color() -> Color { overlay_colors::WHITE }
@@ -91,6 +423,8 @@ impl Default for OverlayAppearanceConfig {
             max_entries: 16,
             show_total: false,
             show_per_second: true,
+            show_percent: true,
+            show_duration: true,
         }
     }
 }
@@ -132,6 +466,10 @@ pub enum PersonalStat {
     HealCritPct,
     EffectiveHealPct,
     ClassDiscipline,
+    /// Current boss phase (if any)
+    Phase,
+    /// Time in current phase
+    PhaseTime,
 }
 
 impl PersonalStat {
@@ -158,6 +496,8 @@ impl PersonalStat {
             Self::HealCritPct => "Heal Crit %",
             Self::EffectiveHealPct => "Eff Heal %",
             Self::ClassDiscipline => "Spec",
+            Self::Phase => "Phase",
+            Self::PhaseTime => "Phase Time",
         }
     }
 
@@ -184,6 +524,8 @@ impl PersonalStat {
             Self::DamageCritPct,
             Self::HealCritPct,
             Self::EffectiveHealPct,
+            Self::Phase,
+            Self::PhaseTime,
         ]
     }
 }
@@ -371,6 +713,79 @@ impl Default for TimerOverlayConfig {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Challenge Overlay Configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Layout direction for challenge cards
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChallengeLayout {
+    /// Stack challenges vertically (default)
+    #[default]
+    Vertical,
+    /// Arrange challenges horizontally
+    Horizontal,
+}
+
+/// Column display mode for individual challenges
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChallengeColumns {
+    /// Show total value and percent (default)
+    #[default]
+    TotalPercent,
+    /// Show total value and per-second rate
+    TotalPerSecond,
+    /// Show per-second rate and percent
+    PerSecondPercent,
+    /// Show only total value
+    TotalOnly,
+    /// Show only per-second rate
+    PerSecondOnly,
+    /// Show only percent
+    PercentOnly,
+}
+
+/// Configuration for the challenge overlay (global settings)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChallengeOverlayConfig {
+    /// Font color for challenge text
+    #[serde(default = "default_font_color")]
+    pub font_color: Color,
+    /// Default bar color for challenges (individual challenges may override)
+    #[serde(default = "default_challenge_bar_color")]
+    pub default_bar_color: Color,
+    /// Show footer with totals
+    #[serde(default = "default_true")]
+    pub show_footer: bool,
+    /// Show duration in header
+    #[serde(default = "default_true")]
+    pub show_duration: bool,
+    /// Maximum challenges to display
+    #[serde(default = "default_max_challenges")]
+    pub max_display: u8,
+    /// Layout direction for challenge cards
+    #[serde(default)]
+    pub layout: ChallengeLayout,
+}
+
+fn default_challenge_bar_color() -> Color { overlay_colors::DPS }
+fn default_max_challenges() -> u8 { 4 }
+
+impl Default for ChallengeOverlayConfig {
+    fn default() -> Self {
+        Self {
+            font_color: overlay_colors::WHITE,
+            default_bar_color: overlay_colors::DPS,
+            show_footer: true,
+            show_duration: true,
+            max_display: 4,
+            layout: ChallengeLayout::Vertical,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Hotkey Settings
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -447,6 +862,10 @@ pub struct OverlaySettings {
     pub effects_overlay: TimerOverlayConfig,
     #[serde(default = "default_opacity")]
     pub effects_opacity: u8,
+    #[serde(default)]
+    pub challenge_overlay: ChallengeOverlayConfig,
+    #[serde(default = "default_opacity")]
+    pub challenge_opacity: u8,
 }
 
 impl Default for OverlaySettings {
@@ -470,6 +889,8 @@ impl Default for OverlaySettings {
             timer_opacity: 180,
             effects_overlay: TimerOverlayConfig::default(),
             effects_opacity: 180,
+            challenge_overlay: ChallengeOverlayConfig::default(),
+            challenge_opacity: 180,
         }
     }
 }
@@ -511,7 +932,39 @@ impl OverlaySettings {
 // App Config
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Application configuration.
+/// Audio settings for timer alerts and countdowns
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioSettings {
+    /// Master enable for all audio
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Volume level (0-100)
+    #[serde(default = "default_audio_volume")]
+    pub volume: u8,
+
+    /// Enable countdown sounds (e.g., "Shield 3... 2... 1...")
+    #[serde(default = "default_true")]
+    pub countdown_enabled: bool,
+
+    /// Enable alert speech when timers fire
+    #[serde(default = "default_true")]
+    pub alerts_enabled: bool,
+}
+
+fn default_audio_volume() -> u8 { 80 }
+
+impl Default for AudioSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            volume: 80,
+            countdown_enabled: true,
+            alerts_enabled: true,
+        }
+    }
+}
+
 /// Parsely.io upload settings
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ParselySettings {
@@ -549,6 +1002,8 @@ pub struct AppConfig {
     pub active_profile_name: Option<String>,
     #[serde(default)]
     pub parsely: ParselySettings,
+    #[serde(default)]
+    pub audio: AudioSettings,
 }
 
 fn default_retention_days() -> u32 { 21 }
@@ -568,6 +1023,162 @@ impl AppConfig {
             profiles: Vec::new(),
             active_profile_name: None,
             parsely: ParselySettings::default(),
+            audio: AudioSettings::default(),
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Entity Filter
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Filter for matching entities (used for both source and target filtering).
+///
+/// Shared between core (for timer/effect matching) and frontend (for UI editing).
+/// The actual matching logic lives in core since it requires runtime types.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntityFilter {
+    /// The local player only
+    #[default]
+    LocalPlayer,
+    /// Local player's companion
+    OtherPlayers,
+    /// Any player (including local)
+    AnyPlayer,
+    /// Any companion (any player's)
+    AnyCompanion,
+    /// Any player or companion
+    AnyPlayerOrCompanion,
+    /// Group members (players in the local player's group)
+    GroupMembers,
+    /// Group members except local player
+    GroupMembersExceptLocal,
+    /// Boss NPCs specifically
+    Boss,
+    /// Non-boss NPCs (trash mobs / adds)
+    NpcExceptBoss,
+    /// Any NPC (boss or trash)
+    AnyNpc,
+    /// Specific entities by selector (IDs, names, or roster aliases)
+    Selector(Vec<EntitySelector>),
+    /// Any entity whatsoever
+    Any,
+}
+
+impl EntityFilter {
+    /// Get a user-friendly label for this filter
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::LocalPlayer => "Local Player",
+            Self::OtherPlayers => "Other Players",
+            Self::AnyPlayer => "Any Player",
+            Self::AnyCompanion => "Any Companion",
+            Self::AnyPlayerOrCompanion => "Any Player or Companion",
+            Self::GroupMembers => "Group Members",
+            Self::GroupMembersExceptLocal => "Other Group Members",
+            Self::Boss => "Boss",
+            Self::NpcExceptBoss => "Adds (Non-Boss)",
+            Self::AnyNpc => "Any NPC",
+            Self::Selector(_) => "Specific Selector",
+            Self::Any => "Any",
+        }
+    }
+
+    /// Default for trigger source/target (any entity)
+    pub fn default_any() -> Self {
+        Self::Any
+    }
+
+    /// Returns true if this filter matches anything (no restriction)
+    pub fn is_any(&self) -> bool {
+        matches!(self, Self::Any)
+    }
+
+    /// Returns true if this is the LocalPlayer filter
+    pub fn is_local_player(&self) -> bool {
+        matches!(self, Self::LocalPlayer)
+    }
+
+    /// Returns true if this is the Boss filter
+    pub fn is_boss(&self) -> bool {
+        matches!(self, Self::Boss)
+    }
+
+    /// Check if this filter matches a specific NPC by class ID
+    pub fn matches_npc_id(&self, npc_id: i64) -> bool {
+        match self {
+            Self::Selector(selectors) => selectors.iter().any(|s| {
+                matches!(s, EntitySelector::Id(id) if *id == npc_id)
+            }),
+            Self::AnyNpc | Self::Boss | Self::NpcExceptBoss | Self::Any => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this filter matches by name (case insensitive)
+    pub fn matches_name(&self, name: &str) -> bool {
+        match self {
+            Self::Selector(selectors) => selectors.iter().any(|s| {
+                matches!(s, EntitySelector::Name(n) if n.eq_ignore_ascii_case(name))
+            }),
+            Self::Any => true,
+            _ => false,
+        }
+    }
+
+    /// Common options for source/target dropdowns (challenges)
+    pub fn common_options() -> &'static [EntityFilter] {
+        &[
+            Self::Boss,
+            Self::NpcExceptBoss,
+            Self::AnyNpc,
+            Self::AnyPlayer,
+            Self::LocalPlayer,
+            Self::Any,
+        ]
+    }
+
+    /// Get the snake_case type name for serialization
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Self::LocalPlayer => "local_player",
+            Self::OtherPlayers => "other_players",
+            Self::AnyPlayer => "any_player",
+            Self::AnyCompanion => "any_companion",
+            Self::AnyPlayerOrCompanion => "any_player_or_companion",
+            Self::GroupMembers => "group_members",
+            Self::GroupMembersExceptLocal => "group_members_except_local",
+            Self::Boss => "boss",
+            Self::NpcExceptBoss => "npc_except_boss",
+            Self::AnyNpc => "any_npc",
+            Self::Selector(_) => "selector",
+            Self::Any => "any",
+        }
+    }
+
+    /// Common filters for source field (timers/effects)
+    pub fn source_options() -> &'static [EntityFilter] {
+        &[
+            Self::LocalPlayer,
+            Self::OtherPlayers,
+            Self::AnyPlayer,
+            Self::Boss,
+            Self::AnyNpc,
+            Self::Any,
+        ]
+    }
+
+    /// Common filters for target field (timers/effects)
+    pub fn target_options() -> &'static [EntityFilter] {
+        &[
+            Self::LocalPlayer,
+            Self::GroupMembers,
+            Self::GroupMembersExceptLocal,
+            Self::AnyPlayer,
+            Self::Boss,
+            Self::AnyNpc,
+            Self::Any,
+        ]
     }
 }

@@ -5,50 +5,26 @@
 
 use serde::{Deserialize, Serialize};
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Entity Filter (shared by effects and timers)
-// ═══════════════════════════════════════════════════════════════════════════
+use crate::audio::AudioConfig;
 
-/// Filter for matching entities (used for both source and target)
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EntityFilter {
-    /// The local player only
-    #[default]
-    LocalPlayer,
-    /// Local player's companion
-    LocalCompanion,
-    /// Local player OR their companion
-    LocalPlayerOrCompanion,
-    /// Other players (not local)
-    OtherPlayers,
-    /// Other players' companions
-    OtherCompanions,
-    /// Any player (including local)
-    AnyPlayer,
-    /// Any companion (any player's)
-    AnyCompanion,
-    /// Any player or companion
-    AnyPlayerOrCompanion,
-    /// Group members (players in the local player's group)
-    GroupMembers,
-    /// Group members except local player
-    GroupMembersExceptLocal,
-    /// Boss NPCs specifically
-    Boss,
-    /// Non-boss NPCs (trash mobs)
-    NpcExceptBoss,
-    /// Any NPC (boss or trash)
-    AnyNpc,
-    /// Specific entity by name
-    Specific(String),
-    /// Any entity whatsoever
-    Any,
-}
+// Re-export EntityFilter from shared module
+pub use crate::entity_filter::EntityFilter;
+pub use crate::triggers::{AbilitySelector, EffectSelector};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Effect Definitions
 // ═══════════════════════════════════════════════════════════════════════════
+
+/// When the effect tracking should start
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectTriggerMode {
+    /// Track starts when effect is applied (default)
+    #[default]
+    EffectApplied,
+    /// Track starts when effect is removed
+    EffectRemoved,
+}
 
 /// How an effect should be categorized and displayed
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -99,18 +75,26 @@ pub struct EffectDefinition {
     /// Display name shown in overlays
     pub name: String,
 
+    /// Optional in-game display text (defaults to name if not set)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_text: Option<String>,
+
     /// Whether this definition is currently enabled
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::serde_defaults::default_true")]
     pub enabled: bool,
 
     // ─── Matching ───────────────────────────────────────────────────────────
-    /// Game effect IDs that match this definition
+    /// Effect selectors (ID or name) that match this definition
     #[serde(default)]
-    pub effect_ids: Vec<u64>,
+    pub effects: Vec<EffectSelector>,
 
-    /// Ability IDs that can apply or refresh this effect
+    /// When to start tracking: on effect gained or effect lost
     #[serde(default)]
-    pub refresh_abilities: Vec<u64>,
+    pub trigger: EffectTriggerMode,
+
+    /// Abilities (ID or name) that can apply or refresh this effect
+    #[serde(default)]
+    pub refresh_abilities: Vec<AbilitySelector>,
 
     // ─── Filtering ──────────────────────────────────────────────────────────
     /// Who must apply the effect for it to be tracked
@@ -126,7 +110,7 @@ pub struct EffectDefinition {
     pub duration_secs: Option<f32>,
 
     /// Can this effect be refreshed by reapplication?
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::serde_defaults::default_true")]
     pub can_be_refreshed: bool,
 
     // ─── Display ────────────────────────────────────────────────────────────
@@ -149,13 +133,17 @@ pub struct EffectDefinition {
     #[serde(default)]
     pub show_on_effects_overlay: bool,
 
+    /// Only show when remaining time is at or below this threshold (0 = always show)
+    #[serde(default)]
+    pub show_at_secs: f32,
+
     // ─── Behavior ───────────────────────────────────────────────────────────
     /// Should this effect persist after target dies?
     #[serde(default)]
     pub persist_past_death: bool,
 
     /// Track this effect outside of combat?
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::serde_defaults::default_true")]
     pub track_outside_combat: bool,
 
     // ─── Timer Integration ──────────────────────────────────────────────────
@@ -178,6 +166,12 @@ pub struct EffectDefinition {
     /// Seconds before expiration to show warning
     #[serde(default = "default_alert_threshold")]
     pub alert_threshold_secs: f32,
+
+    // ─── Audio ─────────────────────────────────────────────────────────────────
+
+    /// Audio configuration (alerts, custom sounds)
+    #[serde(default)]
+    pub audio: AudioConfig,
 }
 
 impl EffectDefinition {
@@ -186,24 +180,20 @@ impl EffectDefinition {
         self.color.unwrap_or_else(|| self.category.default_color())
     }
 
-    /// Check if an effect ID matches this definition
-    pub fn matches_effect(&self, effect_id: u64) -> bool {
-        self.effect_ids.contains(&effect_id)
+    /// Check if an effect ID/name matches this definition
+    pub fn matches_effect(&self, effect_id: u64, effect_name: Option<&str>) -> bool {
+        self.effects.iter().any(|s| s.matches(effect_id, effect_name))
     }
 
     /// Check if an ability can refresh this effect
-    pub fn can_refresh_with(&self, ability_id: u64) -> bool {
-        self.refresh_abilities.contains(&ability_id)
+    pub fn can_refresh_with(&self, ability_id: u64, ability_name: Option<&str>) -> bool {
+        self.refresh_abilities.iter().any(|s| s.matches(ability_id, ability_name))
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Serde Helpers
 // ═══════════════════════════════════════════════════════════════════════════
-
-fn default_true() -> bool {
-    true
-}
 
 fn default_alert_threshold() -> f32 {
     3.0

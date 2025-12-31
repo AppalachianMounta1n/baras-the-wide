@@ -276,7 +276,7 @@ impl MetricOverlay {
                     .with_color(font_color)
             };
 
-            footer.render(&mut self.frame, padding, y, content_width, font_size - 2.0, bar_spacing);
+            footer.render(&mut self.frame, padding, y, content_width, font_size - 2.0);
         }
 
         // End frame (resize indicator, commit)
@@ -289,9 +289,12 @@ impl MetricOverlay {
 // ─────────────────────────────────────────────────────────────────────────────
 
 impl Overlay for MetricOverlay {
-    fn update_data(&mut self, data: OverlayData) {
+    fn update_data(&mut self, data: OverlayData) -> bool {
         if let OverlayData::Metrics(entries) = data {
             self.set_entries(entries);
+            true // Metric overlays always render when updated
+        } else {
+            false
         }
     }
 

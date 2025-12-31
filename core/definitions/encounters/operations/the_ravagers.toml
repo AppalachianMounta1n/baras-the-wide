@@ -1,0 +1,104 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# The Ravagers - Operation
+# ═══════════════════════════════════════════════════════════════════════════════
+# Pirate-themed operation on Rishi. 5 bosses.
+
+[area]
+name = "The Ravagers"
+id = 3367421863788544
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 1: Sparky
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "sparky"
+name = "Sparky"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Sparky"
+ids = [3458114393210880, 3367555007774720, 3458122983145472, 3458110098243584]
+is_boss = true
+is_kill_target = true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 2: Quartermaster Bulo
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "bulo"
+name = "Quartermaster Bulo"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Quartermaster Bulo"
+ids = [3468701487595520, 3371446248144896, 3468697192628224, 3468705782562816]
+is_boss = true
+is_kill_target = true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 3: Torque
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "torque"
+name = "Torque"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Torque"
+ids = [3468714372497408, 3397005598523392, 3468718667464704, 3468710077530112]
+is_boss = true
+is_kill_target = true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 4: Master & Blaster
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "master_blaster"
+name = "Master & Blaster"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Blaster"
+ids = [
+  3725149689872384,
+  3391095723524096,
+  3462181727240192,
+  3462186022207488,
+  3458148752949248,
+]
+is_boss = true
+
+[[boss.entities]]
+name = "Master"
+ids = [3462181727240192]
+is_boss = true
+is_kill_target = true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 5: Coratanni
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "coratanni"
+name = "Coratanni"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Coratanni"
+ids = [3619433364848640, 3371437658210304]
+is_boss = true
+
+[[boss.entities]]
+name = "Ruugar"
+ids = [3371441953177600, 3397039958261760]
+is_boss = true
+is_kill_target = true
+
+[[boss.entities]]
+name = "Pearl"
+ids = [3374109127868416]
+is_boss = true

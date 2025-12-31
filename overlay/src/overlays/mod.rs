@@ -10,6 +10,7 @@
 //! interface for the application layer to interact with any overlay type.
 
 mod boss_health;
+mod challenges;
 mod effects;
 mod metric;
 mod personal;
@@ -17,6 +18,7 @@ mod raid;
 mod timers;
 
 pub use boss_health::{BossHealthOverlay, BossHealthData};
+pub use challenges::{ChallengeData, ChallengeEntry, ChallengeOverlay, PlayerContribution};
 pub use effects::{EffectsData, EffectEntry, EffectsOverlay};
 pub use metric::{MetricEntry, MetricOverlay};
 pub use personal::{PersonalOverlay, PersonalStats};
@@ -44,7 +46,10 @@ pub enum RaidRegistryAction {
 }
 
 use crate::frame::OverlayFrame;
-use baras_core::context::{OverlayAppearanceConfig, PersonalOverlayConfig, BossHealthConfig, TimerOverlayConfig};
+use baras_core::context::{
+    BossHealthConfig, ChallengeOverlayConfig, OverlayAppearanceConfig, PersonalOverlayConfig,
+    TimerOverlayConfig,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Data Types
@@ -65,6 +70,8 @@ pub enum OverlayData {
     Timers(TimerData),
     /// Effects countdown bars
     Effects(EffectsData),
+    /// Challenge metrics during boss encounters
+    Challenges(ChallengeData),
 }
 
 /// Configuration updates that can be sent to overlays
@@ -82,6 +89,8 @@ pub enum OverlayConfigUpdate {
     Timers(TimerOverlayConfig, u8),
     /// Config for effects overlay (+ background alpha)
     Effects(TimerOverlayConfig, u8),
+    /// Config for challenge overlay (+ background alpha)
+    Challenge(ChallengeOverlayConfig, u8),
 }
 
 /// Position information for an overlay
@@ -108,9 +117,12 @@ pub struct OverlayPosition {
 pub trait Overlay: 'static {
     /// Update the overlay with new data
     ///
+    /// Returns `true` if the data changed meaningfully and a re-render is needed.
+    /// Returns `false` if the data is unchanged (e.g., empty -> empty).
+    ///
     /// Implementations should check if the data variant matches their type
-    /// and update accordingly. Mismatched variants are silently ignored.
-    fn update_data(&mut self, data: OverlayData);
+    /// and update accordingly. Mismatched variants return `false`.
+    fn update_data(&mut self, data: OverlayData) -> bool;
 
     /// Update the overlay configuration/appearance
     ///

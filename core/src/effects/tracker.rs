@@ -4,16 +4,17 @@
 //! configured effect definitions. Produces `ActiveEffect` instances
 //! that can be fed to overlay renderers.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use chrono::NaiveDateTime;
 
 use crate::combat_log::EntityType;
 use crate::context::IStr;
-use crate::events::{GameSignal, SignalHandler};
+use crate::entity_filter::EntityFilterMatching;
+use crate::signal_processor::{GameSignal, SignalHandler};
 
-use super::{ActiveEffect, EffectDefinition, EntityFilter};
+use super::{ActiveEffect, EffectDefinition, EffectTriggerMode};
 
 /// Combined set of effect definitions
 #[derive(Debug, Clone, Default)]
@@ -33,9 +34,9 @@ impl DefinitionSet {
         let mut duplicates = Vec::new();
         for def in definitions {
             // Warn about effects that will never match anything
-            if def.effect_ids.is_empty() && def.refresh_abilities.is_empty() {
+            if def.effects.is_empty() && def.refresh_abilities.is_empty() {
                 eprintln!(
-                    "[EFFECT WARNING] Effect '{}' has no effect_ids or refresh_abilities - it will never match anything!",
+                    "[EFFECT WARNING] Effect '{}' has no effects or refresh_abilities - it will never match anything!",
                     def.id
                 );
             }
@@ -57,11 +58,11 @@ impl DefinitionSet {
         self.effects.get(id)
     }
 
-    /// Find effect definitions that match a game effect ID
-    pub fn find_by_game_id(&self, effect_id: u64) -> Vec<&EffectDefinition> {
+    /// Find effect definitions that match a game effect ID/name
+    pub fn find_matching(&self, effect_id: u64, effect_name: Option<&str>) -> Vec<&EffectDefinition> {
         self.effects
             .values()
-            .filter(|def| def.enabled && def.matches_effect(effect_id))
+            .filter(|def| def.enabled && def.matches_effect(effect_id, effect_name))
             .collect()
     }
 
@@ -76,6 +77,16 @@ impl DefinitionSet {
 struct EffectInstanceKey {
     definition_id: String,
     target_entity_id: i64,
+}
+
+/// Entity info for filter matching
+#[derive(Debug, Clone, Copy)]
+struct EntityInfo {
+    id: i64,
+    /// NPC class/template ID (0 for players/companions)
+    npc_id: i64,
+    entity_type: EntityType,
+    name: IStr,
 }
 
 /// Info about a newly registered target (for raid frame registration)
@@ -126,6 +137,10 @@ pub struct EffectTracker {
     /// Current target for each entity (source_id -> target info)
     /// Used to resolve target when AbilityActivated has empty/self target
     current_targets: HashMap<i64, TrackedTarget>,
+
+    /// Boss entity IDs currently in combat (from BossHpChanged signals)
+    /// Used for Boss entity filter matching
+    boss_entity_ids: HashSet<i64>,
 }
 
 impl Default for EffectTracker {
@@ -146,6 +161,7 @@ impl EffectTracker {
             live_mode: false, // Start in historical mode
             new_targets: Vec::new(),
             current_targets: HashMap::new(),
+            boss_entity_ids: HashSet::new(),
         }
     }
 
@@ -201,6 +217,11 @@ impl EffectTracker {
         self.active_effects.values()
     }
 
+    /// Get mutable references to all active effects (for audio processing)
+    pub fn active_effects_mut(&mut self) -> impl Iterator<Item = &mut ActiveEffect> {
+        self.active_effects.values_mut()
+    }
+
     /// Get active effects for a specific target entity
     pub fn effects_for_target(&self, target_id: i64) -> impl Iterator<Item = &ActiveEffect> {
         self.active_effects
@@ -235,11 +256,17 @@ impl EffectTracker {
     fn handle_effect_applied(
         &mut self,
         effect_id: i64,
+        effect_name: IStr,
         action_id: i64,
+        action_name: IStr,
         source_id: i64,
+        source_name: IStr,
+        source_entity_type: EntityType,
+        source_npc_id: i64,
         target_id: i64,
         target_name: IStr,
         target_entity_type: EntityType,
+        target_npc_id: i64,
         timestamp: NaiveDateTime,
         charges: Option<u8>,
     ) {
@@ -253,12 +280,30 @@ impl EffectTracker {
             return;
         }
 
-        // Find matching definitions
+        // Build entity info for filter matching
+        let source_info = EntityInfo {
+            id: source_id,
+            npc_id: source_npc_id,
+            entity_type: source_entity_type,
+            name: source_name,
+        };
+        let target_info = EntityInfo {
+            id: target_id,
+            npc_id: target_npc_id,
+            entity_type: target_entity_type,
+            name: target_name,
+        };
+
+        // Resolve effect name for matching
+        let effect_name_str = crate::context::resolve(effect_name);
+
+        // Find matching definitions (only those that trigger on EffectApplied)
         let matching_defs: Vec<_> = self
             .definitions
-            .find_by_game_id(effect_id as u64)
+            .find_matching(effect_id as u64, Some(&effect_name_str))
             .into_iter()
-            .filter(|def| self.matches_filters(def, source_id, target_id))
+            .filter(|def| def.trigger == EffectTriggerMode::EffectApplied)
+            .filter(|def| self.matches_filters(def, source_info, target_info))
             .collect();
 
         let is_from_local = self.local_player_id == Some(source_id);
@@ -274,10 +319,11 @@ impl EffectTracker {
 
             if let Some(existing) = self.active_effects.get_mut(&key) {
                 // Refresh existing effect if this action is in refresh_abilities
+                let action_name_str = crate::context::resolve(action_name);
                 let should_refresh = if def.refresh_abilities.is_empty() {
                     def.can_be_refreshed
                 } else {
-                    def.can_refresh_with(action_id as u64)
+                    def.can_refresh_with(action_id as u64, Some(&action_name_str))
                 };
 
                 if should_refresh {
@@ -289,10 +335,12 @@ impl EffectTracker {
                 }
             } else {
                 // Create new effect
+                let display_text = def.display_text.clone().unwrap_or_else(|| def.name.clone());
                 let mut effect = ActiveEffect::new(
                     def.id.clone(),
                     effect_id as u64,
                     def.name.clone(),
+                    display_text,
                     source_id,
                     target_id,
                     target_name,
@@ -303,6 +351,7 @@ impl EffectTracker {
                     def.category,
                     def.show_on_raid_frames,
                     def.show_on_effects_overlay,
+                    &def.audio,
                 );
 
                 if let Some(c) = charges {
@@ -327,15 +376,17 @@ impl EffectTracker {
     fn refresh_effects_by_action(
         &mut self,
         action_id: i64,
+        action_name: IStr,
         target_id: i64,
         target_name: IStr,
         target_entity_type: &EntityType,
         timestamp: NaiveDateTime,
     ) {
         // Find all definitions that have this action in their refresh_abilities
+        let action_name_str = crate::context::resolve(action_name);
         let refreshable_defs: Vec<_> = self.definitions
             .enabled()
-            .filter(|def| def.can_refresh_with(action_id as u64))
+            .filter(|def| def.can_refresh_with(action_id as u64, Some(&action_name_str)))
             .map(|def| (def.id.clone(), def.duration_secs.map(Duration::from_secs_f32)))
             .collect();
 
@@ -365,28 +416,66 @@ impl EffectTracker {
     fn handle_effect_removed(
         &mut self,
         effect_id: i64,
-        _source_id: i64,
+        effect_name: IStr,
+        source_id: i64,
         target_id: i64,
+        target_name: IStr,
         timestamp: NaiveDateTime,
     ) {
         self.current_game_time = Some(timestamp);
 
-        // Find matching definitions and mark their effects as removed
-        let matching_def_ids: Vec<_> = self
+        // Skip when processing historical data
+        if !self.live_mode {
+            return;
+        }
+
+        // Resolve effect name for matching
+        let effect_name_str = crate::context::resolve(effect_name);
+
+        let matching_defs: Vec<_> = self
             .definitions
-            .find_by_game_id(effect_id as u64)
+            .find_matching(effect_id as u64, Some(&effect_name_str))
             .into_iter()
-            .map(|def| def.id.clone())
             .collect();
 
-        for def_id in matching_def_ids {
+        let is_from_local = self.local_player_id == Some(source_id);
+
+        for def in matching_defs {
             let key = EffectInstanceKey {
-                definition_id: def_id,
+                definition_id: def.id.clone(),
                 target_entity_id: target_id,
             };
 
-            if let Some(effect) = self.active_effects.get_mut(&key) {
-                effect.mark_removed();
+            match def.trigger {
+                EffectTriggerMode::EffectApplied => {
+                    // Mark existing effect as removed (normal behavior)
+                    if let Some(effect) = self.active_effects.get_mut(&key) {
+                        effect.mark_removed();
+                    }
+                }
+                EffectTriggerMode::EffectRemoved => {
+                    // Create new effect when the game effect is removed (cooldown tracking)
+                    let duration = def.duration_secs.map(Duration::from_secs_f32);
+                    let display_text = def.display_text.clone().unwrap_or_else(|| def.name.clone());
+                    let effect = ActiveEffect::new(
+                        def.id.clone(),
+                        effect_id as u64,
+                        def.name.clone(),
+                        display_text,
+                        source_id,
+                        target_id,
+                        target_name,
+                        is_from_local,
+                        timestamp,
+                        duration,
+                        def.effective_color(),
+                        def.category,
+                        def.show_on_raid_frames,
+                        def.show_on_effects_overlay,
+                        &def.audio,
+                    );
+                    self.active_effects.insert(key, effect);
+                }
             }
         }
     }
@@ -395,19 +484,24 @@ impl EffectTracker {
     fn handle_charges_changed(
         &mut self,
         effect_id: i64,
+        effect_name: IStr,
         action_id: i64,
+        action_name: IStr,
         target_id: i64,
         timestamp: NaiveDateTime,
         charges: u8,
     ) {
         self.current_game_time = Some(timestamp);
 
-        // Find matching definitions
+        // Find matching definitions (by ID or name)
+        let effect_name_str = crate::context::resolve(effect_name);
         let matching_defs: Vec<_> = self
             .definitions
-            .find_by_game_id(effect_id as u64)
+            .find_matching(effect_id as u64, Some(&effect_name_str))
             .into_iter()
             .collect();
+
+        let action_name_str = crate::context::resolve(action_name);
 
         for def in matching_defs {
             let key = EffectInstanceKey {
@@ -422,7 +516,7 @@ impl EffectTracker {
                 let should_refresh = if def.refresh_abilities.is_empty() {
                     def.can_be_refreshed
                 } else {
-                    def.can_refresh_with(action_id as u64)
+                    def.can_refresh_with(action_id as u64, Some(&action_name_str))
                 };
 
                 if should_refresh {
@@ -454,6 +548,7 @@ impl EffectTracker {
     /// Handle combat end - optionally clear combat-only effects
     fn handle_combat_ended(&mut self) {
         self.in_combat = false;
+        self.boss_entity_ids.clear();
 
         // Mark effects that don't track outside combat as removed
         let outside_combat_ids: std::collections::HashSet<_> = self
@@ -476,36 +571,19 @@ impl EffectTracker {
             effect.mark_removed();
         }
         self.current_targets.clear();
+        self.boss_entity_ids.clear();
         self.in_combat = false;
     }
 
     /// Check if an effect matches source/target filters
-    fn matches_filters(&self, def: &EffectDefinition, source_id: i64, target_id: i64) -> bool {
-        self.matches_entity_filter(&def.source, source_id, true)
-            && self.matches_entity_filter(&def.target, target_id, false)
-    }
-
-    /// Check if an entity matches a filter
-    fn matches_entity_filter(&self, filter: &EntityFilter, entity_id: i64, _is_source: bool) -> bool {
-        let local_id = self.local_player_id;
-
-        match filter {
-            EntityFilter::LocalPlayer => local_id == Some(entity_id),
-            EntityFilter::OtherPlayers => local_id.is_some() && local_id != Some(entity_id),
-            EntityFilter::AnyPlayer => true, // TODO: Check entity type from cache
-            EntityFilter::GroupMembers => true, // TODO: Check group membership
-            EntityFilter::GroupMembersExceptLocal => {
-                local_id.is_some() && local_id != Some(entity_id)
-            }
-            EntityFilter::Any => true,
-            EntityFilter::Specific(name) => {
-                // TODO: Look up entity name from cache
-                let _ = name;
-                false
-            }
-            // TODO: Implement companion, NPC, boss filters
-            _ => true,
-        }
+    fn matches_filters(
+        &self,
+        def: &EffectDefinition,
+        source: EntityInfo,
+        target: EntityInfo,
+    ) -> bool {
+        def.source.matches(source.id, source.entity_type, source.name, source.npc_id, self.local_player_id, &self.boss_entity_ids)
+            && def.target.matches(target.id, target.entity_type, target.name, target.npc_id, self.local_player_id, &self.boss_entity_ids)
     }
 }
 
@@ -514,32 +592,58 @@ impl SignalHandler for EffectTracker {
         match signal {
             GameSignal::EffectApplied {
                 effect_id,
+                effect_name,
                 action_id,
+                action_name,
                 source_id,
+                source_name,
+                source_entity_type,
+                source_npc_id,
                 target_id,
                 target_name,
                 target_entity_type,
+                target_npc_id,
                 timestamp,
                 charges,
             } => {
-                self.handle_effect_applied(*effect_id, *action_id, *source_id, *target_id, *target_name, target_entity_type.clone(), *timestamp, *charges);
+                self.handle_effect_applied(
+                    *effect_id,
+                    *effect_name,
+                    *action_id,
+                    *action_name,
+                    *source_id,
+                    *source_name,
+                    *source_entity_type,
+                    *source_npc_id,
+                    *target_id,
+                    *target_name,
+                    *target_entity_type,
+                    *target_npc_id,
+                    *timestamp,
+                    *charges,
+                );
             }
             GameSignal::EffectRemoved {
                 effect_id,
+                effect_name,
                 source_id,
                 target_id,
+                target_name,
                 timestamp,
+                ..
             } => {
-                self.handle_effect_removed(*effect_id, *source_id, *target_id, *timestamp);
+                self.handle_effect_removed(*effect_id, *effect_name, *source_id, *target_id, *target_name, *timestamp);
             }
             GameSignal::EffectChargesChanged {
                 effect_id,
+                effect_name,
                 action_id,
+                action_name,
                 target_id,
                 timestamp,
                 charges,
             } => {
-                self.handle_charges_changed(*effect_id, *action_id, *target_id, *timestamp, *charges);
+                self.handle_charges_changed(*effect_id, *effect_name, *action_id, *action_name, *target_id, *timestamp, *charges);
             }
             GameSignal::EntityDeath { entity_id, .. } => {
                 self.handle_entity_death(*entity_id);
@@ -558,11 +662,13 @@ impl SignalHandler for EffectTracker {
             }
             GameSignal::AbilityActivated {
                 ability_id,
+                ability_name,
                 source_id,
                 target_id,
                 target_name,
                 target_entity_type,
                 timestamp,
+                ..
             } => {
                 // Only process abilities from local player
                 if self.local_player_id == Some(*source_id) {
@@ -572,14 +678,15 @@ impl SignalHandler for EffectTracker {
                             if let Some(tracked) = self.current_targets.get(source_id).cloned() {
                                 (tracked.entity_id, tracked.name, tracked.entity_type)
                             } else {
-                                (*source_id, *target_name, target_entity_type.clone())
+                                (*source_id, *target_name, *target_entity_type)
                             }
                         } else {
-                            (*target_id, *target_name, target_entity_type.clone())
+                            (*target_id, *target_name, *target_entity_type)
                         };
 
                     self.refresh_effects_by_action(
                         *ability_id,
+                        *ability_name,
                         resolved_id,
                         resolved_name,
                         &resolved_type,
@@ -597,11 +704,19 @@ impl SignalHandler for EffectTracker {
                 self.current_targets.insert(*source_id, TrackedTarget {
                     entity_id: *target_id,
                     name: *target_name,
-                    entity_type: target_entity_type.clone(),
+                    entity_type: *target_entity_type,
                 });
             }
             GameSignal::TargetCleared { source_id, .. } => {
                 self.current_targets.remove(source_id);
+            }
+            GameSignal::BossEncounterDetected { entity_id, .. } => {
+                // Track boss entity ID immediately when encounter is detected
+                self.boss_entity_ids.insert(*entity_id);
+            }
+            GameSignal::BossHpChanged { entity_id, .. } => {
+                // Track boss entity IDs for the Boss filter
+                self.boss_entity_ids.insert(*entity_id);
             }
             _ => {}
         }

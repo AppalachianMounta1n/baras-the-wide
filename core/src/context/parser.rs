@@ -7,9 +7,9 @@ use tokio::sync::RwLock;
 use crate::combat_log::{CombatEvent, Reader};
 use crate::context::{AppConfig, parse_log_filename};
 use crate::effects::{DefinitionSet, EffectTracker};
-use crate::events::{EventProcessor, GameSignal, SignalHandler};
+use crate::signal_processor::{EventProcessor, GameSignal, SignalHandler};
 use crate::state::SessionCache;
-use crate::boss_timers::BossDefinition;
+use crate::boss::BossEncounterDefinition;
 use crate::timers::{TimerDefinition, TimerManager};
 
 /// A live parsing session that processes combat events and tracks game state.
@@ -60,7 +60,7 @@ impl ParsingSession {
         let date_stamp = path
             .file_name()
             .and_then(|f| f.to_str())
-            .and_then(|f| parse_log_filename(f))
+            .and_then(parse_log_filename)
             .map(|(_, dt)| dt);
 
         Self {
@@ -160,6 +160,14 @@ impl ParsingSession {
         }
     }
 
+    /// Enable/disable live mode for timer tracking.
+    /// Call with `true` after initial file load to filter stale events.
+    pub fn set_timer_live_mode(&self, enabled: bool) {
+        if let Ok(mut timer_mgr) = self.timer_manager.lock() {
+            timer_mgr.set_live_mode(enabled);
+        }
+    }
+
     /// Update timer definitions (e.g., after config reload).
     pub fn set_timer_definitions(&self, definitions: Vec<TimerDefinition>) {
         if let Ok(mut timer_mgr) = self.timer_manager.lock() {
@@ -168,7 +176,22 @@ impl ParsingSession {
     }
 
     /// Update boss definitions (for boss detection and phase tracking).
-    pub fn set_boss_definitions(&self, bosses: Vec<BossDefinition>) {
+    /// NOTE: This only updates TimerManager. For full support, use `load_boss_definitions`.
+    pub fn set_boss_definitions(&self, bosses: Vec<BossEncounterDefinition>) {
+        if let Ok(mut timer_mgr) = self.timer_manager.lock() {
+            timer_mgr.load_boss_definitions(bosses);
+        }
+    }
+
+    /// Load boss definitions into both SessionCache and TimerManager.
+    /// Requires mutable access - use this when entering a new area.
+    pub fn load_boss_definitions(&mut self, bosses: Vec<BossEncounterDefinition>) {
+        // Update SessionCache (for boss encounter detection and state tracking)
+        if let Some(cache) = &mut self.session_cache {
+            cache.load_boss_definitions(bosses.clone());
+        }
+
+        // Update TimerManager (for timer activation)
         if let Ok(mut timer_mgr) = self.timer_manager.lock() {
             timer_mgr.load_boss_definitions(bosses);
         }
@@ -199,15 +222,17 @@ impl ParsingSession {
         }
 
         let difficulty = crate::game_data::Difficulty::from_game_string(&area.difficulty_name);
+        let area_id = if area.area_id != 0 { Some(area.area_id) } else { None };
 
         if let Ok(mut timer_mgr) = self.timer_manager.lock() {
             timer_mgr.set_context(
+                area_id,
                 Some(area.area_name.clone()),
                 None, // Boss will be detected on target change
                 difficulty,
             );
-            eprintln!("[TIMER] Synced initial context from cache: area={}, difficulty={:?}",
-                area.area_name, difficulty);
+            eprintln!("[TIMER] Synced initial context from cache: area={} (id={:?}), difficulty={:?}",
+                area.area_name, area_id, difficulty);
         }
     }
 }

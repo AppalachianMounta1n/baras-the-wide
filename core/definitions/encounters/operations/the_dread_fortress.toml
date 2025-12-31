@@ -1,0 +1,269 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# The Dread Fortress - Operation
+# ═══════════════════════════════════════════════════════════════════════════════
+# Dread Fortress - 5 boss operation (Nefra, Draxus, Grob'thok, Corruptor Zero, Brontes)
+# Source: ORBS timer data + manual verification from NiM logs
+
+[area]
+name = "The Dread Fortress"
+id = 137438993402
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 1: Nefra, Who Bars the Way
+# ═══════════════════════════════════════════════════════════════════════════════
+# Simple boss with periodic raid damage and add spawns.
+# Key mechanics:
+# - Voice of the Masters: Raid-wide damage that must be healed through
+# - DPS/Tank Adds: Spawned periodically, must be killed quickly
+# - Twin Attack: Main rotation ability (used for NiM cleave tracking)
+# - Nightmare Twin Attack: Special cleave mechanic in NiM
+
+[[boss]]
+id = "nefra"
+name = "Nefra, Who Bars the Way"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Nefra, Who Bars the Way"
+ids = [3303036009054208, 3266533082005504, 3303040304021504, 3303031714086912]
+is_boss = true
+is_kill_target = true
+
+# ─── Counters ───────────────────────────────────────────────────────────────────
+# NiM uses Twin Attack count to determine when adds/cleave happen
+
+[[boss.counters]]
+id = "nefra_twin_attack_count"
+name = "Twin Attacks"
+increment_on = { type = "ability_cast", abilities = [3342034312101888] }
+reset_on = { type = "ability_cast", abilities = [
+  3342167456088064,
+] } # Reset on Nightmare Twin Attack
+
+# ─── Timers ─────────────────────────────────────────────────────────────────────
+
+# -- Voice of the Masters --
+# Raid-wide damage that needs to be healed. First at 15s, then every 30s.
+
+[[boss.timer]]
+id = "nefra_voice_cs"
+name = "Voice"
+trigger = { type = "combat_start" }
+duration_secs = 15.0
+color = [29, 153, 20, 255]
+difficulties = ["veteran", "master"]
+chains_to = "nefra_voice"
+
+[[boss.timer]]
+id = "nefra_voice"
+name = "Voice"
+trigger = { type = "ability_cast", abilities = [3270007710547968] }
+duration_secs = 30.0
+color = [29, 153, 20, 255]
+difficulties = ["veteran", "master"]
+
+# -- DPS Add --
+# Small add that DPS needs to kill. First at 30s, then every 30s on spawn.
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 2: Gate Commander Draxus
+# ═══════════════════════════════════════════════════════════════════════════════
+# Multi-phase fight with add waves. Boss escapes at HP thresholds, spawning adds.
+# Key mechanics:
+# - Escape: Boss runs away at 90%, 60%, 30% HP - each triggers add wave
+# - Subteroth Adds: Swarm of small adds that spawn after each escape
+# - Corrosive Grenade: DoT attack on random players
+# - Emergency Shielding: Final phase immunity shield that must be burned
+
+[[boss]]
+id = "draxus"
+name = "Gate Commander Draxus"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Gate Commander Draxus"
+ids = [3303401081274368, 3273924720721920, 3303405376241664, 3303392491339776]
+is_boss = true
+is_kill_target = true
+
+# ─── Phases ─────────────────────────────────────────────────────────────────────
+# Draxus escapes at HP thresholds, spawning add waves
+[[boss.timer]]
+id = "draxus_grenade"
+name = "Grenade"
+trigger = { type = "ability_cast", abilities = [3289043005603840] }
+duration_secs = 12.0
+color = [204, 182, 30, 255]
+difficulties = ["veteran", "master"]
+
+# -- Suppressive Fire --
+# Channeled attack
+
+[[boss.timer]]
+id = "draxus_suppressive"
+name = "Suppressive Fire"
+trigger = { type = "ability_cast", abilities = [3289034415669248] }
+duration_secs = 15.0
+color = [219, 96, 28, 255]
+difficulties = ["veteran", "master"]
+
+# -- Emergency Shielding --
+# Final phase immunity - alert when applied and removed
+
+[[boss.timer]]
+id = "draxus_shield_on"
+name = "Emergency Shield"
+trigger = { type = "effect_applied", effects = [3321693346988296] }
+is_alert = true
+alert_text = "Shield Active - BURN!"
+color = [29, 224, 219, 255]
+difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "draxus_shield_off"
+name = "Shield Down"
+trigger = { type = "effect_removed", effects = [3321693346988296] }
+is_alert = true
+alert_text = "Shield Down!"
+color = [33, 224, 218, 255]
+difficulties = ["veteran", "master"]
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 3: Grob'thok, Who Feeds the Forge
+# ═══════════════════════════════════════════════════════════════════════════════
+# Kite fight with lava, adds, and a magnet mechanic.
+# Source: ORBS timer data
+
+[[boss]]
+id = "grobthok"
+name = "Grob'thok, Who Feeds the Forge"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Grob'thok, Who Feeds the Forge"
+ids = [3302559267684352, 3279024890417152, 3302555872337920, 3302563562651648]
+is_boss = true
+is_kill_target = true
+
+[[boss.entities]]
+name = "Dreadful Ugnaught"
+ids = [3307678868701184]
+is_boss = false
+
+# ─── Timers ─────────────────────────────────────────────────────────────────────
+
+# -- Pipe Smash --
+# Boss smashes pipes to release lava. 60s from start, 63s after each cast.
+
+[[boss.timer]]
+id = "grobthok_pipe_smash_cs"
+name = "Pipe Smash"
+trigger = { type = "combat_start" }
+duration_secs = 60.0
+color = [204, 182, 30, 255]
+difficulties = ["veteran", "master"]
+chains_to = "grobthok_pipe_smash"
+
+[[boss.timer]]
+id = "grobthok_pipe_smash"
+name = "Pipe Smash"
+trigger = { type = "ability_cast", abilities = [3307601559289856] }
+duration_secs = 63.0
+color = [204, 182, 30, 255]
+difficulties = ["veteran", "master"]
+
+# -- Adds --
+# Spawns at 97% HP, then 25s after each spawn ability.
+
+[[boss.timer]]
+id = "grobthok_adds_hp"
+name = "Adds"
+trigger = { type = "boss_hp_below", hp_percent = 97.0, selector = [
+  "Grob'thok, Who Feeds the Forge",
+] }
+is_alert = true
+alert_text = "Adds Spawning"
+color = [25, 148, 13, 255]
+difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "grobthok_adds"
+name = "Adds"
+trigger = { type = "ability_cast", abilities = [3315585903493120] }
+duration_secs = 25.0
+color = [25, 148, 13, 255]
+difficulties = ["veteran", "master"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 4: Corruptor Zero
+# ═══════════════════════════════════════════════════════════════════════════════
+# Droid boss with melee and ranged phases.
+# Source: ORBS timer data
+
+[[boss]]
+id = "corruptor_zero"
+name = "Corruptor Zero"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Corruptor Zero"
+ids = [3303534225260544, 3277089476714496, 3303538520227840, 3303530830243840]
+is_boss = true
+is_kill_target = true
+
+[[boss.entities]]
+name = "D-13 Corruption Droid"
+ids = [3282596259692544]
+is_boss = false
+
+[[boss.entities]]
+name = "D-15 Corruption Droid"
+ids = [3282639209365504]
+is_boss = false
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 5: Dread Master Brontes
+# ═══════════════════════════════════════════════════════════════════════════════
+# Complex multi-phase fight with hands, fingers, orbs, and clocks.
+# Source: ORBS timer data
+
+[[boss]]
+id = "brontes"
+name = "Dread Master Brontes"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Dread Master Brontes"
+ids = [3303529930293248, 3275195828551680, 3303525635325952, 3303521340358656]
+is_boss = true
+is_kill_target = true
+
+[[boss.entities]]
+name = "Right Hand of Brontes"
+ids = [3275625527771136]
+is_boss = true
+
+[[boss.entities]]
+name = "Left Hand of Brontes"
+ids = [3277721471811584]
+is_boss = true
+
+[[boss.entities]]
+name = "Finger of Brontes"
+ids = [3275642707640320]
+is_boss = false
+
+[[boss.entities]]
+name = "Energy Sphere"
+ids = [3280057934020608]
+is_boss = false
+
+[[boss.entities]]
+name = "Reach of Brontes"
+ids = [3298281480257536]
+is_boss = true
+
+# ─── Phases ─────────────────────────────────────────────────────────────────────

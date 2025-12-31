@@ -1,0 +1,1105 @@
+//! Challenge editing tab
+//!
+//! CRUD for boss challenge definitions.
+
+use dioxus::prelude::*;
+
+use crate::api;
+use crate::types::{
+    BossListItem, ChallengeColumns, ChallengeCondition, ChallengeListItem, ChallengeMetric,
+    ComparisonOp, EntityFilter, EntitySelector,
+};
+use crate::utils::parse_hex_color;
+
+use super::tabs::EncounterData;
+use super::timers::PhaseSelector;
+
+/// Generate a preview of the ID that will be created (mirrors backend logic)
+fn preview_id(boss_id: &str, name: &str) -> String {
+    let name_part: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect::<String>()
+        .split('_')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("_");
+    format!("{}_{}", boss_id, name_part)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Challenges Tab
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[component]
+pub fn ChallengesTab(
+    boss: BossListItem,
+    challenges: Vec<ChallengeListItem>,
+    encounter_data: EncounterData,
+    on_change: EventHandler<Vec<ChallengeListItem>>,
+    on_status: EventHandler<(String, bool)>,
+) -> Element {
+    let mut expanded_challenge = use_signal(|| None::<String>);
+    let mut show_new_challenge = use_signal(|| false);
+
+    rsx! {
+        div { class: "challenges-tab",
+            // Header
+            div { class: "flex items-center justify-between mb-sm",
+                span { class: "text-sm text-secondary", "{challenges.len()} challenges" }
+                button {
+                    class: "btn btn-success btn-sm",
+                    onclick: move |_| show_new_challenge.set(true),
+                    "+ New Challenge"
+                }
+            }
+
+            // New challenge form
+            if show_new_challenge() {
+                {
+                    let challenges_for_create = challenges.clone();
+                    rsx! {
+                        NewChallengeForm {
+                            boss: boss.clone(),
+                            on_create: move |new_challenge: ChallengeListItem| {
+                                let challenges_clone = challenges_for_create.clone();
+                                spawn(async move {
+                                    if let Some(created) = api::create_challenge(&new_challenge).await {
+                                        let mut current = challenges_clone;
+                                        current.push(created);
+                                        on_change.call(current);
+                                        on_status.call(("Created".to_string(), false));
+                                    } else {
+                                        on_status.call(("Failed to create".to_string(), true));
+                                    }
+                                });
+                                show_new_challenge.set(false);
+                            },
+                            on_cancel: move |_| show_new_challenge.set(false),
+                        }
+                    }
+                }
+            }
+
+            // Challenge list
+            if challenges.is_empty() {
+                div { class: "empty-state text-sm", "No challenges defined" }
+            } else {
+                for challenge in challenges.clone() {
+                    {
+                        let challenge_key = challenge.id.clone();
+                        let is_expanded = expanded_challenge() == Some(challenge_key.clone());
+                        let challenges_for_row = challenges.clone();
+
+                        rsx! {
+                            ChallengeRow {
+                                key: "{challenge_key}",
+                                challenge: challenge.clone(),
+                                expanded: is_expanded,
+                                encounter_data: encounter_data.clone(),
+                                on_toggle: move |_| {
+                                    expanded_challenge.set(if is_expanded { None } else { Some(challenge_key.clone()) });
+                                },
+                                on_change: on_change,
+                                on_status: on_status,
+                                on_collapse: move |_| expanded_challenge.set(None),
+                                all_challenges: challenges_for_row,
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Challenge Row
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[component]
+fn ChallengeRow(
+    challenge: ChallengeListItem,
+    expanded: bool,
+    all_challenges: Vec<ChallengeListItem>,
+    encounter_data: EncounterData,
+    on_toggle: EventHandler<()>,
+    on_change: EventHandler<Vec<ChallengeListItem>>,
+    on_status: EventHandler<(String, bool)>,
+    on_collapse: EventHandler<()>,
+) -> Element {
+    let metric_label = challenge.metric.label();
+    let condition_count = challenge.conditions.len();
+
+    rsx! {
+        div { class: "list-item",
+            // Header row
+            div {
+                class: "list-item-header",
+                onclick: move |_| on_toggle.call(()),
+                span { class: "list-item-expand", if expanded { "▼" } else { "▶" } }
+                span { class: "font-medium", "{challenge.name}" }
+                span { class: "tag", "{metric_label}" }
+                if condition_count > 0 {
+                    span { class: "tag tag-secondary", "{condition_count} conditions" }
+                }
+            }
+
+            // Expanded content
+            if expanded {
+                div { class: "list-item-body",
+                    ChallengeEditForm {
+                        challenge: challenge.clone(),
+                        encounter_data: encounter_data,
+                        on_save: move |updated: ChallengeListItem| {
+                            on_status.call(("Saving...".to_string(), false));
+                            spawn(async move {
+                                if api::update_challenge(&updated).await {
+                                    on_status.call(("Saved".to_string(), false));
+                                } else {
+                                    on_status.call(("Failed to save".to_string(), true));
+                                }
+                            });
+                        },
+                        on_delete: {
+                            let all_challenges = all_challenges.clone();
+                            move |challenge_to_delete: ChallengeListItem| {
+                                let all_challenges = all_challenges.clone();
+                                spawn(async move {
+                                    if api::delete_challenge(
+                                        &challenge_to_delete.id,
+                                        &challenge_to_delete.boss_id,
+                                        &challenge_to_delete.file_path
+                                    ).await {
+                                        let updated: Vec<_> = all_challenges.iter()
+                                            .filter(|c| c.id != challenge_to_delete.id)
+                                            .cloned()
+                                            .collect();
+                                        on_change.call(updated);
+                                        on_collapse.call(());
+                                        on_status.call(("Deleted".to_string(), false));
+                                    } else {
+                                        on_status.call(("Failed to delete".to_string(), true));
+                                    }
+                                });
+                            }
+                        },
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Challenge Edit Form
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[component]
+fn ChallengeEditForm(
+    challenge: ChallengeListItem,
+    encounter_data: EncounterData,
+    on_save: EventHandler<ChallengeListItem>,
+    on_delete: EventHandler<ChallengeListItem>,
+) -> Element {
+    // Clone values needed for closures and display
+    let challenge_id_display = challenge.id.clone();
+    let challenge_for_delete = challenge.clone();
+
+    let mut draft = use_signal(|| challenge.clone());
+    let original = challenge.clone();
+
+    let has_changes = use_memo(move || draft() != original);
+
+    let handle_save = move |_| {
+        let updated = draft();
+        on_save.call(updated);
+    };
+
+    let handle_delete = move |_| {
+        on_delete.call(challenge_for_delete.clone());
+    };
+
+    rsx! {
+        div { class: "challenge-edit-form",
+            // ─── ID (read-only) ─────────────────────────────────────────────
+            div { class: "form-row-hz",
+                label { "Challenge ID" }
+                code { class: "tag-muted text-mono text-xs", "{challenge_id_display}" }
+            }
+
+            // ─── Name ────────────────────────────────────────────────────────
+            div { class: "form-row-hz",
+                label { "Name" }
+                input {
+                    class: "input-inline",
+                    style: "width: 300px;",
+                    value: "{draft().name}",
+                    oninput: move |e| {
+                        let mut d = draft();
+                        d.name = e.value();
+                        draft.set(d);
+                    }
+                }
+            }
+
+            // ─── Display Text ────────────────────────────────────────────────
+            div { class: "form-row-hz",
+                label { "Display Text" }
+                input {
+                    class: "input-inline",
+                    style: "width: 300px;",
+                    placeholder: "(defaults to name)",
+                    value: "{draft().display_text.clone().unwrap_or_default()}",
+                    oninput: move |e| {
+                        let mut d = draft();
+                        d.display_text = if e.value().is_empty() { None } else { Some(e.value()) };
+                        draft.set(d);
+                    }
+                }
+            }
+
+            // ─── Description ─────────────────────────────────────────────────
+            div { class: "form-row-hz",
+                label { "Description" }
+                input {
+                    class: "input-inline",
+                    style: "width: 400px;",
+                    placeholder: "(optional)",
+                    value: "{draft().description.clone().unwrap_or_default()}",
+                    oninput: move |e| {
+                        let mut d = draft();
+                        d.description = if e.value().is_empty() { None } else { Some(e.value()) };
+                        draft.set(d);
+                    }
+                }
+            }
+
+            // ─── Metric ──────────────────────────────────────────────────────
+            div { class: "form-row-hz",
+                label { "Metric" }
+                select {
+                    class: "input-inline",
+                    value: "{draft().metric:?}",
+                    onchange: move |e| {
+                        let mut d = draft();
+                        d.metric = match e.value().as_str() {
+                            "Damage" => ChallengeMetric::Damage,
+                            "Healing" => ChallengeMetric::Healing,
+                            "DamageTaken" => ChallengeMetric::DamageTaken,
+                            "HealingTaken" => ChallengeMetric::HealingTaken,
+                            "AbilityCount" => ChallengeMetric::AbilityCount,
+                            "EffectCount" => ChallengeMetric::EffectCount,
+                            "Deaths" => ChallengeMetric::Deaths,
+                            "Threat" => ChallengeMetric::Threat,
+                            _ => ChallengeMetric::Damage,
+                        };
+                        draft.set(d);
+                    },
+                    for metric in ChallengeMetric::all() {
+                        option {
+                            value: "{metric:?}",
+                            selected: draft().metric == *metric,
+                            "{metric.label()}"
+                        }
+                    }
+                }
+            }
+
+            // ─── Display Settings ────────────────────────────────────────────
+            div { class: "form-row-hz",
+                label { "Enabled" }
+                input {
+                    r#type: "checkbox",
+                    checked: draft().enabled,
+                    onchange: move |e| {
+                        let mut d = draft();
+                        d.enabled = e.checked();
+                        draft.set(d);
+                    }
+                }
+                span { class: "text-muted text-sm", style: "margin-left: 8px;", "(show in overlay)" }
+            }
+
+            div { class: "form-row-hz",
+                label { "Columns" }
+                select {
+                    class: "input-inline",
+                    value: match draft().columns {
+                        ChallengeColumns::TotalPercent => "total_percent",
+                        ChallengeColumns::TotalPerSecond => "total_per_second",
+                        ChallengeColumns::PerSecondPercent => "per_second_percent",
+                        ChallengeColumns::TotalOnly => "total_only",
+                        ChallengeColumns::PerSecondOnly => "per_second_only",
+                        ChallengeColumns::PercentOnly => "percent_only",
+                    },
+                    onchange: move |e| {
+                        let mut d = draft();
+                        d.columns = match e.value().as_str() {
+                            "total_per_second" => ChallengeColumns::TotalPerSecond,
+                            "per_second_percent" => ChallengeColumns::PerSecondPercent,
+                            "total_only" => ChallengeColumns::TotalOnly,
+                            "per_second_only" => ChallengeColumns::PerSecondOnly,
+                            "percent_only" => ChallengeColumns::PercentOnly,
+                            _ => ChallengeColumns::TotalPercent,
+                        };
+                        draft.set(d);
+                    },
+                    option { value: "total_percent", selected: matches!(draft().columns, ChallengeColumns::TotalPercent), "Total + Percent" }
+                    option { value: "total_per_second", selected: matches!(draft().columns, ChallengeColumns::TotalPerSecond), "Total + Per Second" }
+                    option { value: "per_second_percent", selected: matches!(draft().columns, ChallengeColumns::PerSecondPercent), "Per Second + Percent" }
+                    option { value: "total_only", selected: matches!(draft().columns, ChallengeColumns::TotalOnly), "Total Only" }
+                    option { value: "per_second_only", selected: matches!(draft().columns, ChallengeColumns::PerSecondOnly), "Per Second Only" }
+                    option { value: "percent_only", selected: matches!(draft().columns, ChallengeColumns::PercentOnly), "Percent Only" }
+                }
+            }
+
+            {
+                let current_color = draft().color;
+                let color_hex = current_color
+                    .map(|c| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]))
+                    .unwrap_or_else(|| "#4a90d9".to_string()); // Default blue
+
+                rsx! {
+                    div { class: "form-row-hz",
+                        label { "Bar Color" }
+                        div { class: "flex-row gap-sm",
+                            input {
+                                r#type: "color",
+                                class: "color-picker",
+                                value: "{color_hex}",
+                                oninput: move |e| {
+                                    if let Some(color) = parse_hex_color(&e.value()) {
+                                        let mut d = draft();
+                                        d.color = Some([color[0], color[1], color[2], color[3]]);
+                                        draft.set(d);
+                                    }
+                                }
+                            }
+                            if current_color.is_some() {
+                                button {
+                                    class: "btn btn-sm",
+                                    title: "Use default color",
+                                    onclick: move |_| {
+                                        let mut d = draft();
+                                        d.color = None;
+                                        draft.set(d);
+                                    },
+                                    i { class: "fa-solid fa-rotate-left" }
+                                }
+                            }
+                            if current_color.is_none() {
+                                span { class: "text-muted text-sm", "(using default)" }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ─── Conditions ──────────────────────────────────────────────────
+            div { class: "form-row-hz", style: "align-items: flex-start;",
+                label { style: "padding-top: 6px;", "Conditions" }
+                div { class: "flex-col gap-xs",
+                    if draft().conditions.is_empty() {
+                        span { class: "text-sm text-muted", "(matches all events)" }
+                    } else {
+                        for (idx, condition) in draft().conditions.iter().enumerate() {
+                            ChallengeConditionRow {
+                                condition: condition.clone(),
+                                available_phases: encounter_data.phase_ids(),
+                                on_change: move |updated| {
+                                    let mut d = draft();
+                                    d.conditions[idx] = updated;
+                                    draft.set(d);
+                                },
+                                on_remove: move |_| {
+                                    let mut d = draft();
+                                    d.conditions.remove(idx);
+                                    draft.set(d);
+                                },
+                            }
+                        }
+                    }
+                    button {
+                        class: "btn btn-sm",
+                        style: "width: fit-content;",
+                        onclick: move |_| {
+                            let mut d = draft();
+                            d.conditions.push(ChallengeCondition::Phase { phase_ids: vec![] });
+                            draft.set(d);
+                        },
+                        "+ Add Condition"
+                    }
+                }
+            }
+
+            // ─── Actions ─────────────────────────────────────────────────────
+            div { class: "form-actions",
+                button {
+                    class: if has_changes() { "btn btn-success btn-sm" } else { "btn btn-sm" },
+                    disabled: !has_changes(),
+                    onclick: handle_save,
+                    "Save"
+                }
+                button {
+                    class: "btn btn-danger btn-sm",
+                    onclick: handle_delete,
+                    "Delete"
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Challenge Condition Row
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[component]
+fn ChallengeConditionRow(
+    condition: ChallengeCondition,
+    available_phases: Vec<String>,
+    on_change: EventHandler<ChallengeCondition>,
+    on_remove: EventHandler<()>,
+) -> Element {
+    let condition_type = condition.label();
+
+    rsx! {
+        div {
+            class: "flex gap-sm items-start",
+            style: "padding: 8px; background: var(--bg-secondary); border-radius: 4px; margin-bottom: 4px;",
+
+            // Condition type selector
+            select {
+                class: "input-inline",
+                style: "width: 120px; flex-shrink: 0;",
+                value: "{condition_type}",
+                onchange: move |e| {
+                    let new_condition = match e.value().as_str() {
+                        "Phase" => ChallengeCondition::Phase { phase_ids: vec![] },
+                        "Source" => ChallengeCondition::Source { matcher: EntityFilter::Boss },
+                        "Target" => ChallengeCondition::Target { matcher: EntityFilter::Boss },
+                        "Ability" => ChallengeCondition::Ability { ability_ids: vec![] },
+                        "Effect" => ChallengeCondition::Effect { effect_ids: vec![] },
+                        "Counter" => ChallengeCondition::Counter {
+                            counter_id: String::new(),
+                            operator: ComparisonOp::Eq,
+                            value: 0,
+                        },
+                        "Boss HP Range" => ChallengeCondition::BossHpRange {
+                            min_hp: None,
+                            max_hp: None,
+                            npc_id: None,
+                        },
+                        _ => condition.clone(),
+                    };
+                    on_change.call(new_condition);
+                },
+                option { value: "Phase", "Phase" }
+                option { value: "Source", "Source" }
+                option { value: "Target", "Target" }
+                option { value: "Ability", "Ability" }
+                option { value: "Effect", "Effect" }
+                option { value: "Counter", "Counter" }
+                option { value: "Boss HP Range", "Boss HP Range" }
+            }
+
+            // Condition-specific editor (flex-1 to fill space)
+            div { class: "flex-1",
+                {
+                    match &condition {
+                        ChallengeCondition::Phase { phase_ids } => {
+                            rsx! {
+                                PhaseSelector {
+                                    selected: phase_ids.clone(),
+                                    available: available_phases.clone(),
+                                    on_change: move |ids| {
+                                        on_change.call(ChallengeCondition::Phase { phase_ids: ids });
+                                    }
+                                }
+                            }
+                        }
+                        ChallengeCondition::Source { matcher } => {
+                            rsx! {
+                                EntityFilterSelect {
+                                    matcher: matcher.clone(),
+                                    on_change: move |m| {
+                                        on_change.call(ChallengeCondition::Source { matcher: m });
+                                    }
+                                }
+                            }
+                        }
+                        ChallengeCondition::Target { matcher } => {
+                            rsx! {
+                                EntityFilterSelect {
+                                    matcher: matcher.clone(),
+                                    on_change: move |m| {
+                                        on_change.call(ChallengeCondition::Target { matcher: m });
+                                    }
+                                }
+                            }
+                        }
+                        ChallengeCondition::Ability { ability_ids } => {
+                            let ids_str = ability_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
+                            rsx! {
+                                input {
+                                    class: "input-inline text-mono",
+                                    style: "width: 100%;",
+                                    placeholder: "ability_id1, ability_id2, ...",
+                                    value: "{ids_str}",
+                                    oninput: move |e| {
+                                        let ids: Vec<u64> = e.value()
+                                            .split(',')
+                                            .filter_map(|s| s.trim().parse().ok())
+                                            .collect();
+                                        on_change.call(ChallengeCondition::Ability { ability_ids: ids });
+                                    }
+                                }
+                            }
+                        }
+                        ChallengeCondition::Effect { effect_ids } => {
+                            let ids_str = effect_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
+                            rsx! {
+                                input {
+                                    class: "input-inline text-mono",
+                                    style: "width: 100%;",
+                                    placeholder: "effect_id1, effect_id2, ...",
+                                    value: "{ids_str}",
+                                    oninput: move |e| {
+                                        let ids: Vec<u64> = e.value()
+                                            .split(',')
+                                            .filter_map(|s| s.trim().parse().ok())
+                                            .collect();
+                                        on_change.call(ChallengeCondition::Effect { effect_ids: ids });
+                                    }
+                                }
+                            }
+                        }
+                        ChallengeCondition::Counter { counter_id, operator, value } => {
+                            let counter_id_for_select = counter_id.clone();
+                            let counter_id_for_input = counter_id.clone();
+                            let current_op = *operator;
+                            let current_val = *value;
+                            rsx! {
+                                div { class: "flex gap-xs items-center flex-wrap",
+                                    input {
+                                        class: "input-inline text-mono",
+                                        style: "width: 150px;",
+                                        placeholder: "counter_id",
+                                        value: "{counter_id}",
+                                        oninput: move |e| {
+                                            on_change.call(ChallengeCondition::Counter {
+                                                counter_id: e.value(),
+                                                operator: current_op,
+                                                value: current_val,
+                                            });
+                                        }
+                                    }
+                                    select {
+                                        class: "input-inline",
+                                        style: "width: 60px;",
+                                        value: "{current_op:?}",
+                                        onchange: move |e| {
+                                            let op = match e.value().as_str() {
+                                                "Eq" => ComparisonOp::Eq,
+                                                "Lt" => ComparisonOp::Lt,
+                                                "Gt" => ComparisonOp::Gt,
+                                                "Lte" => ComparisonOp::Lte,
+                                                "Gte" => ComparisonOp::Gte,
+                                                "Ne" => ComparisonOp::Ne,
+                                                _ => ComparisonOp::Eq,
+                                            };
+                                            on_change.call(ChallengeCondition::Counter {
+                                                counter_id: counter_id_for_select.clone(),
+                                                operator: op,
+                                                value: current_val,
+                                            });
+                                        },
+                                        for op in ComparisonOp::all() {
+                                            option {
+                                                value: "{op:?}",
+                                                selected: current_op == *op,
+                                                "{op.label()}"
+                                            }
+                                        }
+                                    }
+                                    input {
+                                        r#type: "number",
+                                        min: "0",
+                                        class: "input-inline",
+                                        style: "width: 70px;",
+                                        value: "{current_val}",
+                                        oninput: move |e| {
+                                            if let Ok(v) = e.value().parse::<u32>() {
+                                                on_change.call(ChallengeCondition::Counter {
+                                                    counter_id: counter_id_for_input.clone(),
+                                                    operator: current_op,
+                                                    value: v,
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        ChallengeCondition::BossHpRange { min_hp, max_hp, npc_id } => {
+                            let current_min = *min_hp;
+                            let current_max = *max_hp;
+                            let current_npc = *npc_id;
+                            rsx! {
+                                div { class: "flex gap-xs items-center",
+                                    span { class: "text-sm", "HP:" }
+                                    input {
+                                        r#type: "number",
+                                        min: "0",
+                                        max: "100",
+                                        class: "input-inline",
+                                        style: "width: 70px;",
+                                        placeholder: "min",
+                                        value: "{current_min.map(|v| v.to_string()).unwrap_or_default()}",
+                                        oninput: move |e| {
+                                            let min = e.value().parse().ok();
+                                            on_change.call(ChallengeCondition::BossHpRange {
+                                                min_hp: min,
+                                                max_hp: current_max,
+                                                npc_id: current_npc,
+                                            });
+                                        }
+                                    }
+                                    span { class: "text-sm", "to" }
+                                    input {
+                                        r#type: "number",
+                                        min: "0",
+                                        max: "100",
+                                        class: "input-inline",
+                                        style: "width: 70px;",
+                                        placeholder: "max",
+                                        value: "{current_max.map(|v| v.to_string()).unwrap_or_default()}",
+                                        oninput: move |e| {
+                                            let max = e.value().parse().ok();
+                                            on_change.call(ChallengeCondition::BossHpRange {
+                                                min_hp: current_min,
+                                                max_hp: max,
+                                                npc_id: current_npc,
+                                            });
+                                        }
+                                    }
+                                    span { class: "text-sm", "%" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Remove button (flex-shrink-0 to keep fixed size)
+            button {
+                class: "btn btn-danger btn-xs",
+                style: "flex-shrink: 0;",
+                onclick: move |_| on_remove.call(()),
+                "×"
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Entity Filter Select
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[component]
+fn EntityFilterSelect(
+    matcher: EntityFilter,
+    on_change: EventHandler<EntityFilter>,
+) -> Element {
+    let matcher_type = match &matcher {
+        EntityFilter::Boss => "boss",
+        EntityFilter::NpcExceptBoss => "npc_except_boss",
+        EntityFilter::AnyNpc => "any_npc",
+        EntityFilter::AnyPlayer => "any_player",
+        EntityFilter::LocalPlayer => "local_player",
+        EntityFilter::Any => "any",
+        EntityFilter::Selector(_) => "selector",
+        _ => "any", // Handle other variants
+    };
+
+    rsx! {
+        div { class: "flex-col gap-xs",
+            select {
+                class: "input-inline",
+                value: "{matcher_type}",
+                onchange: move |e| {
+                    let new_matcher = match e.value().as_str() {
+                        "boss" => EntityFilter::Boss,
+                        "npc_except_boss" => EntityFilter::NpcExceptBoss,
+                        "any_npc" => EntityFilter::AnyNpc,
+                        "any_player" => EntityFilter::AnyPlayer,
+                        "local_player" => EntityFilter::LocalPlayer,
+                        "any" => EntityFilter::Any,
+                        "selector" => EntityFilter::Selector(vec![]),
+                        _ => EntityFilter::Any,
+                    };
+                    on_change.call(new_matcher);
+                },
+                option { value: "boss", "Boss" }
+                option { value: "npc_except_boss", "Adds (Non-Boss)" }
+                option { value: "any_npc", "Any NPC" }
+                option { value: "any_player", "Any Player" }
+                option { value: "local_player", "Local Player" }
+                option { value: "any", "Any" }
+                option { value: "selector", "Specific (ID or Name)" }
+            }
+
+            // Chip-based input for selector
+            {
+                match &matcher {
+                    EntityFilter::Selector(selectors) => {
+                        rsx! {
+                            SelectorChipEditor {
+                                selectors: selectors.clone(),
+                                on_change: move |new_sels| on_change.call(EntityFilter::Selector(new_sels))
+                            }
+                        }
+                    }
+                    _ => rsx! {}
+                }
+            }
+        }
+    }
+}
+
+/// Chip editor for NPC IDs with +Add button
+#[component]
+fn NpcIdChipEditor(
+    ids: Vec<i64>,
+    on_change: EventHandler<Vec<i64>>,
+) -> Element {
+    let mut new_input = use_signal(String::new);
+    let ids_for_keydown = ids.clone();
+    let ids_for_click = ids.clone();
+
+    rsx! {
+        div { class: "flex-col gap-xs",
+            // ID chips
+            if !ids.is_empty() {
+                div { class: "flex flex-wrap gap-xs",
+                    for (idx, id) in ids.iter().enumerate() {
+                        {
+                            let ids_clone = ids.clone();
+                            rsx! {
+                                span { class: "chip",
+                                    "{id}"
+                                    button {
+                                        class: "chip-remove",
+                                        onclick: move |_| {
+                                            let mut new_ids = ids_clone.clone();
+                                            new_ids.remove(idx);
+                                            on_change.call(new_ids);
+                                        },
+                                        "×"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Add new ID
+            div { class: "flex gap-xs",
+                input {
+                    r#type: "text",
+                    class: "input-inline text-mono",
+                    style: "width: 120px;",
+                    placeholder: "NPC ID (Enter)",
+                    value: "{new_input}",
+                    oninput: move |e| new_input.set(e.value()),
+                    onkeydown: move |e| {
+                        if e.key() == Key::Enter && !new_input().trim().is_empty() {
+                            if let Ok(id) = new_input().trim().parse::<i64>() {
+                                let mut new_ids = ids_for_keydown.clone();
+                                if !new_ids.contains(&id) {
+                                    new_ids.push(id);
+                                    on_change.call(new_ids);
+                                }
+                                new_input.set(String::new());
+                            }
+                        }
+                    }
+                }
+                button {
+                    class: "btn btn-sm",
+                    onclick: move |_| {
+                        if let Ok(id) = new_input().trim().parse::<i64>() {
+                            let mut new_ids = ids_for_click.clone();
+                            if !new_ids.contains(&id) {
+                                new_ids.push(id);
+                                on_change.call(new_ids);
+                            }
+                            new_input.set(String::new());
+                        }
+                    },
+                    "Add"
+                }
+            }
+        }
+    }
+}
+
+/// Chip editor for entity names with +Add button
+#[component]
+fn NameChipEditor(
+    names: Vec<String>,
+    on_change: EventHandler<Vec<String>>,
+) -> Element {
+    let mut new_input = use_signal(String::new);
+    let names_for_keydown = names.clone();
+    let names_for_click = names.clone();
+
+    rsx! {
+        div { class: "flex-col gap-xs",
+            // Name chips
+            if !names.is_empty() {
+                div { class: "flex flex-wrap gap-xs",
+                    for (idx, name) in names.iter().enumerate() {
+                        {
+                            let names_clone = names.clone();
+                            let display = name.clone();
+                            rsx! {
+                                span { class: "chip",
+                                    "{display}"
+                                    button {
+                                        class: "chip-remove",
+                                        onclick: move |_| {
+                                            let mut new_names = names_clone.clone();
+                                            new_names.remove(idx);
+                                            on_change.call(new_names);
+                                        },
+                                        "×"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Add new name
+            div { class: "flex gap-xs",
+                input {
+                    r#type: "text",
+                    class: "input-inline",
+                    style: "width: 150px;",
+                    placeholder: "Name (Enter)",
+                    value: "{new_input}",
+                    oninput: move |e| new_input.set(e.value()),
+                    onkeydown: move |e| {
+                        if e.key() == Key::Enter && !new_input().trim().is_empty() {
+                            let name = new_input().trim().to_string();
+                            let mut new_names = names_for_keydown.clone();
+                            if !new_names.contains(&name) {
+                                new_names.push(name);
+                                on_change.call(new_names);
+                            }
+                            new_input.set(String::new());
+                        }
+                    }
+                }
+                button {
+                    class: "btn btn-sm",
+                    onclick: move |_| {
+                        if !new_input().trim().is_empty() {
+                            let name = new_input().trim().to_string();
+                            let mut new_names = names_for_click.clone();
+                            if !new_names.contains(&name) {
+                                new_names.push(name);
+                                on_change.call(new_names);
+                            }
+                            new_input.set(String::new());
+                        }
+                    },
+                    "Add"
+                }
+            }
+        }
+    }
+}
+
+/// Unified chip editor for entity selectors (IDs or names)
+#[component]
+fn SelectorChipEditor(
+    selectors: Vec<EntitySelector>,
+    on_change: EventHandler<Vec<EntitySelector>>,
+) -> Element {
+    let mut new_input = use_signal(String::new);
+    let sels_for_keydown = selectors.clone();
+    let sels_for_click = selectors.clone();
+
+    rsx! {
+        div { class: "flex-col gap-xs",
+            // Selector chips
+            if !selectors.is_empty() {
+                div { class: "flex flex-wrap gap-xs",
+                    for (idx, sel) in selectors.iter().enumerate() {
+                        {
+                            let sels_clone = selectors.clone();
+                            let display = sel.display();
+                            rsx! {
+                                span { class: "chip",
+                                    "{display}"
+                                    button {
+                                        class: "chip-remove",
+                                        onclick: move |_| {
+                                            let mut new_sels = sels_clone.clone();
+                                            new_sels.remove(idx);
+                                            on_change.call(new_sels);
+                                        },
+                                        "×"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Add new selector (parses to ID if numeric, name otherwise)
+            div { class: "flex gap-xs",
+                input {
+                    r#type: "text",
+                    class: "input-inline",
+                    style: "width: 150px;",
+                    placeholder: "ID or Name",
+                    value: "{new_input}",
+                    oninput: move |e| new_input.set(e.value()),
+                    onkeydown: move |e| {
+                        if e.key() == Key::Enter && !new_input().trim().is_empty() {
+                            let sel = EntitySelector::from_input(&new_input());
+                            let mut new_sels = sels_for_keydown.clone();
+                            if !new_sels.contains(&sel) {
+                                new_sels.push(sel);
+                                on_change.call(new_sels);
+                            }
+                            new_input.set(String::new());
+                        }
+                    }
+                }
+                button {
+                    class: "btn btn-sm",
+                    onclick: move |_| {
+                        if !new_input().trim().is_empty() {
+                            let sel = EntitySelector::from_input(&new_input());
+                            let mut new_sels = sels_for_click.clone();
+                            if !new_sels.contains(&sel) {
+                                new_sels.push(sel);
+                                on_change.call(new_sels);
+                            }
+                            new_input.set(String::new());
+                        }
+                    },
+                    "Add"
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// New Challenge Form
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[component]
+fn NewChallengeForm(
+    boss: BossListItem,
+    on_create: EventHandler<ChallengeListItem>,
+    on_cancel: EventHandler<()>,
+) -> Element {
+    let mut name = use_signal(|| "New Challenge".to_string());
+    let mut metric = use_signal(|| ChallengeMetric::Damage);
+
+    // Preview the ID that will be generated
+    let boss_id_for_preview = boss.id.clone();
+    let generated_id = use_memo(move || preview_id(&boss_id_for_preview, &name()));
+
+    let handle_create = move |_| {
+        let new_challenge = ChallengeListItem {
+            id: String::new(), // Backend will generate
+            name: name(),
+            display_text: None,
+            description: None,
+            boss_id: boss.id.clone(),
+            boss_name: boss.name.clone(),
+            file_path: boss.file_path.clone(),
+            metric: metric(),
+            conditions: vec![],
+            enabled: true,
+            color: None,
+            columns: ChallengeColumns::TotalPercent,
+        };
+        on_create.call(new_challenge);
+    };
+
+    rsx! {
+        div { class: "new-item-form mb-md",
+            div { class: "form-row-hz",
+                label { "Name" }
+                input {
+                    class: "input-inline",
+                    style: "width: 300px;",
+                    value: "{name}",
+                    oninput: move |e| name.set(e.value())
+                }
+            }
+
+            div { class: "form-row-hz",
+                label { "ID" }
+                code { class: "tag-muted text-mono text-xs", "{generated_id}" }
+                span { class: "text-xs text-muted ml-xs", "(auto-generated)" }
+            }
+
+            div { class: "form-row-hz",
+                label { "Metric" }
+                select {
+                    class: "input-inline",
+                    value: "{metric():?}",
+                    onchange: move |e| {
+                        let m = match e.value().as_str() {
+                            "Damage" => ChallengeMetric::Damage,
+                            "Healing" => ChallengeMetric::Healing,
+                            "DamageTaken" => ChallengeMetric::DamageTaken,
+                            "HealingTaken" => ChallengeMetric::HealingTaken,
+                            "AbilityCount" => ChallengeMetric::AbilityCount,
+                            "EffectCount" => ChallengeMetric::EffectCount,
+                            "Deaths" => ChallengeMetric::Deaths,
+                            "Threat" => ChallengeMetric::Threat,
+                            _ => ChallengeMetric::Damage,
+                        };
+                        metric.set(m);
+                    },
+                    for m in ChallengeMetric::all() {
+                        option {
+                            value: "{m:?}",
+                            selected: metric() == *m,
+                            "{m.label()}"
+                        }
+                    }
+                }
+            }
+
+            div { class: "flex gap-xs mt-sm",
+                button {
+                    class: if name().is_empty() { "btn btn-sm" } else { "btn btn-success btn-sm" },
+                    disabled: name().is_empty(),
+                    onclick: handle_create,
+                    "Create Challenge"
+                }
+                button {
+                    class: "btn btn-sm",
+                    onclick: move |_| on_cancel.call(()),
+                    "Cancel"
+                }
+            }
+        }
+    }
+}

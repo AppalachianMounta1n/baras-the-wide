@@ -9,6 +9,7 @@
 //! - `router` - Routes service updates to overlay threads
 //! - `hotkeys` - Global hotkey registration (Windows/macOS only)
 
+mod audio;
 mod commands;
 #[cfg(not(target_os = "linux"))]
 mod hotkeys;
@@ -17,20 +18,20 @@ mod router;
 pub mod service;
 pub mod state;
 mod tray;
+#[cfg(desktop)]
+mod updater;
 
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
-use router::spawn_overlay_router;
+use audio::create_audio_channel;
 use overlay::{OverlayManager, OverlayState, SharedOverlayState};
+use router::spawn_overlay_router;
 use service::{CombatService, OverlayUpdate, ServiceHandle};
 use tauri::Manager;
 
 /// Auto-show all enabled overlays on startup (if overlays_visible is true)
-fn spawn_auto_show_overlays(
-    overlay_state: SharedOverlayState,
-    service_handle: ServiceHandle,
-) {
+fn spawn_auto_show_overlays(overlay_state: SharedOverlayState, service_handle: ServiceHandle) {
     tauri::async_runtime::spawn(async move {
         // Small delay to let everything initialize
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -39,19 +40,11 @@ fn spawn_auto_show_overlays(
 
         // Only show overlays if global visibility is enabled
         if !config.overlay_settings.overlays_visible {
-            eprintln!("Overlays hidden on startup (overlays_visible=false)");
             return;
         }
 
         // Use OverlayManager to show all enabled overlays
-        match OverlayManager::show_all(&overlay_state, &service_handle).await {
-            Ok(metric_types) => {
-                eprintln!("Auto-showed {} metric overlays on startup", metric_types.len());
-            }
-            Err(e) => {
-                eprintln!("Failed to auto-show overlays on startup: {}", e);
-            }
-        }
+        let _ = OverlayManager::show_all(&overlay_state, &service_handle).await;
     });
 }
 
@@ -61,6 +54,7 @@ pub fn run() {
     let overlay_state = Arc::new(Mutex::new(OverlayState::default()));
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -70,8 +64,12 @@ pub fn run() {
                 // Create channel for overlay updates
                 let (overlay_tx, overlay_rx) = mpsc::channel::<OverlayUpdate>(64);
 
-                // Create and spawn the combat service
-                let (service, handle) = CombatService::new(app.handle().clone(), overlay_tx);
+                // Create channel for audio events
+                let (audio_tx, audio_rx) = create_audio_channel();
+
+                // Create and spawn the combat service (includes audio service)
+                let (service, handle) =
+                    CombatService::new(app.handle().clone(), overlay_tx, audio_tx, audio_rx);
                 tauri::async_runtime::spawn(service.run());
 
                 // Store the service handle for commands
@@ -85,12 +83,18 @@ pub fn run() {
 
                 // Register global hotkeys (not supported on Linux/Wayland)
                 #[cfg(not(target_os = "linux"))]
-                hotkeys::spawn_register_hotkeys(app.handle().clone(), overlay_state.clone(), handle);
+                hotkeys::spawn_register_hotkeys(
+                    app.handle().clone(),
+                    overlay_state.clone(),
+                    handle,
+                );
 
                 // Set up system tray
-                if let Err(e) = tray::setup_tray(app.handle()) {
-                    eprintln!("[TRAY] Failed to set up system tray: {}", e);
-                }
+                let _ = tray::setup_tray(app.handle());
+
+                // Check for updates in background
+                #[cfg(desktop)]
+                updater::spawn_update_check(app.handle().clone());
 
                 Ok(())
             }
@@ -160,7 +164,7 @@ pub fn run() {
             commands::load_profile,
             commands::delete_profile,
             commands::rename_profile,
-            // Timer editor commands
+            // Encounter editor commands
             commands::get_encounter_timers,
             commands::update_encounter_timer,
             commands::create_encounter_timer,
@@ -170,6 +174,30 @@ pub fn run() {
             commands::get_area_index,
             commands::get_timers_for_area,
             commands::get_bosses_for_area,
+            commands::create_boss,
+            commands::create_area,
+            commands::get_phases_for_area,
+            commands::create_phase,
+            commands::update_phase,
+            commands::delete_phase,
+            commands::get_counters_for_area,
+            commands::create_counter,
+            commands::update_counter,
+            commands::delete_counter,
+            commands::get_challenges_for_area,
+            commands::create_challenge,
+            commands::update_challenge,
+            commands::delete_challenge,
+            commands::get_entities_for_area,
+            commands::create_entity,
+            commands::update_entity,
+            commands::delete_entity,
+            // Timer preference commands
+            commands::get_timer_preference,
+            commands::set_timer_enabled,
+            commands::set_timer_audio,
+            commands::set_timer_color,
+            commands::reset_timer_preference,
             // Effect editor commands
             commands::get_effect_definitions,
             commands::update_effect_definition,
@@ -179,6 +207,14 @@ pub fn run() {
             commands::get_effect_files,
             // Parsely upload
             commands::upload_to_parsely,
+            // Audio
+            commands::pick_audio_file,
+            commands::list_bundled_sounds,
+            // Updater
+            #[cfg(desktop)]
+            updater::check_update,
+            #[cfg(desktop)]
+            updater::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

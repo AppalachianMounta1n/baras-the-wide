@@ -1,0 +1,74 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# R-4 Anomaly - Operation
+# ═══════════════════════════════════════════════════════════════════════════════
+# The newest operation. 4 bosses.
+
+[area]
+name = "R4"
+id = 833571547775799
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 1: IP-CPT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "ip_cpt"
+name = "IP-CPT"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "IP-CPT"
+ids = [4494653210492928, 4467247024177152]
+is_boss = true
+is_kill_target = true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 2: Watchdog
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "watchdog"
+name = "Watchdog"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Watchdog"
+ids = [4466177577320448, 4494700455133184]
+is_boss = true
+is_kill_target = true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 3: Lord Kanoth
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "kanoth"
+name = "Lord Kanoth"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Lord Kanoth"
+ids = [4466190462222336, 4494876548792320]
+is_boss = true
+is_kill_target = true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Boss 4: Lady Dominique
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[[boss]]
+id = "dominique"
+name = "Lady Dominique"
+difficulties = ["story", "veteran", "master"]
+
+[[boss.entities]]
+name = "Lady Dominique"
+ids = [4466199052156928, 4488524292161536, 4608014577303552]
+is_boss = true
+is_kill_target = true
+
+[[boss.entities]]
+name = "Watchdog"
+ids = [4488524292161536]
+ids_boss = true
+is_kill_target = true

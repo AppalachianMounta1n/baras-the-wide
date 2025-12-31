@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 
 use crate::api;
 use crate::types::{
-    BossHealthConfig, MetricType, OverlayAppearanceConfig, OverlaySettings,
+    BossHealthConfig, ChallengeLayout, MetricType, OverlayAppearanceConfig, OverlaySettings,
     PersonalOverlayConfig, PersonalStat, RaidOverlaySettings, TimerOverlayConfig,
     MAX_PROFILES,
 };
@@ -28,6 +28,7 @@ pub fn SettingsPanel(
     on_header_mousedown: EventHandler<MouseEvent>,
 ) -> Element {
     // Local draft of settings being edited
+    #[allow(clippy::redundant_closure)]
     let mut draft_settings = use_signal(|| settings());
     let mut has_changes = use_signal(|| false);
     let mut save_status = use_signal(String::new);
@@ -76,6 +77,8 @@ pub fn SettingsPanel(
                 config.overlay_settings.timer_opacity = new_settings.timer_opacity;
                 config.overlay_settings.effects_overlay = new_settings.effects_overlay.clone();
                 config.overlay_settings.effects_opacity = new_settings.effects_opacity;
+                config.overlay_settings.challenge_overlay = new_settings.challenge_overlay.clone();
+                config.overlay_settings.challenge_opacity = new_settings.challenge_opacity;
                 config.overlay_settings.positions = existing_positions;
                 config.overlay_settings.enabled = existing_enabled;
 
@@ -266,6 +269,7 @@ pub fn SettingsPanel(
                         TabButton { label: "Boss Health", tab_key: "boss_health", selected_tab: selected_tab }
                         TabButton { label: "Timers", tab_key: "timers", selected_tab: selected_tab }
                         TabButton { label: "Effects", tab_key: "effects", selected_tab: selected_tab }
+                        TabButton { label: "Challenges", tab_key: "challenges", selected_tab: selected_tab }
                     }
                 }
                 div { class: "tab-group",
@@ -435,6 +439,159 @@ pub fn SettingsPanel(
                             },
                             i { class: "fa-solid fa-rotate-left" }
                             span { " Reset Style" }
+                        }
+                    }
+                }
+            } else if tab == "challenges" {
+                // Challenges Settings (global overlay settings)
+                div { class: "settings-section",
+                    h4 { "Appearance" }
+
+                    OpacitySlider {
+                        label: "Background Opacity",
+                        value: current_settings.challenge_opacity,
+                        on_change: move |val| {
+                            let mut new_settings = draft_settings();
+                            new_settings.challenge_opacity = val;
+                            update_draft(new_settings);
+                        },
+                    }
+
+                    h4 { style: "margin-top: 16px;", "Layout" }
+
+                    {
+                        let challenge_config = current_settings.challenge_overlay.clone();
+                        let font_hex = color_to_hex(&challenge_config.font_color);
+                        let bar_hex = color_to_hex(&challenge_config.default_bar_color);
+
+                        rsx! {
+                            // Layout direction
+                            div { class: "setting-row",
+                                label { "Direction" }
+                                select {
+                                    class: "input-inline",
+                                    value: match challenge_config.layout {
+                                        ChallengeLayout::Vertical => "vertical",
+                                        ChallengeLayout::Horizontal => "horizontal",
+                                    },
+                                    onchange: move |e: Event<FormData>| {
+                                        let mut new_settings = draft_settings();
+                                        new_settings.challenge_overlay.layout = match e.value().as_str() {
+                                            "horizontal" => ChallengeLayout::Horizontal,
+                                            _ => ChallengeLayout::Vertical,
+                                        };
+                                        update_draft(new_settings);
+                                    },
+                                    option { value: "vertical", selected: matches!(challenge_config.layout, ChallengeLayout::Vertical), "Vertical (stacked)" }
+                                    option { value: "horizontal", selected: matches!(challenge_config.layout, ChallengeLayout::Horizontal), "Horizontal (side-by-side)" }
+                                }
+                            }
+
+                            // Max challenges to display
+                            div { class: "setting-row",
+                                label { "Max Displayed" }
+                                select {
+                                    class: "input-inline",
+                                    value: "{challenge_config.max_display}",
+                                    onchange: move |e: Event<FormData>| {
+                                        if let Ok(val) = e.value().parse::<u8>() {
+                                            let mut new_settings = draft_settings();
+                                            new_settings.challenge_overlay.max_display = val.clamp(1, 8);
+                                            update_draft(new_settings);
+                                        }
+                                    },
+                                    for n in 1..=8u8 {
+                                        option { value: "{n}", selected: challenge_config.max_display == n, "{n}" }
+                                    }
+                                }
+                            }
+
+                            h4 { style: "margin-top: 16px;", "Display Options" }
+
+                            // Show footer
+                            div { class: "setting-row",
+                                label { "Show Footer Totals" }
+                                input {
+                                    r#type: "checkbox",
+                                    checked: challenge_config.show_footer,
+                                    onchange: move |e: Event<FormData>| {
+                                        let mut new_settings = draft_settings();
+                                        new_settings.challenge_overlay.show_footer = e.checked();
+                                        update_draft(new_settings);
+                                    }
+                                }
+                            }
+
+                            // Show duration
+                            div { class: "setting-row",
+                                label { "Show Duration" }
+                                input {
+                                    r#type: "checkbox",
+                                    checked: challenge_config.show_duration,
+                                    onchange: move |e: Event<FormData>| {
+                                        let mut new_settings = draft_settings();
+                                        new_settings.challenge_overlay.show_duration = e.checked();
+                                        update_draft(new_settings);
+                                    }
+                                }
+                            }
+
+                            h4 { style: "margin-top: 16px;", "Colors" }
+
+                            // Default bar color
+                            div { class: "setting-row",
+                                label { "Default Bar Color" }
+                                input {
+                                    r#type: "color",
+                                    value: "{bar_hex}",
+                                    class: "color-picker",
+                                    oninput: move |e: Event<FormData>| {
+                                        if let Some(color) = parse_hex_color(&e.value()) {
+                                            let mut new_settings = draft_settings();
+                                            new_settings.challenge_overlay.default_bar_color = color;
+                                            update_draft(new_settings);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Font color
+                            div { class: "setting-row",
+                                label { "Font Color" }
+                                input {
+                                    r#type: "color",
+                                    value: "{font_hex}",
+                                    class: "color-picker",
+                                    oninput: move |e: Event<FormData>| {
+                                        if let Some(color) = parse_hex_color(&e.value()) {
+                                            let mut new_settings = draft_settings();
+                                            new_settings.challenge_overlay.font_color = color;
+                                            update_draft(new_settings);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Reset button
+                            div { class: "setting-row reset-row",
+                                button {
+                                    class: "btn btn-reset",
+                                    onclick: move |_| {
+                                        let mut new_settings = draft_settings();
+                                        new_settings.challenge_overlay = Default::default();
+                                        new_settings.challenge_opacity = 180;
+                                        update_draft(new_settings);
+                                    },
+                                    i { class: "fa-solid fa-rotate-left" }
+                                    span { " Reset to Defaults" }
+                                }
+                            }
+
+                            // Hint about per-challenge settings
+                            p { class: "text-muted text-sm", style: "margin-top: 12px;",
+                                i { class: "fa-solid fa-info-circle" }
+                                " Per-challenge settings (columns, color, enabled) are configured in the Encounter Editor."
+                            }
                         }
                     }
                 }

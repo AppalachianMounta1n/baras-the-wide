@@ -14,14 +14,18 @@
 use std::thread::{self, JoinHandle};
 use tokio::sync::mpsc::{self, Sender};
 
-use baras_core::context::{BossHealthConfig, OverlayAppearanceConfig, OverlayPositionConfig, PersonalOverlayConfig, TimerOverlayConfig};
+use baras_core::context::{
+    BossHealthConfig, ChallengeOverlayConfig, OverlayAppearanceConfig, OverlayPositionConfig,
+    PersonalOverlayConfig, TimerOverlayConfig,
+};
 use baras_overlay::{
-    BossHealthOverlay, EffectsOverlay, MetricOverlay, Overlay, OverlayConfig, PersonalOverlay,
-    RaidGridLayout, RaidOverlay, RaidOverlayConfig, RaidRegistryAction, TimerOverlay,
+    BossHealthOverlay, ChallengeOverlay, EffectsOverlay, MetricOverlay, Overlay, OverlayConfig,
+    PersonalOverlay, RaidGridLayout, RaidOverlay, RaidOverlayConfig, RaidRegistryAction,
+    TimerOverlay,
 };
 
 use super::state::{OverlayCommand, OverlayHandle, PositionEvent};
-use super::types::{OverlayType, MetricType};
+use super::types::{MetricType, OverlayType};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Generic Spawn Function
@@ -51,7 +55,6 @@ where
     F: FnOnce() -> Result<O, String> + Send + 'static,
 {
     let (tx, mut rx) = mpsc::channel::<OverlayCommand>(32);
-    let kind_name = format!("{:?}", kind);
 
     // Use a oneshot channel to get creation result back from spawned thread
     let (confirm_tx, confirm_rx) = std::sync::mpsc::channel::<Result<(), String>>();
@@ -64,7 +67,6 @@ where
                 o
             }
             Err(e) => {
-                eprintln!("[OVERLAY] {}: Failed to create: {}", kind_name, e);
                 let _ = confirm_tx.send(Err(e));
                 return;
             }
@@ -87,8 +89,9 @@ where
                         needs_render = true;
                     }
                     OverlayCommand::UpdateData(data) => {
-                        overlay.update_data(data);
-                        needs_render = true;
+                        if overlay.update_data(data) {
+                            needs_render = true;
+                        }
                     }
                     OverlayCommand::UpdateConfig(config) => {
                         overlay.update_config(config);
@@ -156,7 +159,9 @@ where
             }
 
             // Sleep longer when locked (no interaction), shorter when interactive
-            let sleep_ms = if is_interactive { 16 } else { 50 };
+            // 100ms = 10 polls/sec when locked (smooth countdowns, visual-change detection skips redundant renders)
+            // 16ms = 60 FPS when interactive (for responsive dragging)
+            let sleep_ms = if is_interactive { 16 } else { 100 };
             thread::sleep(std::time::Duration::from_millis(sleep_ms));
         }
     });
@@ -211,7 +216,12 @@ pub fn create_metric_overlay(
 
     let (tx, handle) = spawn_overlay_with_factory(factory, kind, None)?;
 
-    Ok(OverlayHandle { tx, handle, kind, registry_action_rx: None })
+    Ok(OverlayHandle {
+        tx,
+        handle,
+        kind,
+        registry_action_rx: None,
+    })
 }
 
 /// Create and spawn the personal overlay
@@ -248,7 +258,12 @@ pub fn create_personal_overlay(
 
     let (tx, handle) = spawn_overlay_with_factory(factory, kind, None)?;
 
-    Ok(OverlayHandle { tx, handle, kind, registry_action_rx: None })
+    Ok(OverlayHandle {
+        tx,
+        handle,
+        kind,
+        registry_action_rx: None,
+    })
 }
 
 /// Create and spawn the raid frames overlay (starts with empty frames)
@@ -283,7 +298,12 @@ pub fn create_raid_overlay(
 
     let (tx, handle) = spawn_overlay_with_factory(factory, kind, Some(registry_tx))?;
 
-    Ok(OverlayHandle { tx, handle, kind, registry_action_rx: Some(registry_rx) })
+    Ok(OverlayHandle {
+        tx,
+        handle,
+        kind,
+        registry_action_rx: Some(registry_rx),
+    })
 }
 
 /// Create and spawn the boss health bar overlay
@@ -311,7 +331,12 @@ pub fn create_boss_health_overlay(
 
     let (tx, handle) = spawn_overlay_with_factory(factory, kind, None)?;
 
-    Ok(OverlayHandle { tx, handle, kind, registry_action_rx: None })
+    Ok(OverlayHandle {
+        tx,
+        handle,
+        kind,
+        registry_action_rx: None,
+    })
 }
 
 /// Create and spawn the timer countdown overlay
@@ -339,7 +364,12 @@ pub fn create_timer_overlay(
 
     let (tx, handle) = spawn_overlay_with_factory(factory, kind, None)?;
 
-    Ok(OverlayHandle { tx, handle, kind, registry_action_rx: None })
+    Ok(OverlayHandle {
+        tx,
+        handle,
+        kind,
+        registry_action_rx: None,
+    })
 }
 
 /// Create and spawn the effects countdown overlay
@@ -367,5 +397,43 @@ pub fn create_effects_overlay(
 
     let (tx, handle) = spawn_overlay_with_factory(factory, kind, None)?;
 
-    Ok(OverlayHandle { tx, handle, kind, registry_action_rx: None })
+    Ok(OverlayHandle {
+        tx,
+        handle,
+        kind,
+        registry_action_rx: None,
+    })
+}
+
+/// Create and spawn the challenges overlay
+pub fn create_challenges_overlay(
+    position: OverlayPositionConfig,
+    challenge_config: ChallengeOverlayConfig,
+    background_alpha: u8,
+) -> Result<OverlayHandle, String> {
+    let config = OverlayConfig {
+        x: position.x,
+        y: position.y,
+        width: position.width,
+        height: position.height,
+        namespace: "baras-challenges".to_string(),
+        click_through: true,
+        target_monitor_id: position.monitor_id.clone(),
+    };
+
+    let kind = OverlayType::Challenges;
+
+    let factory = move || {
+        ChallengeOverlay::new(config, challenge_config, background_alpha)
+            .map_err(|e| format!("Failed to create challenges overlay: {}", e))
+    };
+
+    let (tx, handle) = spawn_overlay_with_factory(factory, kind, None)?;
+
+    Ok(OverlayHandle {
+        tx,
+        handle,
+        kind,
+        registry_action_rx: None,
+    })
 }

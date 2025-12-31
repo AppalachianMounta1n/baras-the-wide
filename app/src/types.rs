@@ -10,10 +10,20 @@ use serde::{Deserialize, Serialize};
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub use baras_types::{
-    AppConfig, BossHealthConfig, Color, OverlayAppearanceConfig,
-    OverlaySettings, PersonalOverlayConfig, PersonalStat, RaidOverlaySettings,
-    TimerOverlayConfig, MAX_PROFILES,
+    // Config types
+    AppConfig, BossHealthConfig, ChallengeColumns, ChallengeLayout, Color, EntityFilter,
+    OverlayAppearanceConfig, OverlaySettings, PersonalOverlayConfig, PersonalStat,
+    RaidOverlaySettings, TimerOverlayConfig, MAX_PROFILES,
+    // Selectors (unified ID-or-Name matching)
+    AbilitySelector, EffectSelector, EntitySelector,
+    // Trigger type (shared across timers, phases, counters)
+    Trigger,
 };
+
+// Type aliases for context-specific trigger usage
+pub type TimerTrigger = Trigger;
+pub type PhaseTrigger = Trigger;
+pub type CounterTrigger = Trigger;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Frontend-Only Types (mirror backend structures)
@@ -46,6 +56,8 @@ pub struct OverlayStatus {
     pub timers_enabled: bool,
     pub effects_running: bool,
     pub effects_enabled: bool,
+    pub challenges_running: bool,
+    pub challenges_enabled: bool,
     pub overlays_visible: bool,
     pub move_mode: bool,
     pub rearrange_mode: bool,
@@ -60,6 +72,14 @@ pub struct LogFileInfo {
     pub date: String,
     pub is_empty: bool,
     pub file_size: u64,
+}
+
+/// Update availability info from backend
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UpdateInfo {
+    pub version: String,
+    pub notes: Option<String>,
+    pub date: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,6 +158,35 @@ pub enum OverlayType {
     BossHealth,
     Timers,
     Effects,
+    Challenges,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Audio Configuration (shared across timers, effects, alerts)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Audio configuration shared by timers, effects, and alerts
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AudioConfig {
+    /// Master toggle for audio on this item
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Audio file to play (relative to sounds directory)
+    #[serde(default)]
+    pub file: Option<String>,
+
+    /// Seconds before expiration to play audio (0 = on expiration)
+    #[serde(default)]
+    pub offset: u8,
+
+    /// Start countdown audio at N seconds remaining (0 = disabled)
+    #[serde(default)]
+    pub countdown_start: u8,
+
+    /// Voice pack for countdown (None = default)
+    #[serde(default)]
+    pub countdown_voice: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -157,6 +206,7 @@ pub struct TimerListItem {
 
     // Timer data
     pub name: String,
+    pub display_text: Option<String>,
     pub enabled: bool,
     pub duration_secs: f32,
     pub color: [u8; 4],
@@ -166,82 +216,32 @@ pub struct TimerListItem {
     // Trigger info
     pub trigger: TimerTrigger,
 
-    // Optional fields
+    // Entity filters (from trigger)
+    pub source: EntityFilter,
+    pub target: EntityFilter,
+
+    // Counter guard condition
+    pub counter_condition: Option<CounterCondition>,
+
+    // Alert fields
+    pub is_alert: bool,
+    pub alert_text: Option<String>,
+
+    // Cancel trigger
+    pub cancel_trigger: Option<TimerTrigger>,
+    pub cancel_source: EntityFilter,
+    pub cancel_target: EntityFilter,
+
+    // Behavior
     pub can_be_refreshed: bool,
     pub repeats: u8,
     pub chains_to: Option<String>,
     pub alert_at_secs: Option<f32>,
     pub show_on_raid_frames: bool,
-}
+    pub show_at_secs: f32,
 
-/// Timer trigger types (mirrors backend BossTimerTrigger)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TimerTrigger {
-    CombatStart,
-    AbilityCast {
-        #[serde(default)]
-        ability_ids: Vec<u64>,
-    },
-    EffectApplied {
-        #[serde(default)]
-        effect_ids: Vec<u64>,
-    },
-    EffectRemoved {
-        #[serde(default)]
-        effect_ids: Vec<u64>,
-    },
-    TimerExpires {
-        timer_id: String,
-    },
-    PhaseEntered {
-        phase_id: String,
-    },
-    BossHpBelow {
-        hp_percent: f32,
-        #[serde(default)]
-        npc_id: Option<i64>,
-        #[serde(default)]
-        boss_name: Option<String>,
-    },
-    AllOf {
-        conditions: Vec<TimerTrigger>,
-    },
-    AnyOf {
-        conditions: Vec<TimerTrigger>,
-    },
-}
-
-impl TimerTrigger {
-    /// Human-readable label for the trigger type
-    pub fn label(&self) -> &'static str {
-        match self {
-            TimerTrigger::CombatStart => "Combat Start",
-            TimerTrigger::AbilityCast { .. } => "Ability Cast",
-            TimerTrigger::EffectApplied { .. } => "Effect Applied",
-            TimerTrigger::EffectRemoved { .. } => "Effect Removed",
-            TimerTrigger::TimerExpires { .. } => "Timer Expires",
-            TimerTrigger::PhaseEntered { .. } => "Phase Entered",
-            TimerTrigger::BossHpBelow { .. } => "Boss HP Below",
-            TimerTrigger::AllOf { .. } => "All Of (AND)",
-            TimerTrigger::AnyOf { .. } => "Any Of (OR)",
-        }
-    }
-
-    /// Machine-readable type name for the trigger (matches serde tag)
-    pub fn type_name(&self) -> &'static str {
-        match self {
-            TimerTrigger::CombatStart => "combat_start",
-            TimerTrigger::AbilityCast { .. } => "ability_cast",
-            TimerTrigger::EffectApplied { .. } => "effect_applied",
-            TimerTrigger::EffectRemoved { .. } => "effect_removed",
-            TimerTrigger::TimerExpires { .. } => "timer_expires",
-            TimerTrigger::PhaseEntered { .. } => "phase_entered",
-            TimerTrigger::BossHpBelow { .. } => "boss_hp_below",
-            TimerTrigger::AllOf { .. } => "all_of",
-            TimerTrigger::AnyOf { .. } => "any_of",
-        }
-    }
+    // Audio
+    pub audio: AudioConfig,
 }
 
 /// Minimal boss info for the "New Timer" dropdown
@@ -310,72 +310,27 @@ impl EffectCategory {
     }
 }
 
-/// Entity filter for source/target matching
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+/// When the effect tracking should start
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum EntityFilter {
+pub enum EffectTriggerMode {
+    /// Track starts when effect is applied (default)
     #[default]
-    LocalPlayer,
-    LocalCompanion,
-    LocalPlayerOrCompanion,
-    OtherPlayers,
-    OtherCompanions,
-    AnyPlayer,
-    AnyCompanion,
-    AnyPlayerOrCompanion,
-    GroupMembers,
-    GroupMembersExceptLocal,
-    Boss,
-    NpcExceptBoss,
-    AnyNpc,
-    Specific(String),
-    Any,
+    EffectApplied,
+    /// Track starts when effect is removed
+    EffectRemoved,
 }
 
-impl EntityFilter {
+impl EffectTriggerMode {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::LocalPlayer => "Local Player",
-            Self::LocalCompanion => "Local Companion",
-            Self::LocalPlayerOrCompanion => "Local Player or Companion",
-            Self::OtherPlayers => "Other Players",
-            Self::OtherCompanions => "Other Companions",
-            Self::AnyPlayer => "Any Player",
-            Self::AnyCompanion => "Any Companion",
-            Self::AnyPlayerOrCompanion => "Any Player or Companion",
-            Self::GroupMembers => "Group Members",
-            Self::GroupMembersExceptLocal => "Group (Except Local)",
-            Self::Boss => "Boss",
-            Self::NpcExceptBoss => "NPC (Non-Boss)",
-            Self::AnyNpc => "Any NPC",
-            Self::Specific(_) => "Specific",
-            Self::Any => "Any",
+            Self::EffectApplied => "Effect Applied",
+            Self::EffectRemoved => "Effect Removed",
         }
     }
 
-    /// Common filters for source field
-    pub fn source_options() -> &'static [EntityFilter] {
-        &[
-            Self::LocalPlayer,
-            Self::OtherPlayers,
-            Self::AnyPlayer,
-            Self::Boss,
-            Self::AnyNpc,
-            Self::Any,
-        ]
-    }
-
-    /// Common filters for target field
-    pub fn target_options() -> &'static [EntityFilter] {
-        &[
-            Self::LocalPlayer,
-            Self::GroupMembers,
-            Self::GroupMembersExceptLocal,
-            Self::AnyPlayer,
-            Self::Boss,
-            Self::AnyNpc,
-            Self::Any,
-        ]
+    pub fn all() -> &'static [EffectTriggerMode] {
+        &[Self::EffectApplied, Self::EffectRemoved]
     }
 }
 
@@ -385,15 +340,18 @@ pub struct EffectListItem {
     // Identity
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub display_text: Option<String>,
     pub file_path: String,
 
     // Core
     pub enabled: bool,
     pub category: EffectCategory,
+    pub trigger: EffectTriggerMode,
 
     // Matching
-    pub effect_ids: Vec<u64>,
-    pub refresh_abilities: Vec<u64>,
+    pub effects: Vec<EffectSelector>,
+    pub refresh_abilities: Vec<AbilitySelector>,
 
     // Filtering
     pub source: EntityFilter,
@@ -408,6 +366,7 @@ pub struct EffectListItem {
     pub color: Option<[u8; 4]>,
     pub show_on_raid_frames: bool,
     pub show_on_effects_overlay: bool,
+    pub show_at_secs: f32,
 
     // Behavior (advanced)
     pub persist_past_death: bool,
@@ -423,4 +382,272 @@ pub struct EffectListItem {
     // Alerts (advanced)
     pub alert_near_expiration: bool,
     pub alert_threshold_secs: f32,
+
+    // Audio
+    #[serde(default)]
+    pub audio: AudioConfig,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Encounter Editor Types (Phases, Counters, Challenges, Entities)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Comparison operators for counter conditions
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComparisonOp {
+    #[default]
+    Eq,
+    Lt,
+    Gt,
+    Lte,
+    Gte,
+    Ne,
+}
+
+impl ComparisonOp {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Eq => "=",
+            Self::Lt => "<",
+            Self::Gt => ">",
+            Self::Lte => "<=",
+            Self::Gte => ">=",
+            Self::Ne => "!=",
+        }
+    }
+
+    pub fn all() -> &'static [ComparisonOp] {
+        &[Self::Eq, Self::Lt, Self::Gt, Self::Lte, Self::Gte, Self::Ne]
+    }
+}
+
+/// Counter condition for timer/phase guards
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CounterCondition {
+    pub counter_id: String,
+    #[serde(default)]
+    pub operator: ComparisonOp,
+    pub value: u32,
+}
+
+/// Phase list item for the encounter editor
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhaseListItem {
+    pub id: String,
+    pub name: String,
+    /// Optional in-game display text (defaults to name if not set)
+    #[serde(default)]
+    pub display_text: Option<String>,
+    pub boss_id: String,
+    pub boss_name: String,
+    pub file_path: String,
+    pub start_trigger: PhaseTrigger,
+    #[serde(default)]
+    pub end_trigger: Option<PhaseTrigger>,
+    #[serde(default)]
+    pub preceded_by: Option<String>,
+    #[serde(default)]
+    pub counter_condition: Option<CounterCondition>,
+    #[serde(default)]
+    pub resets_counters: Vec<String>,
+}
+
+/// Counter list item for the encounter editor
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CounterListItem {
+    pub id: String,
+    /// Display name (used for ID generation)
+    pub name: String,
+    /// Optional in-game display text (defaults to name if not set)
+    #[serde(default)]
+    pub display_text: Option<String>,
+    pub boss_id: String,
+    pub boss_name: String,
+    pub file_path: String,
+    pub increment_on: CounterTrigger,
+    #[serde(default)]
+    pub decrement_on: Option<CounterTrigger>,
+    #[serde(default)]
+    pub reset_on: CounterTrigger,
+    #[serde(default)]
+    pub initial_value: u32,
+    #[serde(default)]
+    pub decrement: bool,
+    #[serde(default)]
+    pub set_value: Option<u32>,
+}
+
+/// Challenge metric types
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChallengeMetric {
+    Damage,
+    Healing,
+    EffectiveHealing,
+    DamageTaken,
+    HealingTaken,
+    AbilityCount,
+    EffectCount,
+    Deaths,
+    Threat,
+}
+
+impl ChallengeMetric {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Damage => "Damage",
+            Self::Healing => "Healing",
+            Self::EffectiveHealing => "Effective Healing",
+            Self::DamageTaken => "Damage Taken",
+            Self::HealingTaken => "Healing Taken",
+            Self::AbilityCount => "Ability Count",
+            Self::EffectCount => "Effect Count",
+            Self::Deaths => "Deaths",
+            Self::Threat => "Threat",
+        }
+    }
+
+    pub fn all() -> &'static [ChallengeMetric] {
+        &[
+            Self::Damage,
+            Self::Healing,
+            Self::EffectiveHealing,
+            Self::DamageTaken,
+            Self::HealingTaken,
+            Self::AbilityCount,
+            Self::EffectCount,
+            Self::Deaths,
+            Self::Threat,
+        ]
+    }
+}
+
+/// Challenge condition types
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ChallengeCondition {
+    Phase {
+        phase_ids: Vec<String>,
+    },
+    Source {
+        #[serde(rename = "match")]
+        matcher: EntityFilter,
+    },
+    Target {
+        #[serde(rename = "match")]
+        matcher: EntityFilter,
+    },
+    Ability {
+        ability_ids: Vec<u64>,
+    },
+    Effect {
+        effect_ids: Vec<u64>,
+    },
+    Counter {
+        counter_id: String,
+        operator: ComparisonOp,
+        value: u32,
+    },
+    BossHpRange {
+        #[serde(default)]
+        min_hp: Option<f32>,
+        #[serde(default)]
+        max_hp: Option<f32>,
+        #[serde(default)]
+        npc_id: Option<i64>,
+    },
+}
+
+impl ChallengeCondition {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Phase { .. } => "Phase",
+            Self::Source { .. } => "Source",
+            Self::Target { .. } => "Target",
+            Self::Ability { .. } => "Ability",
+            Self::Effect { .. } => "Effect",
+            Self::Counter { .. } => "Counter",
+            Self::BossHpRange { .. } => "Boss HP Range",
+        }
+    }
+}
+
+/// Challenge list item for the encounter editor
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChallengeListItem {
+    pub id: String,
+    pub name: String,
+    /// Optional in-game display text (defaults to name if not set)
+    #[serde(default)]
+    pub display_text: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub boss_id: String,
+    pub boss_name: String,
+    pub file_path: String,
+    pub metric: ChallengeMetric,
+    #[serde(default)]
+    pub conditions: Vec<ChallengeCondition>,
+    /// Whether this challenge is enabled for overlay display
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    /// Bar color [r, g, b, a] (None = use overlay default)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 4]>,
+    /// Which columns to display for this challenge
+    #[serde(default)]
+    pub columns: ChallengeColumns,
+}
+
+fn default_enabled() -> bool { true }
+
+/// Entity list item for the encounter editor
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntityListItem {
+    pub name: String,
+    pub boss_id: String,
+    pub boss_name: String,
+    pub file_path: String,
+    #[serde(default)]
+    pub ids: Vec<i64>,
+    #[serde(default)]
+    pub is_boss: bool,
+    #[serde(default)]
+    pub triggers_encounter: bool,
+    #[serde(default)]
+    pub is_kill_target: bool,
+    #[serde(default)]
+    pub show_on_hp_overlay: bool,
+}
+
+/// Boss item for full editing
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BossEditItem {
+    pub id: String,
+    pub name: String,
+    pub area_name: String,
+    pub area_id: i64,
+    pub file_path: String,
+    #[serde(default)]
+    pub difficulties: Vec<String>,
+}
+
+/// Request to create a new area
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewAreaRequest {
+    pub name: String,
+    pub area_id: i64,
+    #[serde(default = "default_area_type")]
+    pub area_type: String,
+}
+
+fn default_area_type() -> String {
+    "operation".to_string()
 }

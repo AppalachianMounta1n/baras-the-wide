@@ -1,0 +1,191 @@
+# Dread Palace Boss Definitions
+# Test fixture for challenge system validation
+
+[area]
+name = "Dread Palace"
+area_id = 833575842743088  # Placeholder - would need real ID
+category = "operations"
+
+[[boss]]
+id = "bestia"
+name = "Dread Master Bestia"
+area_name = "Dread Palace"
+
+# ─── Entity Roster ─────────────────────────────────────────────────────────
+# Define all NPCs once with IDs across difficulties, reference by name in triggers
+
+[[boss.entities]]
+name = "Dread Master Bestia"
+ids = [3273941900591104]  # TODO: Add SM16/HM16 IDs when available
+is_boss = true
+is_kill_target = true
+
+[[boss.entities]]
+name = "Dread Larva"
+ids = [3292079547482112]  # Verified from SM8 log
+is_boss = false
+
+[[boss.entities]]
+name = "Dread Monster"
+ids = [3291675820556288]  # Verified from SM8 log
+is_boss = false
+
+[[boss.entities]]
+name = "Dread Tentacle"
+ids = [3292083842449408]  # Verified from SM8 log
+is_boss = false
+
+# ─── Phases ────────────────────────────────────────────────────────────────
+
+[[boss.phase]]
+id = "monsters"
+name = "Monsters"
+trigger = { type = "combat_start" }
+
+[[boss.phase]]
+id = "bestia"
+name = "Bestia"
+# Transition when 4 monsters die OR 2 minutes elapse
+trigger = { type = "any_of", conditions = [
+    { type = "counter_reaches", counter_id = "monster_deaths", value = 4 },
+    { type = "time_elapsed", secs = 120.0 }
+]}
+
+[[boss.phase]]
+id = "burn"
+name = "Bestia and Monsters"
+trigger = { type = "boss_hp_below", hp_percent = 50.0, selector = [3273941900591104] }
+
+# ─── Counters ──────────────────────────────────────────────────────────────
+
+[[boss.counter]]
+id = "larva_spawns"
+name = "Larva Spawns"
+increment_on = { type = "ability_cast", abilities = [3292079547482112] }
+
+[[boss.counter]]
+id = "monster_spawns"
+name = "Monster Spawns"
+increment_on = { type = "ability_cast", abilities = [3291675820556288] }
+
+[[boss.counter]]
+id = "monster_deaths"
+name = "Monster Deaths"
+increment_on = { type = "entity_death", selector = ["Dread Monster"] }
+
+[[boss.counter]]
+id = "dread_scream_casts"
+name = "Dread Scream Casts"
+increment_on = { type = "ability_cast", abilities = [3302391763959808] }
+
+# ─── Challenges ────────────────────────────────────────────────────────────
+
+# Track all boss damage
+[[boss.challenge]]
+id = "boss_damage"
+name = "Boss Damage"
+description = "Total damage dealt to Dread Master Bestia"
+metric = "damage"
+conditions = [
+    { type = "target", match = "boss" }
+]
+
+# Track add damage (Dread Larva + Dread Monster)
+[[boss.challenge]]
+id = "add_damage"
+name = "Add Damage"
+description = "Total damage dealt to Dread Larva and Dread Monster adds"
+metric = "damage"
+conditions = [
+    { type = "target", match = { selector = [3292079547482112, 3291675820556288] } }
+]
+
+# Track damage during burn phase
+[[boss.challenge]]
+id = "burn_phase_dps"
+name = "Burn Phase DPS"
+description = "Damage dealt to boss during burn phase (below 30% HP)"
+metric = "damage"
+conditions = [
+    { type = "phase", phase_ids = ["burn"] },
+    { type = "target", match = "boss" }
+]
+
+# Track player damage taken from boss
+[[boss.challenge]]
+id = "boss_damage_taken"
+name = "Damage Taken from Boss"
+description = "Damage taken from Bestia's abilities"
+metric = "damage_taken"
+conditions = [
+    { type = "source", match = "boss" },
+    { type = "target", match = "any_player" }
+]
+
+# Track local player's contribution
+[[boss.challenge]]
+id = "local_player_boss_damage"
+name = "Your Boss Damage"
+description = "Your personal damage to the boss"
+metric = "damage"
+conditions = [
+    { type = "source", match = "local_player" },
+    { type = "target", match = "boss" }
+]
+
+# ─── Timers ───────────────────────────────────────────────────────────────────
+
+# Soft enrage timer - starts on combat
+[[boss.timer]]
+id = "soft_enrage"
+name = "Soft Enrage"
+trigger = { type = "combat_start" }
+duration_secs = 495.0
+color = [224, 31, 24, 255]
+
+# Add spawn chain - A1 starts on combat, then chains
+[[boss.timer]]
+id = "a1_tentacle"
+name = "A1: Tentacle"
+trigger = { type = "combat_start" }
+duration_secs = 15.0
+color = [32, 72, 219, 255]
+
+[[boss.timer]]
+id = "a2_monster"
+name = "A2: Monster"
+trigger = { type = "timer_expires", timer_id = "a1_tentacle" }
+duration_secs = 15.0
+color = [32, 72, 219, 255]
+
+[[boss.timer]]
+id = "a3_larva"
+name = "A3: Larva"
+trigger = { type = "timer_expires", timer_id = "a2_monster" }
+duration_secs = 15.0
+color = [32, 72, 219, 255]
+
+# Ability-based timers - refresh on cast
+[[boss.timer]]
+id = "swelling_despair"
+name = "Swelling Despair"
+trigger = { type = "ability_cast", abilities = [3294098182111232] }
+duration_secs = 24.0
+color = [98, 21, 163, 255]
+can_be_refreshed = true
+
+[[boss.timer]]
+id = "dread_strike"
+name = "Dread Strike"
+trigger = { type = "ability_cast", abilities = [3294841211453440] }
+duration_secs = 24.0
+color = [204, 22, 133, 255]
+can_be_refreshed = true
+
+[[boss.timer]]
+id = "combusting_seed"
+name = "Combusting Seed"
+trigger = { type = "ability_cast", abilities = [3294102477078528] }
+duration_secs = 24.0
+color = [224, 97, 24, 255]
+can_be_refreshed = true

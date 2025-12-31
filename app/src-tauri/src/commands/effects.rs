@@ -8,10 +8,15 @@
 //! - All edits are made to the user config copy, never the bundled defaults
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, State};
 
-use baras_core::effects::{DefinitionConfig, EffectCategory, EffectDefinition, EntityFilter};
+use baras_core::audio::AudioConfig;
+use baras_core::effects::{
+    DefinitionConfig, EffectCategory, EffectDefinition, EffectSelector, EffectTriggerMode,
+    EntityFilter,
+};
+use baras_types::AbilitySelector;
 
 use crate::service::ServiceHandle;
 
@@ -25,13 +30,15 @@ pub struct EffectListItem {
     // Identity
     pub id: String,
     pub name: String,
+    pub display_text: Option<String>,
     pub file_path: String,
 
     // Effect data
     pub enabled: bool,
     pub category: EffectCategory,
-    pub effect_ids: Vec<u64>,
-    pub refresh_abilities: Vec<u64>,
+    pub trigger: EffectTriggerMode,
+    pub effects: Vec<EffectSelector>,
+    pub refresh_abilities: Vec<AbilitySelector>,
     pub source: EntityFilter,
     pub target: EntityFilter,
     pub duration_secs: Option<f32>,
@@ -40,6 +47,7 @@ pub struct EffectListItem {
     pub color: Option<[u8; 4]>,
     pub show_on_raid_frames: bool,
     pub show_on_effects_overlay: bool,
+    pub show_at_secs: f32,
 
     // Behavior
     pub persist_past_death: bool,
@@ -55,17 +63,22 @@ pub struct EffectListItem {
     // Alerts
     pub alert_near_expiration: bool,
     pub alert_threshold_secs: f32,
+
+    // Audio
+    pub audio: AudioConfig,
 }
 
 impl EffectListItem {
-    fn from_definition(def: &EffectDefinition, file_path: &PathBuf) -> Self {
+    fn from_definition(def: &EffectDefinition, file_path: &Path) -> Self {
         Self {
             id: def.id.clone(),
             name: def.name.clone(),
+            display_text: def.display_text.clone(),
             file_path: file_path.to_string_lossy().to_string(),
             enabled: def.enabled,
             category: def.category,
-            effect_ids: def.effect_ids.clone(),
+            trigger: def.trigger,
+            effects: def.effects.clone(),
             refresh_abilities: def.refresh_abilities.clone(),
             source: def.source.clone(),
             target: def.target.clone(),
@@ -75,6 +88,7 @@ impl EffectListItem {
             color: def.color,
             show_on_raid_frames: def.show_on_raid_frames,
             show_on_effects_overlay: def.show_on_effects_overlay,
+            show_at_secs: def.show_at_secs,
             persist_past_death: def.persist_past_death,
             track_outside_combat: def.track_outside_combat,
             on_apply_trigger_timer: def.on_apply_trigger_timer.clone(),
@@ -82,6 +96,7 @@ impl EffectListItem {
             encounters: def.encounters.clone(),
             alert_near_expiration: def.alert_near_expiration,
             alert_threshold_secs: def.alert_threshold_secs,
+            audio: def.audio.clone(),
         }
     }
 
@@ -89,9 +104,11 @@ impl EffectListItem {
         EffectDefinition {
             id: self.id.clone(),
             name: self.name.clone(),
+            display_text: self.display_text.clone(),
             enabled: self.enabled,
             category: self.category,
-            effect_ids: self.effect_ids.clone(),
+            trigger: self.trigger,
+            effects: self.effects.clone(),
             refresh_abilities: self.refresh_abilities.clone(),
             source: self.source.clone(),
             target: self.target.clone(),
@@ -101,6 +118,7 @@ impl EffectListItem {
             color: self.color,
             show_on_raid_frames: self.show_on_raid_frames,
             show_on_effects_overlay: self.show_on_effects_overlay,
+            show_at_secs: self.show_at_secs,
             persist_past_death: self.persist_past_death,
             track_outside_combat: self.track_outside_combat,
             on_apply_trigger_timer: self.on_apply_trigger_timer.clone(),
@@ -108,6 +126,7 @@ impl EffectListItem {
             encounters: self.encounters.clone(),
             alert_near_expiration: self.alert_near_expiration,
             alert_threshold_secs: self.alert_threshold_secs,
+            audio: self.audio.clone(),
         }
     }
 }
@@ -161,9 +180,9 @@ fn ensure_user_effects_dir(app_handle: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// Copy files from src to dst that don't already exist in dst
-fn sync_missing_files(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
-    let entries = std::fs::read_dir(src)
-        .map_err(|e| format!("Failed to read directory {:?}: {}", src, e))?;
+fn sync_missing_files(src: &PathBuf, dst: &Path) -> Result<(), String> {
+    let entries =
+        std::fs::read_dir(src).map_err(|e| format!("Failed to read directory {:?}: {}", src, e))?;
 
     for entry in entries.flatten() {
         let src_path = entry.path();
@@ -173,7 +192,10 @@ fn sync_missing_files(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
         if !dst_path.exists() {
             if src_path.is_dir() {
                 copy_dir_recursive(&src_path, &dst_path)?;
-                eprintln!("[EFFECTS] Synced missing directory: {:?}", entry.file_name());
+                eprintln!(
+                    "[EFFECTS] Synced missing directory: {:?}",
+                    entry.file_name()
+                );
             } else {
                 std::fs::copy(&src_path, &dst_path)
                     .map_err(|e| format!("Failed to copy {:?}: {}", src_path, e))?;
@@ -190,8 +212,8 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
     std::fs::create_dir_all(dst)
         .map_err(|e| format!("Failed to create directory {:?}: {}", dst, e))?;
 
-    let entries = std::fs::read_dir(src)
-        .map_err(|e| format!("Failed to read directory {:?}: {}", src, e))?;
+    let entries =
+        std::fs::read_dir(src).map_err(|e| format!("Failed to read directory {:?}: {}", src, e))?;
 
     for entry in entries.flatten() {
         let src_path = entry.path();
@@ -222,8 +244,8 @@ fn load_effects_with_paths(dir: &PathBuf) -> Result<Vec<EffectWithPath>, String>
         return Ok(results);
     }
 
-    let entries = std::fs::read_dir(dir)
-        .map_err(|e| format!("Failed to read directory {:?}: {}", dir, e))?;
+    let entries =
+        std::fs::read_dir(dir).map_err(|e| format!("Failed to read directory {:?}: {}", dir, e))?;
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -264,10 +286,40 @@ fn save_effects_to_file(effects: &[EffectDefinition], path: &PathBuf) -> Result<
             .map_err(|e| format!("Failed to create directory {:?}: {}", parent, e))?;
     }
 
-    std::fs::write(path, content)
-        .map_err(|e| format!("Failed to write {:?}: {}", path, e))?;
+    std::fs::write(path, content).map_err(|e| format!("Failed to write {:?}: {}", path, e))?;
 
     Ok(())
+}
+
+/// Get the path to custom.toml for user-created/modified effects
+fn get_custom_effects_path() -> Option<PathBuf> {
+    get_user_effects_dir().map(|p| p.join("custom.toml"))
+}
+
+/// Load effects from custom.toml
+fn load_custom_effects() -> Vec<EffectDefinition> {
+    let Some(custom_path) = get_custom_effects_path() else {
+        return vec![];
+    };
+
+    if !custom_path.exists() {
+        return vec![];
+    }
+
+    match std::fs::read_to_string(&custom_path) {
+        Ok(contents) => toml::from_str::<DefinitionConfig>(&contents)
+            .map(|c| c.effects)
+            .unwrap_or_default(),
+        Err(_) => vec![],
+    }
+}
+
+/// Save effects to custom.toml
+fn save_custom_effects(effects: &[EffectDefinition]) -> Result<(), String> {
+    let Some(custom_path) = get_custom_effects_path() else {
+        return Err("Cannot determine custom effects path".to_string());
+    };
+    save_effects_to_file(effects, &custom_path)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -287,46 +339,54 @@ pub async fn get_effect_definitions(app_handle: AppHandle) -> Result<Vec<EffectL
     Ok(items)
 }
 
-/// Update an existing effect
+/// Update an existing effect (modifications saved to custom.toml)
 #[tauri::command]
 pub async fn update_effect_definition(
-    app_handle: AppHandle,
     service: State<'_, ServiceHandle>,
     effect: EffectListItem,
 ) -> Result<(), String> {
     // Validate effect has at least one way to match
-    if effect.effect_ids.is_empty() && effect.refresh_abilities.is_empty() {
+    if effect.effects.is_empty() && effect.refresh_abilities.is_empty() {
         return Err(
             "Effect must have at least one effect ID or refresh ability to match against. \
-            Without these, the effect will never trigger.".to_string()
+            Without these, the effect will never trigger."
+                .to_string(),
         );
     }
 
-    let effects = load_user_effects(&app_handle)?;
-    let file_path = PathBuf::from(&effect.file_path);
+    let custom_path = get_custom_effects_path().ok_or("Cannot determine custom effects path")?;
+    let is_from_custom = effect.file_path == custom_path.to_string_lossy();
 
-    // Get all effects from the same file
-    let mut file_effects: Vec<EffectDefinition> = effects
-        .iter()
-        .filter(|e| e.file_path == file_path)
-        .map(|e| e.effect.clone())
-        .collect();
+    // Load custom effects
+    let mut custom_effects = load_custom_effects();
 
-    // Find and update the effect
-    let mut found = false;
-    for existing in &mut file_effects {
-        if existing.id == effect.id {
-            *existing = effect.to_definition();
-            found = true;
-            break;
+    if is_from_custom {
+        // Effect is already in custom.toml - update in place
+        let mut found = false;
+        for existing in &mut custom_effects {
+            if existing.id == effect.id {
+                *existing = effect.to_definition();
+                found = true;
+                break;
+            }
+        }
+
+        if !found {
+            return Err(format!("Effect '{}' not found in custom.toml", effect.id));
+        }
+    } else {
+        // Effect is from a default file - add/update in custom.toml as an override
+        // This creates a new entry that will override the default when loaded
+        let existing_idx = custom_effects.iter().position(|e| e.id == effect.id);
+
+        if let Some(idx) = existing_idx {
+            custom_effects[idx] = effect.to_definition();
+        } else {
+            custom_effects.push(effect.to_definition());
         }
     }
 
-    if !found {
-        return Err(format!("Effect '{}' not found in {:?}", effect.id, file_path));
-    }
-
-    save_effects_to_file(&file_effects, &file_path)?;
+    save_custom_effects(&custom_effects)?;
 
     // Reload definitions in the running service
     let _ = service.reload_effect_definitions().await;
@@ -334,7 +394,7 @@ pub async fn update_effect_definition(
     Ok(())
 }
 
-/// Create a new effect
+/// Create a new effect (always saved to custom.toml)
 #[tauri::command]
 pub async fn create_effect_definition(
     app_handle: AppHandle,
@@ -342,10 +402,11 @@ pub async fn create_effect_definition(
     mut effect: EffectListItem,
 ) -> Result<EffectListItem, String> {
     // Validate effect has at least one way to match
-    if effect.effect_ids.is_empty() && effect.refresh_abilities.is_empty() {
+    if effect.effects.is_empty() && effect.refresh_abilities.is_empty() {
         return Err(
             "Effect must have at least one effect ID or refresh ability to match against. \
-            Without these, the effect will never trigger.".to_string()
+            Without these, the effect will never trigger."
+                .to_string(),
         );
     }
 
@@ -355,24 +416,22 @@ pub async fn create_effect_definition(
     }
 
     let effects = load_user_effects(&app_handle)?;
-    let file_path = PathBuf::from(&effect.file_path);
 
     // Check for duplicate ID across all files
     if effects.iter().any(|e| e.effect.id == effect.id) {
         return Err(format!("Effect with ID '{}' already exists", effect.id));
     }
 
-    // Get all effects from the target file
-    let mut file_effects: Vec<EffectDefinition> = effects
-        .iter()
-        .filter(|e| e.file_path == file_path)
-        .map(|e| e.effect.clone())
-        .collect();
+    // Load existing custom effects and add the new one
+    let mut custom_effects = load_custom_effects();
+    custom_effects.push(effect.to_definition());
 
-    // Add the new effect
-    file_effects.push(effect.to_definition());
+    // Save to custom.toml
+    save_custom_effects(&custom_effects)?;
 
-    save_effects_to_file(&file_effects, &file_path)?;
+    // Update file_path to reflect where it was saved
+    let custom_path = get_custom_effects_path().ok_or("Cannot determine custom effects path")?;
+    effect.file_path = custom_path.to_string_lossy().to_string();
 
     // Reload definitions in the running service
     let _ = service.reload_effect_definitions().await;
@@ -404,7 +463,12 @@ pub async fn delete_effect_definition(
         .filter(|e| e.id != effect_id)
         .collect();
 
-    if new_effects.len() == effects.iter().filter(|e| e.file_path == file_path_buf).count() {
+    if new_effects.len()
+        == effects
+            .iter()
+            .filter(|e| e.file_path == file_path_buf)
+            .count()
+    {
         return Err(format!("Effect '{}' not found", effect_id));
     }
 
@@ -471,8 +535,8 @@ pub async fn get_effect_files(app_handle: AppHandle) -> Result<Vec<String>, Stri
     let mut files = Vec::new();
 
     if user_dir.exists() {
-        let entries = std::fs::read_dir(&user_dir)
-            .map_err(|e| format!("Failed to read directory: {}", e))?;
+        let entries =
+            std::fs::read_dir(&user_dir).map_err(|e| format!("Failed to read directory: {}", e))?;
 
         for entry in entries.flatten() {
             let path = entry.path();
