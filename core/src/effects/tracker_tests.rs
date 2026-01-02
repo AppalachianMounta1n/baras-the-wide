@@ -69,10 +69,9 @@ fn make_tracker(effects: Vec<EffectDefinition>) -> EffectTracker {
 }
 
 /// Create a mock encounter with the given local player ID
-fn make_encounter_with_player(local_player_id: i64) -> CombatEncounter {
-    let mut enc = CombatEncounter::new(1, ProcessingMode::Live);
-    enc.local_player_id = Some(local_player_id);
-    enc
+/// Note: local_player_id is now passed separately to handle_signals_with_player
+fn make_encounter_with_player(_local_player_id: i64) -> CombatEncounter {
+    CombatEncounter::new(1, ProcessingMode::Live)
 }
 
 /// Create a mock encounter with the given entity IDs registered as bosses
@@ -85,9 +84,9 @@ fn make_encounter_with_bosses(boss_ids: &[i64]) -> CombatEncounter {
 }
 
 /// Create a mock encounter with local player and boss IDs
-fn make_encounter(local_player_id: i64, boss_ids: &[i64]) -> CombatEncounter {
+/// Note: local_player_id is now passed separately to handle_signals_with_player
+fn make_encounter(_local_player_id: i64, boss_ids: &[i64]) -> CombatEncounter {
     let mut enc = CombatEncounter::new(1, ProcessingMode::Live);
-    enc.local_player_id = Some(local_player_id);
     for &id in boss_ids {
         enc.hp_by_entity.insert(id, 100.0);
     }

@@ -8,7 +8,7 @@ use chrono::NaiveDateTime;
 use crate::combat_log::CombatEvent;
 use crate::game_data::{effect_id, effect_type_id};
 use crate::state::SessionCache;
-use crate::dsl::{EntitySelectorExt, Trigger};
+use crate::dsl::Trigger;
 
 use super::GameSignal;
 
@@ -316,10 +316,11 @@ pub fn check_phase_end_triggers(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Trigger Matching Helpers
+// Trigger Matching Helpers (delegate to unified Trigger methods)
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Check if an HP-based phase trigger is satisfied.
+/// Delegates to unified `Trigger::matches_boss_hp_below` and `matches_boss_hp_above`.
 pub fn check_hp_trigger(
     trigger: &Trigger,
     old_hp: f32,
@@ -327,157 +328,76 @@ pub fn check_hp_trigger(
     npc_id: i64,
     entity_name: &str,
 ) -> bool {
-    match trigger {
-        Trigger::BossHpBelow { hp_percent, selector } => {
-            // First check if HP actually crossed the threshold
-            let crossed = old_hp > *hp_percent && new_hp <= *hp_percent;
-            if !crossed {
-                return false;
-            }
-
-            // No selector = any boss crossing threshold
-            if selector.is_empty() {
-                return true;
-            }
-
-            // NPC ID selector - check if THIS entity matches
-            if selector.matches_npc_id(npc_id) {
-                return true;
-            }
-
-            // Name selector - check if THIS entity's name matches
-            if let Some(name) = selector.first_name() {
-                return entity_name == name;
-            }
-
-            false
-        }
-        Trigger::BossHpAbove { hp_percent, selector } => {
-            // First check if HP actually crossed the threshold
-            let crossed = old_hp < *hp_percent && new_hp >= *hp_percent;
-            if !crossed {
-                return false;
-            }
-
-            // No selector = any boss crossing threshold
-            if selector.is_empty() {
-                return true;
-            }
-
-            // NPC ID selector - check if THIS entity matches
-            if selector.matches_npc_id(npc_id) {
-                return true;
-            }
-
-            // Name selector - check if THIS entity's name matches
-            if let Some(name) = selector.first_name() {
-                return entity_name == name;
-            }
-
-            false
-        }
-        Trigger::AnyOf { conditions } => {
-            conditions.iter().any(|c| check_hp_trigger(c, old_hp, new_hp, npc_id, entity_name))
-        }
-        _ => false,
-    }
+    trigger.matches_boss_hp_below(npc_id, entity_name, old_hp, new_hp)
+        || trigger.matches_boss_hp_above(npc_id, entity_name, old_hp, new_hp)
 }
 
 /// Check if an ability/effect-based phase trigger is satisfied.
+/// First checks event type, then delegates to unified Trigger methods.
 pub fn check_ability_trigger(trigger: &Trigger, event: &CombatEvent) -> bool {
-    match trigger {
-        Trigger::AbilityCast { abilities, .. } => {
-            if event.effect.effect_id != effect_id::ABILITYACTIVATE {
-                return false;
-            }
-            let ability_id = event.action.action_id as u64;
-            let ability_name = crate::context::resolve(event.action.name);
-            abilities.is_empty()
-                || abilities.iter().any(|s| s.matches(ability_id, Some(&ability_name)))
+    // Check AbilityCast triggers
+    if event.effect.effect_id == effect_id::ABILITYACTIVATE {
+        let ability_id = event.action.action_id as u64;
+        let ability_name = crate::context::resolve(event.action.name);
+        if trigger.matches_ability(ability_id, Some(ability_name)) {
+            return true;
         }
-        Trigger::EffectApplied { effects, .. } => {
-            if event.effect.type_id != effect_type_id::APPLYEFFECT {
-                return false;
-            }
-            let eff_id = event.effect.effect_id as u64;
-            let eff_name = crate::context::resolve(event.effect.effect_name);
-            effects.is_empty() || effects.iter().any(|s| s.matches(eff_id, Some(&eff_name)))
-        }
-        Trigger::EffectRemoved { effects, .. } => {
-            if event.effect.type_id != effect_type_id::REMOVEEFFECT {
-                return false;
-            }
-            let eff_id = event.effect.effect_id as u64;
-            let eff_name = crate::context::resolve(event.effect.effect_name);
-            effects.is_empty() || effects.iter().any(|s| s.matches(eff_id, Some(&eff_name)))
-        }
-        Trigger::AnyOf { conditions } => {
-            conditions.iter().any(|c| check_ability_trigger(c, event))
-        }
-        _ => false,
     }
+
+    // Check EffectApplied triggers
+    if event.effect.type_id == effect_type_id::APPLYEFFECT {
+        let effect_id = event.effect.effect_id as u64;
+        let effect_name = crate::context::resolve(event.effect.effect_name);
+        if trigger.matches_effect_applied(effect_id, Some(effect_name)) {
+            return true;
+        }
+    }
+
+    // Check EffectRemoved triggers
+    if event.effect.type_id == effect_type_id::REMOVEEFFECT {
+        let effect_id = event.effect.effect_id as u64;
+        let effect_name = crate::context::resolve(event.effect.effect_name);
+        if trigger.matches_effect_removed(effect_id, Some(effect_name)) {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Check if a signal-based phase trigger is satisfied (NpcAppears, EntityDeath, etc.).
+/// Iterates through signals and delegates matching to unified Trigger methods.
 pub fn check_signal_phase_trigger(trigger: &Trigger, signals: &[GameSignal]) -> bool {
-    match trigger {
-        Trigger::NpcAppears { selector } => {
-            signals.iter().any(|s| {
-                if let GameSignal::NpcFirstSeen { npc_id, entity_name, .. } = s {
-                    if selector.matches_npc_id(*npc_id) {
-                        return true;
-                    }
-                    if selector.matches_name_only(entity_name) {
-                        return true;
-                    }
+    for signal in signals {
+        match signal {
+            GameSignal::NpcFirstSeen { npc_id, entity_name, .. } => {
+                if trigger.matches_npc_appears(*npc_id, entity_name) {
+                    return true;
                 }
-                false
-            })
-        }
-        Trigger::EntityDeath { selector } => {
-            signals.iter().any(|s| {
-                if let GameSignal::EntityDeath { npc_id, entity_name, .. } = s {
-                    if selector.is_empty() {
-                        return true; // No filter = any death
-                    }
-                    if selector.matches_npc_id(*npc_id) {
-                        return true;
-                    }
-                    if selector.matches_name_only(entity_name) {
-                        return true;
-                    }
+            }
+            GameSignal::EntityDeath { npc_id, entity_name, .. } => {
+                if trigger.matches_entity_death(*npc_id, entity_name) {
+                    return true;
                 }
-                false
-            })
+            }
+            GameSignal::PhaseEndTriggered { phase_id, .. } => {
+                if trigger.matches_phase_ended(phase_id) {
+                    return true;
+                }
+            }
+            GameSignal::CounterChanged { counter_id, old_value, new_value, .. } => {
+                if trigger.matches_counter_reaches(counter_id, *old_value, *new_value) {
+                    return true;
+                }
+            }
+            _ => {}
         }
-        Trigger::PhaseEnded { phase_id } => {
-            signals.iter().any(|s| {
-                matches!(s, GameSignal::PhaseEndTriggered { phase_id: sig_phase_id, .. }
-                    if sig_phase_id == phase_id)
-            })
-        }
-        Trigger::CounterReaches { counter_id, value } => {
-            signals.iter().any(|s| {
-                matches!(s, GameSignal::CounterChanged { counter_id: cid, new_value, .. }
-                    if cid == counter_id && *new_value == *value)
-            })
-        }
-        Trigger::AnyOf { conditions } => {
-            conditions.iter().any(|c| check_signal_phase_trigger(c, signals))
-        }
-        _ => false,
     }
+    false
 }
 
 /// Check if a TimeElapsed trigger is satisfied (time crossed threshold).
+/// Delegates to unified `Trigger::matches_time_elapsed`.
 pub fn check_time_trigger(trigger: &Trigger, old_time: f32, new_time: f32) -> bool {
-    match trigger {
-        Trigger::TimeElapsed { secs } => {
-            old_time < *secs && new_time >= *secs
-        }
-        Trigger::AnyOf { conditions } => {
-            conditions.iter().any(|c| check_time_trigger(c, old_time, new_time))
-        }
-        _ => false,
-    }
+    trigger.matches_time_elapsed(old_time, new_time)
 }

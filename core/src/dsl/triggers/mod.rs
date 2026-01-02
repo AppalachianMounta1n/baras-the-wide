@@ -307,6 +307,234 @@ impl Trigger {
             other => other, // Leave unchanged for triggers without source/target
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Unified Trigger Matching (used by timers, phases, and counters)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Check if trigger matches an ability cast.
+    pub fn matches_ability(&self, ability_id: u64, ability_name: Option<&str>) -> bool {
+        match self {
+            Self::AbilityCast { abilities, .. } => {
+                abilities.is_empty() || abilities.iter().any(|s| s.matches(ability_id, ability_name))
+            }
+            Self::AnyOf { conditions } => {
+                conditions.iter().any(|c| c.matches_ability(ability_id, ability_name))
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if trigger matches an effect being applied.
+    pub fn matches_effect_applied(&self, effect_id: u64, effect_name: Option<&str>) -> bool {
+        match self {
+            Self::EffectApplied { effects, .. } => {
+                effects.is_empty() || effects.iter().any(|s| s.matches(effect_id, effect_name))
+            }
+            Self::AnyOf { conditions } => {
+                conditions.iter().any(|c| c.matches_effect_applied(effect_id, effect_name))
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if trigger matches an effect being removed.
+    pub fn matches_effect_removed(&self, effect_id: u64, effect_name: Option<&str>) -> bool {
+        match self {
+            Self::EffectRemoved { effects, .. } => {
+                effects.is_empty() || effects.iter().any(|s| s.matches(effect_id, effect_name))
+            }
+            Self::AnyOf { conditions } => {
+                conditions.iter().any(|c| c.matches_effect_removed(effect_id, effect_name))
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if trigger matches damage taken from an ability.
+    pub fn matches_damage_taken(&self, ability_id: u64, ability_name: Option<&str>) -> bool {
+        match self {
+            Self::DamageTaken { abilities, .. } => {
+                abilities.is_empty() || abilities.iter().any(|s| s.matches(ability_id, ability_name))
+            }
+            Self::AnyOf { conditions } => {
+                conditions.iter().any(|c| c.matches_damage_taken(ability_id, ability_name))
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if trigger matches boss HP crossing below a threshold.
+    /// The entity whose HP changed must match the selector.
+    pub fn matches_boss_hp_below(
+        &self,
+        npc_id: i64,
+        entity_name: &str,
+        old_hp: f32,
+        new_hp: f32,
+    ) -> bool {
+        match self {
+            Self::BossHpBelow { hp_percent, selector } => {
+                // Check HP threshold crossing
+                let crossed = old_hp > *hp_percent && new_hp <= *hp_percent;
+                if !crossed {
+                    return false;
+                }
+
+                // No selector = any boss crossing threshold
+                if selector.is_empty() {
+                    return true;
+                }
+
+                // Check if THIS entity matches by NPC ID or name (case-insensitive)
+                selector.matches_npc_id(npc_id) || selector.matches_name_only(entity_name)
+            }
+            Self::AnyOf { conditions } => {
+                conditions.iter().any(|c| c.matches_boss_hp_below(npc_id, entity_name, old_hp, new_hp))
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if trigger matches boss HP crossing above a threshold.
+    /// Used for heal-check mechanics.
+    pub fn matches_boss_hp_above(
+        &self,
+        npc_id: i64,
+        entity_name: &str,
+        old_hp: f32,
+        new_hp: f32,
+    ) -> bool {
+        match self {
+            Self::BossHpAbove { hp_percent, selector } => {
+                // Check HP threshold crossing
+                let crossed = old_hp < *hp_percent && new_hp >= *hp_percent;
+                if !crossed {
+                    return false;
+                }
+
+                // No selector = any boss crossing threshold
+                if selector.is_empty() {
+                    return true;
+                }
+
+                // Check if THIS entity matches by NPC ID or name (case-insensitive)
+                selector.matches_npc_id(npc_id) || selector.matches_name_only(entity_name)
+            }
+            Self::AnyOf { conditions } => {
+                conditions.iter().any(|c| c.matches_boss_hp_above(npc_id, entity_name, old_hp, new_hp))
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if trigger matches NPC first appearing.
+    pub fn matches_npc_appears(&self, npc_id: i64, entity_name: &str) -> bool {
+        match self {
+            Self::NpcAppears { selector } => {
+                // Require explicit filter for NPC appears
+                if selector.is_empty() {
+                    return false;
+                }
+                selector.matches_npc_id(npc_id) || selector.matches_name_only(entity_name)
+            }
+            Self::AnyOf { conditions } => {
+                conditions.iter().any(|c| c.matches_npc_appears(npc_id, entity_name))
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if trigger matches entity death.
+    pub fn matches_entity_death(&self, npc_id: i64, entity_name: &str) -> bool {
+        match self {
+            Self::EntityDeath { selector } => {
+                // Empty selector = any death
+                if selector.is_empty() {
+                    return true;
+                }
+                selector.matches_npc_id(npc_id) || selector.matches_name_only(entity_name)
+            }
+            Self::AnyOf { conditions } => {
+                conditions.iter().any(|c| c.matches_entity_death(npc_id, entity_name))
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if trigger matches a phase being entered.
+    pub fn matches_phase_entered(&self, phase_id: &str) -> bool {
+        match self {
+            Self::PhaseEntered { phase_id: trigger_phase } => trigger_phase == phase_id,
+            Self::AnyOf { conditions } => {
+                conditions.iter().any(|c| c.matches_phase_entered(phase_id))
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if trigger matches a phase ending.
+    pub fn matches_phase_ended(&self, phase_id: &str) -> bool {
+        match self {
+            Self::PhaseEnded { phase_id: trigger_phase } => trigger_phase == phase_id,
+            Self::AnyOf { conditions } => {
+                conditions.iter().any(|c| c.matches_phase_ended(phase_id))
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if trigger matches a counter reaching a value.
+    pub fn matches_counter_reaches(&self, counter_id: &str, old_value: u32, new_value: u32) -> bool {
+        match self {
+            Self::CounterReaches { counter_id: trigger_counter, value } => {
+                trigger_counter == counter_id && old_value < *value && new_value >= *value
+            }
+            Self::AnyOf { conditions } => {
+                conditions.iter().any(|c| c.matches_counter_reaches(counter_id, old_value, new_value))
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if trigger matches time elapsed crossing a threshold.
+    pub fn matches_time_elapsed(&self, old_secs: f32, new_secs: f32) -> bool {
+        match self {
+            Self::TimeElapsed { secs } => old_secs < *secs && new_secs >= *secs,
+            Self::AnyOf { conditions } => {
+                conditions.iter().any(|c| c.matches_time_elapsed(old_secs, new_secs))
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if trigger matches a timer expiring.
+    pub fn matches_timer_expires(&self, timer_id: &str) -> bool {
+        match self {
+            Self::TimerExpires { timer_id: trigger_id } => trigger_id == timer_id,
+            Self::AnyOf { conditions } => {
+                conditions.iter().any(|c| c.matches_timer_expires(timer_id))
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if trigger matches target set (NPC targeting something).
+    pub fn matches_target_set(&self, source_npc_id: i64, source_name: &str) -> bool {
+        match self {
+            Self::TargetSet { selector, .. } => {
+                // Require explicit filter
+                if selector.is_empty() {
+                    return false;
+                }
+                selector.matches_npc_id(source_npc_id) || selector.matches_name_only(source_name)
+            }
+            Self::AnyOf { conditions } => {
+                conditions.iter().any(|c| c.matches_target_set(source_npc_id, source_name))
+            }
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]

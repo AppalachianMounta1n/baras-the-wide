@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::dsl::AudioConfig;
 use crate::dsl::CounterCondition;
 use crate::game_data::Difficulty;
-use crate::dsl::{EntitySelectorExt, Trigger};
+use crate::dsl::Trigger;
 
 // Re-export Trigger as TimerTrigger for backward compatibility during migration
 pub use crate::dsl::Trigger as TimerTrigger;
@@ -120,37 +120,37 @@ pub struct TimerConfig {
 }
 
 impl TimerDefinition {
-    /// Check if this timer matches a given ability ID
-    pub fn matches_ability(&self, ability_id: u64) -> bool {
-        trigger_matches_ability(&self.trigger, ability_id)
-    }
-
-    /// Check if this timer matches a given ability ID and/or name
+    /// Check if this timer matches a given ability ID and/or name.
+    /// Delegates to unified `Trigger::matches_ability`.
     pub fn matches_ability_with_name(&self, ability_id: u64, ability_name: Option<&str>) -> bool {
-        trigger_matches_ability_with_name(&self.trigger, ability_id, ability_name)
+        self.trigger.matches_ability(ability_id, ability_name)
     }
 
-    /// Check if this timer matches a given effect ID for apply triggers
+    /// Check if this timer matches a given effect ID for apply triggers.
+    /// Delegates to unified `Trigger::matches_effect_applied`.
     pub fn matches_effect_applied(&self, effect_id: u64) -> bool {
-        trigger_matches_effect_applied(&self.trigger, effect_id)
+        self.trigger.matches_effect_applied(effect_id, None)
     }
 
-    /// Check if this timer matches a given effect ID for remove triggers
+    /// Check if this timer matches a given effect ID for remove triggers.
+    /// Delegates to unified `Trigger::matches_effect_removed`.
     pub fn matches_effect_removed(&self, effect_id: u64) -> bool {
-        trigger_matches_effect_removed(&self.trigger, effect_id)
+        self.trigger.matches_effect_removed(effect_id, None)
     }
 
-    /// Check if this timer is triggered by another timer expiring
+    /// Check if this timer is triggered by another timer expiring.
+    /// Delegates to unified `Trigger::matches_timer_expires`.
     pub fn matches_timer_expires(&self, timer_id: &str) -> bool {
-        trigger_matches_timer_expires(&self.trigger, timer_id)
+        self.trigger.matches_timer_expires(timer_id)
     }
 
-    /// Check if this timer triggers on combat start
+    /// Check if this timer triggers on combat start.
     pub fn triggers_on_combat_start(&self) -> bool {
         self.trigger.contains_combat_start()
     }
 
-    /// Check if this timer triggers when boss HP crosses below a threshold
+    /// Check if this timer triggers when boss HP crosses below a threshold.
+    /// Delegates to unified `Trigger::matches_boss_hp_below`.
     pub fn matches_boss_hp_threshold(
         &self,
         npc_id: i64,
@@ -158,52 +158,61 @@ impl TimerDefinition {
         previous_hp: f32,
         current_hp: f32,
     ) -> bool {
-        trigger_matches_boss_hp(&self.trigger, npc_id, npc_name, previous_hp, current_hp)
+        // Provide empty string if no name (trigger will match on ID if selector is empty)
+        self.trigger.matches_boss_hp_below(npc_id, npc_name.unwrap_or(""), previous_hp, current_hp)
     }
 
-    /// Check if this timer triggers on a specific phase being entered
+    /// Check if this timer triggers on a specific phase being entered.
+    /// Delegates to unified `Trigger::matches_phase_entered`.
     pub fn matches_phase_entered(&self, phase_id: &str) -> bool {
-        trigger_matches_phase_entered(&self.trigger, phase_id)
+        self.trigger.matches_phase_entered(phase_id)
     }
 
-    /// Check if this timer triggers when a specific phase ends
+    /// Check if this timer triggers when a specific phase ends.
+    /// Delegates to unified `Trigger::matches_phase_ended`.
     pub fn matches_phase_ended(&self, phase_id: &str) -> bool {
-        trigger_matches_phase_ended(&self.trigger, phase_id)
+        self.trigger.matches_phase_ended(phase_id)
     }
 
-    /// Check if this timer triggers when a counter reaches a value
+    /// Check if this timer triggers when a counter reaches a value.
+    /// Delegates to unified `Trigger::matches_counter_reaches`.
     pub fn matches_counter_reaches(
         &self,
         counter_id: &str,
         old_value: u32,
         new_value: u32,
     ) -> bool {
-        trigger_matches_counter_reaches(&self.trigger, counter_id, old_value, new_value)
+        self.trigger.matches_counter_reaches(counter_id, old_value, new_value)
     }
 
-    /// Check if this timer triggers when an NPC first appears
+    /// Check if this timer triggers when an NPC first appears.
+    /// Delegates to unified `Trigger::matches_npc_appears`.
     pub fn matches_npc_appears(&self, npc_id: i64, entity_name: Option<&str>) -> bool {
-        trigger_matches_npc_appears(&self.trigger, npc_id, entity_name)
+        self.trigger.matches_npc_appears(npc_id, entity_name.unwrap_or(""))
     }
 
-    /// Check if this timer triggers on entity death
+    /// Check if this timer triggers on entity death.
+    /// Delegates to unified `Trigger::matches_entity_death`.
     pub fn matches_entity_death(&self, npc_id: i64, entity_name: Option<&str>) -> bool {
-        trigger_matches_entity_death(&self.trigger, npc_id, entity_name)
+        self.trigger.matches_entity_death(npc_id, entity_name.unwrap_or(""))
     }
 
-    /// Check if this timer triggers at a specific combat time
+    /// Check if this timer triggers at a specific combat time.
+    /// Delegates to unified `Trigger::matches_time_elapsed`.
     pub fn matches_time_elapsed(&self, old_combat_secs: f32, new_combat_secs: f32) -> bool {
-        trigger_matches_time_elapsed(&self.trigger, old_combat_secs, new_combat_secs)
+        self.trigger.matches_time_elapsed(old_combat_secs, new_combat_secs)
     }
 
-    /// Check if this timer triggers when an NPC sets its target
+    /// Check if this timer triggers when an NPC sets its target.
+    /// Delegates to unified `Trigger::matches_target_set`.
     pub fn matches_target_set(&self, source_npc_id: i64, source_name: Option<&str>) -> bool {
-        trigger_matches_target_set(&self.trigger, source_npc_id, source_name)
+        self.trigger.matches_target_set(source_npc_id, source_name.unwrap_or(""))
     }
 
-    /// Check if this timer triggers when damage is taken from an ability
+    /// Check if this timer triggers when damage is taken from an ability.
+    /// Delegates to unified `Trigger::matches_damage_taken`.
     pub fn matches_damage_taken(&self, ability_id: u64, ability_name: Option<&str>) -> bool {
-        trigger_matches_damage_taken(&self.trigger, ability_id, ability_name)
+        self.trigger.matches_damage_taken(ability_id, ability_name)
     }
 
     /// Check if this timer is active for a given encounter context
@@ -256,282 +265,5 @@ impl TimerDefinition {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Trigger Matching Functions
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// Check if trigger matches ability cast (handles AnyOf recursively)
-pub fn trigger_matches_ability(trigger: &Trigger, ability_id: u64) -> bool {
-    trigger_matches_ability_with_name(trigger, ability_id, None)
-}
-
-/// Check if trigger matches ability cast with optional name (handles AnyOf recursively)
-pub fn trigger_matches_ability_with_name(
-    trigger: &Trigger,
-    ability_id: u64,
-    ability_name: Option<&str>,
-) -> bool {
-    match trigger {
-        Trigger::AbilityCast { abilities, .. } => {
-            abilities.is_empty()
-                || abilities
-                    .iter()
-                    .any(|s| s.matches(ability_id, ability_name))
-        }
-        Trigger::AnyOf { conditions } => conditions
-            .iter()
-            .any(|c| trigger_matches_ability_with_name(c, ability_id, ability_name)),
-        _ => false,
-    }
-}
-
-/// Check if trigger matches effect applied (handles AnyOf recursively)
-pub fn trigger_matches_effect_applied(trigger: &Trigger, effect_id: u64) -> bool {
-    trigger_matches_effect_applied_with_name(trigger, effect_id, None)
-}
-
-/// Check if trigger matches effect applied with optional name (handles AnyOf recursively)
-pub fn trigger_matches_effect_applied_with_name(
-    trigger: &Trigger,
-    effect_id: u64,
-    effect_name: Option<&str>,
-) -> bool {
-    match trigger {
-        Trigger::EffectApplied { effects, .. } => {
-            effects.is_empty() || effects.iter().any(|s| s.matches(effect_id, effect_name))
-        }
-        Trigger::AnyOf { conditions } => conditions
-            .iter()
-            .any(|c| trigger_matches_effect_applied_with_name(c, effect_id, effect_name)),
-        _ => false,
-    }
-}
-
-/// Check if trigger matches effect removed (handles AnyOf recursively)
-pub fn trigger_matches_effect_removed(trigger: &Trigger, effect_id: u64) -> bool {
-    trigger_matches_effect_removed_with_name(trigger, effect_id, None)
-}
-
-/// Check if trigger matches effect removed with optional name (handles AnyOf recursively)
-pub fn trigger_matches_effect_removed_with_name(
-    trigger: &Trigger,
-    effect_id: u64,
-    effect_name: Option<&str>,
-) -> bool {
-    match trigger {
-        Trigger::EffectRemoved { effects, .. } => {
-            effects.is_empty() || effects.iter().any(|s| s.matches(effect_id, effect_name))
-        }
-        Trigger::AnyOf { conditions } => conditions
-            .iter()
-            .any(|c| trigger_matches_effect_removed_with_name(c, effect_id, effect_name)),
-        _ => false,
-    }
-}
-
-/// Check if trigger matches timer expiration (handles AnyOf recursively)
-pub fn trigger_matches_timer_expires(trigger: &Trigger, timer_id: &str) -> bool {
-    match trigger {
-        Trigger::TimerExpires {
-            timer_id: trigger_id,
-        } => trigger_id == timer_id,
-        Trigger::AnyOf { conditions } => conditions
-            .iter()
-            .any(|c| trigger_matches_timer_expires(c, timer_id)),
-        _ => false,
-    }
-}
-
-/// Check if trigger matches boss HP threshold crossing (handles AnyOf recursively)
-pub fn trigger_matches_boss_hp(
-    trigger: &Trigger,
-    npc_id: i64,
-    npc_name: Option<&str>,
-    previous_hp: f32,
-    current_hp: f32,
-) -> bool {
-    match trigger {
-        Trigger::BossHpBelow {
-            hp_percent,
-            selector,
-        } => {
-            // Check HP threshold crossing
-            let crossed = previous_hp > *hp_percent && current_hp <= *hp_percent;
-            if !crossed {
-                return false;
-            }
-
-            // Check entity filter (if specified)
-            if selector.is_empty() {
-                return true; // No filter = any boss
-            }
-
-            // Check NPC ID first, then name
-            if selector.matches_npc_id(npc_id) {
-                return true;
-            }
-            if let Some(name) = npc_name {
-                return selector.matches_name_only(name);
-            }
-            false
-        }
-        Trigger::AnyOf { conditions } => conditions
-            .iter()
-            .any(|c| trigger_matches_boss_hp(c, npc_id, npc_name, previous_hp, current_hp)),
-        _ => false,
-    }
-}
-
-/// Check if trigger matches phase entered (handles AnyOf recursively)
-pub fn trigger_matches_phase_entered(trigger: &Trigger, phase_id: &str) -> bool {
-    match trigger {
-        Trigger::PhaseEntered {
-            phase_id: trigger_phase,
-        } => trigger_phase == phase_id,
-        Trigger::AnyOf { conditions } => conditions
-            .iter()
-            .any(|c| trigger_matches_phase_entered(c, phase_id)),
-        _ => false,
-    }
-}
-
-/// Check if trigger matches phase ended (handles AnyOf recursively)
-pub fn trigger_matches_phase_ended(trigger: &Trigger, phase_id: &str) -> bool {
-    match trigger {
-        Trigger::PhaseEnded {
-            phase_id: trigger_phase,
-        } => trigger_phase == phase_id,
-        Trigger::AnyOf { conditions } => conditions
-            .iter()
-            .any(|c| trigger_matches_phase_ended(c, phase_id)),
-        _ => false,
-    }
-}
-
-/// Check if trigger matches counter reaching a value (handles AnyOf recursively)
-pub fn trigger_matches_counter_reaches(
-    trigger: &Trigger,
-    counter_id: &str,
-    old_value: u32,
-    new_value: u32,
-) -> bool {
-    match trigger {
-        Trigger::CounterReaches {
-            counter_id: trigger_counter,
-            value,
-        } => trigger_counter == counter_id && old_value < *value && new_value >= *value,
-        Trigger::AnyOf { conditions } => conditions
-            .iter()
-            .any(|c| trigger_matches_counter_reaches(c, counter_id, old_value, new_value)),
-        _ => false,
-    }
-}
-
-/// Check if trigger matches NPC appears (handles AnyOf recursively)
-pub fn trigger_matches_npc_appears(
-    trigger: &Trigger,
-    npc_id: i64,
-    entity_name: Option<&str>,
-) -> bool {
-    match trigger {
-        Trigger::NpcAppears { selector } => {
-            if selector.is_empty() {
-                return false; // Require explicit filter
-            }
-            if selector.matches_npc_id(npc_id) {
-                return true;
-            }
-            if let Some(name) = entity_name {
-                return selector.matches_name_only(name);
-            }
-            false
-        }
-        Trigger::AnyOf { conditions } => conditions
-            .iter()
-            .any(|c| trigger_matches_npc_appears(c, npc_id, entity_name)),
-        _ => false,
-    }
-}
-
-/// Check if trigger matches entity death (handles AnyOf recursively)
-pub fn trigger_matches_entity_death(
-    trigger: &Trigger,
-    npc_id: i64,
-    entity_name: Option<&str>,
-) -> bool {
-    match trigger {
-        Trigger::EntityDeath { selector } => {
-            if selector.is_empty() {
-                return true; // No filter = any death
-            }
-            if selector.matches_npc_id(npc_id) {
-                return true;
-            }
-            if let Some(name) = entity_name {
-                return selector.matches_name_only(name);
-            }
-            false
-        }
-        Trigger::AnyOf { conditions } => conditions
-            .iter()
-            .any(|c| trigger_matches_entity_death(c, npc_id, entity_name)),
-        _ => false,
-    }
-}
-
-/// Check if trigger matches time elapsed (handles AnyOf recursively)
-pub fn trigger_matches_time_elapsed(trigger: &Trigger, old_secs: f32, new_secs: f32) -> bool {
-    match trigger {
-        Trigger::TimeElapsed { secs } => old_secs < *secs && new_secs >= *secs,
-        Trigger::AnyOf { conditions } => conditions
-            .iter()
-            .any(|c| trigger_matches_time_elapsed(c, old_secs, new_secs)),
-        _ => false,
-    }
-}
-
-/// Check if trigger matches target set (handles AnyOf recursively)
-pub fn trigger_matches_target_set(
-    trigger: &Trigger,
-    source_npc_id: i64,
-    source_name: Option<&str>,
-) -> bool {
-    match trigger {
-        Trigger::TargetSet { selector, .. } => {
-            if selector.is_empty() {
-                return false; // Require explicit filter
-            }
-            if selector.matches_npc_id(source_npc_id) {
-                return true;
-            }
-            if let Some(name) = source_name {
-                return selector.matches_name_only(name);
-            }
-            false
-        }
-        Trigger::AnyOf { conditions } => conditions
-            .iter()
-            .any(|c| trigger_matches_target_set(c, source_npc_id, source_name)),
-        _ => false,
-    }
-}
-
-/// Check if trigger matches damage taken (handles AnyOf recursively)
-pub fn trigger_matches_damage_taken(
-    trigger: &Trigger,
-    ability_id: u64,
-    ability_name: Option<&str>,
-) -> bool {
-    match trigger {
-        Trigger::DamageTaken { abilities, .. } => {
-            abilities.is_empty()
-                || abilities
-                    .iter()
-                    .any(|s| s.matches(ability_id, ability_name))
-        }
-        Trigger::AnyOf { conditions } => conditions
-            .iter()
-            .any(|c| trigger_matches_damage_taken(c, ability_id, ability_name)),
-        _ => false,
-    }
-}
+// NOTE: Trigger matching functions have been moved to `impl Trigger` in dsl/triggers/mod.rs.
+// TimerDefinition methods now delegate to those unified methods.
