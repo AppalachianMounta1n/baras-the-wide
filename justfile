@@ -11,8 +11,20 @@ parse-50mb:
 dev:
   cd app && cargo tauri dev 2>&1 | tee /tmp/baras.log
 
+# Build parse-worker and copy to binaries dir with platform-specific name
+build-parse-worker:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cargo build --release -p baras-parse-worker
+  TARGET=$(rustc -vV | grep host | cut -d' ' -f2)
+  mkdir -p app/src-tauri/binaries
+  EXE=""; [[ "$TARGET" == *windows* ]] && EXE=".exe"
+  cp "target/release/baras-parse-worker${EXE}" \
+     "app/src-tauri/binaries/baras-parse-worker-${TARGET}${EXE}"
+  echo "✓ parse-worker binary updated for ${TARGET}"
+
 # Build AppImage/deb (NO_STRIP needed on Arch due to linuxdeploy incompatibility)
-bundle:
+bundle: build-parse-worker
   cd app && NO_STRIP=1 cargo tauri build
 
 # Build release binary only (no bundle)
