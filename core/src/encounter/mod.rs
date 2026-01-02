@@ -28,7 +28,7 @@ pub enum EncounterState {
 }
 
 /// Classification of the phase/content type where an encounter occurred
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum PhaseType {
     #[default]
     OpenWorld,
@@ -65,7 +65,6 @@ impl BossHealthEntry {
 pub struct Encounter {
     pub id: u64,
     pub state: EncounterState,
-    pub events: Vec<CombatEvent>,
     pub enter_combat_time: Option<NaiveDateTime>,
     pub exit_combat_time: Option<NaiveDateTime>,
     pub last_combat_activity_time: Option<NaiveDateTime>,
@@ -85,7 +84,6 @@ impl Encounter {
         Self {
             id,
             state: EncounterState::NotStarted,
-            events: Vec::new(),
             enter_combat_time: None,
             exit_combat_time: None,
             last_combat_activity_time: None,

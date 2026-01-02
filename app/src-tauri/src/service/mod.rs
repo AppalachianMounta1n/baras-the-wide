@@ -35,6 +35,66 @@ use baras_overlay::{
 use crate::audio::{AudioEvent, AudioSender, AudioService};
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Parse Worker IPC
+// ─────────────────────────────────────────────────────────────────────────────
+
+use baras_core::encounter::summary::EncounterSummary;
+
+/// Player info from parse worker subprocess.
+#[derive(Debug, serde::Deserialize)]
+struct WorkerPlayerInfo {
+    name: String,
+    class_name: String,
+    discipline_name: String,
+    entity_id: i64,
+}
+
+/// Area info from parse worker subprocess.
+#[derive(Debug, serde::Deserialize)]
+struct WorkerAreaInfo {
+    area_name: String,
+    area_id: i64,
+    difficulty_name: String,
+}
+
+/// Output from the parse worker subprocess (matches parse-worker JSON output).
+#[derive(Debug, serde::Deserialize)]
+struct ParseWorkerOutput {
+    end_pos: u64,
+    event_count: usize,
+    encounter_count: usize,
+    encounters: Vec<EncounterSummary>,
+    player: WorkerPlayerInfo,
+    area: WorkerAreaInfo,
+    elapsed_ms: u128,
+}
+
+/// Fallback to streaming parse if subprocess fails.
+async fn fallback_streaming_parse(
+    reader: &Reader,
+    session: &Arc<RwLock<ParsingSession>>,
+) {
+    let timer = std::time::Instant::now();
+    let mut session_guard = session.write().await;
+    let session_date = session_guard.game_session_date.unwrap_or_default();
+    let result = reader.read_log_file_streaming(session_date, |event| {
+        session_guard.process_event(event);
+    });
+
+    if let Ok((end_pos, event_count)) = result {
+        session_guard.current_byte = Some(end_pos);
+        session_guard.finalize_session();
+        session_guard.sync_timer_context();
+
+        eprintln!(
+            "[PARSE] Fallback streaming: {} events in {:.0}ms",
+            event_count,
+            timer.elapsed().as_millis()
+        );
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Service Commands
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -690,24 +750,123 @@ impl CombatService {
             .app_handle
             .emit("active-file-changed", path.to_string_lossy().to_string());
 
-        // Create reader
-        let reader = Reader::from(path, session.clone());
+        // Create reader for live tailing (after subprocess parse)
+        let reader = Reader::from(path.clone(), session.clone());
 
-        // First, read and process the entire existing file
-        if let Ok((events, end_pos)) = reader.read_log_file().await {
-            let mut session_guard = session.write().await;
-            for event in events {
-                session_guard.process_event(event);
+        // Parse historical file in subprocess to avoid memory fragmentation
+        let timer = std::time::Instant::now();
+        let session_id = path
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        // Get encounters output directory
+        let encounters_dir = baras_core::storage::encounters_dir(&session_id)
+            .unwrap_or_else(|_| PathBuf::from("/tmp/baras-encounters"));
+
+        // Spawn parse worker subprocess
+        // Check multiple locations: bundled sidecar (with target triple), next to exe, fallback to PATH
+        let worker_path = std::env::current_exe()
+            .ok()
+            .and_then(|exe| {
+                let dir = exe.parent()?;
+                // Try sidecar name with target triple first (Tauri bundle format), then plain name
+                let candidates = [
+                    dir.join(format!("baras-parse-worker-{}-unknown-linux-gnu", std::env::consts::ARCH)),
+                    dir.join("baras-parse-worker"),
+                ];
+                candidates.into_iter().find(|p| p.exists())
+            })
+            .unwrap_or_else(|| PathBuf::from("baras-parse-worker"));
+
+        eprintln!("[PARSE] Using worker: {:?}", worker_path);
+
+        let output = std::process::Command::new(&worker_path)
+            .arg(&path)
+            .arg(&session_id)
+            .arg(&encounters_dir)
+            .output();
+
+        match output {
+            Ok(output) if output.status.success() => {
+                // Parse JSON result from subprocess
+                let json_result = String::from_utf8(output.stdout)
+                    .map_err(|e| format!("Invalid UTF-8: {}", e))
+                    .and_then(|result| {
+                        serde_json::from_str::<ParseWorkerOutput>(&result)
+                            .map_err(|e| format!("JSON parse error: {} (input: {})", e, &result[..result.len().min(500)]))
+                    });
+
+                match json_result {
+                    Ok(parse_result) => {
+                        let mut session_guard = session.write().await;
+                        session_guard.current_byte = Some(parse_result.end_pos);
+
+                        // Import encounter summaries and session metadata from subprocess
+                        if let Some(cache) = &mut session_guard.session_cache {
+                            for summary in parse_result.encounters {
+                                cache.encounter_history.add(summary);
+                            }
+
+                            // Import player info
+                            cache.player.name = baras_core::context::intern(&parse_result.player.name);
+                            cache.player.id = parse_result.player.entity_id;
+                            cache.player.class_name = parse_result.player.class_name.clone();
+                            cache.player.discipline_name = parse_result.player.discipline_name.clone();
+                            cache.player_initialized = true;
+
+                            // Import area info
+                            cache.current_area.area_name = parse_result.area.area_name.clone();
+                            cache.current_area.area_id = parse_result.area.area_id;
+                            cache.current_area.difficulty_name = parse_result.area.difficulty_name.clone();
+                        }
+
+                        // Enable live parquet writing (continues from where subprocess left off)
+                        session_guard.enable_live_parquet(
+                            encounters_dir.clone(),
+                            parse_result.encounter_count as u32,
+                        );
+
+                        session_guard.finalize_session();
+                        session_guard.sync_timer_context();
+                        drop(session_guard);
+
+                        eprintln!(
+                            "[PARSE] Subprocess parsed {} events ({} encounters) in {}ms",
+                            parse_result.event_count,
+                            parse_result.encounter_count,
+                            parse_result.elapsed_ms
+                        );
+
+                        // Notify frontend to refresh session info
+                        let _ = self.app_handle.emit("session-updated", "FileLoaded");
+                    }
+                    Err(e) => {
+                        eprintln!("[PARSE] Subprocess output parse failed: {}", e);
+                        fallback_streaming_parse(&reader, &session).await;
+                    }
+                }
             }
-            session_guard.current_byte = Some(end_pos);
-            // Finalize session to add the last encounter to history
-            session_guard.finalize_session();
-            // Sync area context to timer manager (handles mid-session starts)
-            session_guard.sync_timer_context();
-            drop(session_guard);
-            // Trigger initial metrics send after file processing
-            let _ = trigger_tx.send(MetricsTrigger::InitialLoad);
+            Ok(output) => {
+                eprintln!(
+                    "[PARSE] Subprocess failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                // Fallback to streaming parse in main process
+                fallback_streaming_parse(&reader, &session).await;
+            }
+            Err(e) => {
+                eprintln!("[PARSE] Failed to spawn subprocess: {}", e);
+                // Fallback to streaming parse in main process
+                fallback_streaming_parse(&reader, &session).await;
+            }
         }
+
+        eprintln!("[PARSE] Total time: {:.0}ms", timer.elapsed().as_millis());
+
+        // Trigger initial metrics send after file processing
+        let _ = trigger_tx.send(MetricsTrigger::InitialLoad);
 
         // Enable live mode for effect/timer tracking (skip historical events)
         {

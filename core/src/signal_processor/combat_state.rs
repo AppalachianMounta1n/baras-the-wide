@@ -81,7 +81,6 @@ fn handle_not_started(
             enc.enter_combat_time = Some(timestamp);
             enc.track_event_entities(&event);
             enc.accumulate_data(&event);
-            enc.events.push(event);
 
             signals.push(GameSignal::CombatStarted {
                 timestamp,
@@ -92,7 +91,6 @@ fn handle_not_started(
         // Buffer non-damage events for the upcoming encounter
         if let Some(enc) = cache.current_encounter_mut() {
             enc.accumulate_data(&event);
-            enc.events.push(event);
         }
     }
 
@@ -178,7 +176,6 @@ fn handle_in_combat(
             enc.state = EncounterState::PostCombat {
                 exit_time: timestamp,
             };
-            enc.events.push(event);
             let duration = enc.duration_seconds().unwrap_or(0) as f32;
             enc.challenge_tracker.finalize(timestamp, duration);
         }
@@ -210,7 +207,6 @@ fn handle_in_combat(
         if let Some(enc) = cache.current_encounter_mut() {
             enc.track_event_entities(&event);
             enc.accumulate_data(&event);
-            enc.events.push(event);
             if effect_id == effect_id::DAMAGE || effect_id == effect_id::HEAL {
                 enc.last_combat_activity_time = Some(timestamp);
             }
@@ -237,7 +233,6 @@ fn handle_post_combat(
             enc.state = EncounterState::InCombat;
             enc.enter_combat_time = Some(timestamp);
             enc.accumulate_data(&event);
-            enc.events.push(event);
         }
 
         signals.push(GameSignal::CombatStarted {
@@ -253,7 +248,6 @@ fn handle_post_combat(
             if let Some(enc) = cache.current_encounter_mut() {
                 enc.track_event_entities(&event);
                 enc.accumulate_data(&event);
-                enc.events.push(event);
             }
         } else {
             // Beyond grace period - discard and start fresh
@@ -264,7 +258,6 @@ fn handle_post_combat(
         cache.push_new_encounter();
         if let Some(enc) = cache.current_encounter_mut() {
             enc.accumulate_data(&event);
-            enc.events.push(event);
         }
     }
 

@@ -6,7 +6,7 @@ use crate::state::info::AreaInfo;
 use crate::game_data::{lookup_boss, register_hp_overlay_entity, lookup_registered_name, clear_boss_registry};
 use std::collections::{HashSet, VecDeque};
 
-const CACHE_DEFAULT_CAPACITY: usize = 3;
+const CACHE_DEFAULT_CAPACITY: usize = 2;
 
 /// Pure storage for session state.
 /// Routing logic lives in EventProcessor.
@@ -121,6 +121,10 @@ impl SessionCache {
 
     pub fn encounters(&self) -> impl Iterator<Item = &Encounter> {
         self.encounters.iter()
+    }
+
+    pub fn encounters_mut(&mut self) -> impl Iterator<Item = &mut Encounter> {
+        self.encounters.iter_mut()
     }
 
     pub fn encounter_by_id(&self, id: u64) -> Option<&Encounter> {
