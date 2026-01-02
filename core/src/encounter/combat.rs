@@ -272,7 +272,9 @@ impl CombatEncounter {
             100.0
         };
 
-        let old_percent = self.hp_by_entity.get(&entity_id).copied().unwrap_or(100.0);
+        // Use current HP as "old" for first readings - prevents false threshold crossings
+        // when we see an entity for the first time already below a threshold
+        let old_percent = self.hp_by_entity.get(&entity_id).copied().unwrap_or(new_percent);
 
         // Track by all identifiers
         self.hp_by_entity.insert(entity_id, new_percent);

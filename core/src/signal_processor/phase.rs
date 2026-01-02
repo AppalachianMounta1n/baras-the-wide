@@ -6,7 +6,6 @@
 use chrono::NaiveDateTime;
 
 use crate::combat_log::CombatEvent;
-use crate::encounter::CombatEncounter;
 use crate::game_data::{effect_id, effect_type_id};
 use crate::state::SessionCache;
 use crate::dsl::{EntitySelectorExt, Trigger};
@@ -23,6 +22,7 @@ pub fn check_hp_phase_transitions(
     old_hp: f32,
     new_hp: f32,
     npc_id: i64,
+    entity_name: &str,
     timestamp: NaiveDateTime,
 ) -> Vec<GameSignal> {
     let Some(enc) = cache.current_encounter() else {
@@ -55,7 +55,7 @@ pub fn check_hp_phase_transitions(
             }
         }
 
-        if check_hp_trigger(&phase.start_trigger, old_hp, new_hp, npc_id, enc) {
+        if check_hp_trigger(&phase.start_trigger, old_hp, new_hp, npc_id, entity_name) {
             let old_phase = enc.current_phase.clone();
             let new_phase_id = phase.id.clone();
             let boss_id = def.id.clone();
@@ -325,54 +325,59 @@ pub fn check_hp_trigger(
     old_hp: f32,
     new_hp: f32,
     npc_id: i64,
-    enc: &CombatEncounter,
+    entity_name: &str,
 ) -> bool {
     match trigger {
         Trigger::BossHpBelow { hp_percent, selector } => {
+            // First check if HP actually crossed the threshold
             let crossed = old_hp > *hp_percent && new_hp <= *hp_percent;
             if !crossed {
                 return false;
             }
 
-            // Check entity filter if specified
+            // No selector = any boss crossing threshold
             if selector.is_empty() {
-                return true; // No filter = any boss
+                return true;
             }
 
+            // NPC ID selector - check if THIS entity matches
             if selector.matches_npc_id(npc_id) {
                 return true;
             }
 
-            // Check by name in hp_by_name (for name-based selectors)
+            // Name selector - check if THIS entity's name matches
             if let Some(name) = selector.first_name() {
-                return enc.hp_by_name.contains_key(name);
+                return entity_name == name;
             }
 
             false
         }
         Trigger::BossHpAbove { hp_percent, selector } => {
+            // First check if HP actually crossed the threshold
             let crossed = old_hp < *hp_percent && new_hp >= *hp_percent;
             if !crossed {
                 return false;
             }
 
+            // No selector = any boss crossing threshold
             if selector.is_empty() {
                 return true;
             }
 
+            // NPC ID selector - check if THIS entity matches
             if selector.matches_npc_id(npc_id) {
                 return true;
             }
 
-            // Check by name in hp_by_name (for name-based selectors)
+            // Name selector - check if THIS entity's name matches
             if let Some(name) = selector.first_name() {
-                return enc.hp_by_name.contains_key(name);
+                return entity_name == name;
             }
 
             false
         }
         Trigger::AnyOf { conditions } => {
-            conditions.iter().any(|c| check_hp_trigger(c, old_hp, new_hp, npc_id, enc))
+            conditions.iter().any(|c| check_hp_trigger(c, old_hp, new_hp, npc_id, entity_name))
         }
         _ => false,
     }

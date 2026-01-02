@@ -769,6 +769,13 @@ impl CombatService {
         let encounters_dir = baras_core::storage::encounters_dir(&session_id)
             .unwrap_or_else(|_| PathBuf::from("/tmp/baras-encounters"));
 
+        // Get boss definitions directory for phase detection
+        let definitions_dir = self
+            .app_handle
+            .path()
+            .resolve("definitions/encounters", tauri::path::BaseDirectory::Resource)
+            .ok();
+
         // Spawn parse worker subprocess
         // Check multiple locations: bundled sidecar (with target triple), next to exe, fallback to PATH
         let worker_path = std::env::current_exe()
@@ -786,11 +793,16 @@ impl CombatService {
 
         eprintln!("[PARSE] Using worker: {:?}", worker_path);
 
-        let output = std::process::Command::new(&worker_path)
-            .arg(&path)
-            .arg(&session_id)
-            .arg(&encounters_dir)
-            .output();
+        let mut cmd = std::process::Command::new(&worker_path);
+        cmd.arg(&path).arg(&session_id).arg(&encounters_dir);
+
+        // Pass definitions directory if available
+        if let Some(ref def_dir) = definitions_dir {
+            cmd.arg(def_dir);
+            eprintln!("[PARSE] Using definitions: {:?}", def_dir);
+        }
+
+        let output = cmd.output();
 
         match output {
             Ok(output) if output.status.success() => {

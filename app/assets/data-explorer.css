@@ -1,0 +1,231 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Data Explorer Styles
+   Extends styles.css - uses shared variables and base classes
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Phase Timeline Filter
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.phase-timeline {
+    padding: var(--space-xs) 0;
+}
+
+/* Horizontal row: track + range display */
+.phase-timeline-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+/* Timeline track container - 34px tall */
+.phase-timeline-track {
+    position: relative;
+    flex: 1;
+    height: 34px;
+    background: hsl(210, 40%, 25%);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    cursor: crosshair;
+    user-select: none;
+}
+
+.phase-timeline-track:active {
+    cursor: ew-resize;
+}
+
+/* Time markers inside the track */
+.track-marker {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 10px;
+    font-family: var(--font-mono);
+    color: rgba(255, 255, 255, 0.5);
+    pointer-events: none;
+    z-index: 5;
+}
+
+.track-marker.start { left: 6px; }
+.track-marker.mid { left: 50%; transform: translate(-50%, -50%); }
+.track-marker.end { right: 6px; }
+
+/* Phase segment blocks */
+.phase-segment {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--font-xs);
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 var(--space-xs);
+    border-right: 1px solid var(--bg-secondary);
+    transition: filter var(--transition-fast);
+    user-select: none;
+}
+
+.phase-segment:hover {
+    filter: brightness(1.2);
+}
+
+.phase-segment.selected {
+    outline: 2px solid var(--accent-gold);
+    outline-offset: -2px;
+    z-index: 1;
+}
+
+/* Phase colors - rotating palette */
+.phase-segment:nth-child(6n+1) { background: var(--class-tank); }
+.phase-segment:nth-child(6n+2) { background: var(--class-healer); }
+.phase-segment:nth-child(6n+3) { background: var(--class-dps); }
+.phase-segment:nth-child(6n+4) { background: hsl(280, 50%, 35%); }
+.phase-segment:nth-child(6n+5) { background: hsl(30, 60%, 35%); }
+.phase-segment:nth-child(6n) { background: hsl(180, 40%, 30%); }
+
+/* No-phase regions (gaps between phases) */
+.phase-gap {
+    background: var(--bg-tertiary);
+}
+
+/* Selection range overlay */
+.phase-timeline-selection {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: hsl(45, 90%, 55%);
+    opacity: 0.7;
+    pointer-events: none;
+    border-left: 2px solid hsl(45, 100%, 65%);
+    border-right: 2px solid hsl(45, 100%, 65%);
+    min-width: 4px;
+    z-index: 10;
+}
+
+/* Active drag preview - bright and obvious */
+.phase-timeline-selection.preview {
+    opacity: 0.85;
+    background: hsl(45, 100%, 55%);
+    border-color: hsl(45, 100%, 70%);
+    box-shadow: 0 0 12px hsl(45, 100%, 50%);
+}
+
+/* Drag handles for range selection */
+.phase-timeline-handle {
+    position: absolute;
+    top: 0;
+    width: 8px;
+    height: 100%;
+    background: var(--accent-gold);
+    cursor: ew-resize;
+    z-index: 2;
+    transition: transform var(--transition-fast);
+}
+
+.phase-timeline-handle:hover {
+    transform: scaleX(1.5);
+}
+
+.phase-timeline-handle.left {
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+.phase-timeline-handle.right {
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+/* Compact range display (inline with track) */
+.phase-timeline-range {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.phase-timeline-range-value {
+    font-family: var(--font-mono);
+    color: var(--accent-gold);
+}
+
+.phase-timeline-range-separator {
+    color: var(--text-muted);
+}
+
+/* Reset button - compact X */
+.phase-timeline-reset {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    font-size: 12px;
+    line-height: 1;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    margin-left: 4px;
+}
+
+.phase-timeline-reset:hover {
+    background: hsl(0, 60%, 40%);
+    color: white;
+    border-color: hsl(0, 60%, 50%);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Phase Legend (optional, shows below timeline)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.phase-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--border-subtle);
+}
+
+.phase-legend-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: var(--font-xs);
+    color: var(--text-secondary);
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.phase-legend-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.phase-legend-item.active {
+    outline: 1px solid var(--accent-gold);
+}
+
+.phase-legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: var(--radius-xs);
+}
+
+.phase-legend-name {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.phase-legend-instance {
+    color: var(--text-muted);
+    font-size: 0.9em;
+}

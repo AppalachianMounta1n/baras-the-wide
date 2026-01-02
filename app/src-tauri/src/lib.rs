@@ -214,6 +214,7 @@ pub fn run() {
             commands::query_damage_by_ability,
             commands::query_entity_breakdown,
             commands::query_dps_over_time,
+            commands::query_encounter_timeline,
             commands::list_encounter_files,
             // Updater
             #[cfg(desktop)]

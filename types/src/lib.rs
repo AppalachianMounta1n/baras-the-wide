@@ -7,6 +7,85 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Query Result Types (shared between backend and frontend)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Query result for damage/healing by ability.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AbilityBreakdown {
+    pub ability_name: String,
+    pub ability_id: i64,
+    pub total_value: f64,
+    pub hit_count: i64,
+    pub crit_count: i64,
+    pub crit_rate: f64,
+    pub max_hit: f64,
+    pub avg_hit: f64,
+}
+
+/// Query result for damage/healing by source entity.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EntityBreakdown {
+    pub source_name: String,
+    pub source_id: i64,
+    pub total_value: f64,
+    pub abilities_used: i64,
+}
+
+/// Query result for time-series data (DPS/HPS over time).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TimeSeriesPoint {
+    pub bucket_start_ms: i64,
+    pub total_value: f64,
+}
+
+/// A phase segment - one occurrence of a phase (phases can repeat).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PhaseSegment {
+    pub phase_id: String,
+    pub phase_name: String,
+    pub instance: i64,
+    pub start_secs: f32,
+    pub end_secs: f32,
+}
+
+/// Encounter timeline with duration and phase segments.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EncounterTimeline {
+    pub duration_secs: f32,
+    pub phases: Vec<PhaseSegment>,
+}
+
+/// Time range filter for queries (in seconds from combat start).
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct TimeRange {
+    pub start: f32,
+    pub end: f32,
+}
+
+impl TimeRange {
+    pub fn new(start: f32, end: f32) -> Self {
+        Self { start, end }
+    }
+
+    pub fn full(duration: f32) -> Self {
+        Self { start: 0.0, end: duration }
+    }
+
+    pub fn is_full(&self, duration: f32) -> bool {
+        self.start <= 0.01 && (self.end - duration).abs() < 0.01
+    }
+
+    /// Generate SQL WHERE clause fragment for filtering by time range.
+    pub fn sql_filter(&self) -> String {
+        format!(
+            "combat_time_secs >= {} AND combat_time_secs <= {}",
+            self.start, self.end
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Color Type
 // ─────────────────────────────────────────────────────────────────────────────
 

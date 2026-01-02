@@ -3,12 +3,13 @@
 //! This binary is spawned by the main BARAS app to parse historical files.
 //! It runs in a separate process so memory fragmentation doesn't affect the main app.
 //!
-//! Usage: baras-parse-worker <file_path> <session_id> <output_dir>
+//! Usage: baras-parse-worker <file_path> <session_id> <output_dir> [definitions_dir]
 //!
 //! Output: JSON to stdout with encounter summaries and final byte position.
 
 use baras_core::combat_log::{CombatEvent, LogParser};
 use baras_core::context::{parse_log_filename, resolve};
+use baras_core::dsl::{load_bosses_from_dir, BossEncounterDefinition};
 use baras_core::encounter::summary::EncounterSummary;
 use baras_core::signal_processor::{EventProcessor, GameSignal};
 use baras_core::state::SessionCache;
@@ -59,14 +60,15 @@ struct ParseOutput {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 4 {
-        eprintln!("Usage: baras-parse-worker <file_path> <session_id> <output_dir>");
+    if args.len() < 4 {
+        eprintln!("Usage: baras-parse-worker <file_path> <session_id> <output_dir> [definitions_dir]");
         std::process::exit(1);
     }
 
     let file_path = PathBuf::from(&args[1]);
     let session_id = &args[2];
     let output_dir = PathBuf::from(&args[3]);
+    let definitions_dir = args.get(4).map(PathBuf::from);
 
     // Ensure output directory exists
     if let Err(e) = fs::create_dir_all(&output_dir) {
@@ -74,9 +76,26 @@ fn main() {
         std::process::exit(1);
     }
 
+    // Load boss definitions if path provided
+    let boss_definitions = definitions_dir
+        .as_ref()
+        .and_then(|dir| {
+            match load_bosses_from_dir(dir) {
+                Ok(bosses) => {
+                    eprintln!("[PARSE-WORKER] Loaded {} boss definitions", bosses.len());
+                    Some(bosses)
+                }
+                Err(e) => {
+                    eprintln!("[PARSE-WORKER] Failed to load definitions: {}", e);
+                    None
+                }
+            }
+        })
+        .unwrap_or_default();
+
     let timer = std::time::Instant::now();
 
-    match parse_file(&file_path, session_id, &output_dir) {
+    match parse_file(&file_path, session_id, &output_dir, &boss_definitions) {
         Ok(output) => {
             let mut output = output;
             output.elapsed_ms = timer.elapsed().as_millis();
@@ -97,6 +116,7 @@ fn parse_file(
     file_path: &Path,
     _session_id: &str,
     output_dir: &Path,
+    boss_definitions: &[BossEncounterDefinition],
 ) -> Result<ParseOutput, String> {
     // Extract session date from filename
     let date_stamp = file_path
@@ -139,7 +159,7 @@ fn parse_file(
     let event_count = events.len();
 
     // Process events and write encounters
-    let (encounters, player, area) = process_and_write_encounters(events, output_dir)?;
+    let (encounters, player, area) = process_and_write_encounters(events, output_dir, boss_definitions)?;
 
     Ok(ParseOutput {
         end_pos,
@@ -155,6 +175,7 @@ fn parse_file(
 fn process_and_write_encounters(
     events: Vec<CombatEvent>,
     output_dir: &Path,
+    boss_definitions: &[BossEncounterDefinition],
 ) -> Result<(Vec<EncounterSummary>, PlayerInfo, AreaInfoOutput), String> {
     let mut cache = SessionCache::new();
     let mut processor = EventProcessor::new();
@@ -162,15 +183,19 @@ fn process_and_write_encounters(
     let mut current_encounter_idx: u32 = 0;
     let mut pending_write = false;
 
+    // Load boss definitions into cache for phase detection
+    if !boss_definitions.is_empty() {
+        cache.load_boss_definitions(boss_definitions.to_vec());
+    }
+
     for event in events {
-        // Build metadata for this event
+        // Process event FIRST to detect phase transitions, boss detection, etc.
+        // This updates cache state (including current_phase) before we capture metadata.
+        let signals = processor.process_event(event.clone(), &mut cache);
+
+        // Build metadata AFTER processing so phase state is current
         let metadata = EventMetadata::from_cache(&cache, current_encounter_idx, event.timestamp);
         writer.push_event(&event, &metadata);
-
-        // Process through state machine
-        // Note: CombatEnded triggers push_new_encounter which calls finalize_current_encounter
-        // which creates the summary and adds it to encounter_history
-        let signals = processor.process_event(event, &mut cache);
 
         // Check for combat end signal
         for signal in &signals {

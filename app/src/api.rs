@@ -642,38 +642,14 @@ pub async fn install_update() -> Result<(), String> {
 // Query Commands (Data Explorer)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Damage breakdown by ability
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct AbilityBreakdown {
-    pub ability_name: String,
-    pub ability_id: i64,
-    pub total_value: f64,
-    pub hit_count: i64,
-    pub crit_count: i64,
-    pub crit_rate: f64,
-    pub max_hit: f64,
-    pub avg_hit: f64,
-}
-
-/// Damage breakdown by entity
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct EntityBreakdown {
-    pub source_name: String,
-    pub source_id: i64,
-    pub total_value: f64,
-    pub abilities_used: i64,
-}
-
-/// DPS over time data point
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct TimeSeriesPoint {
-    pub bucket_start_ms: i64,
-    pub total_value: f64,
-}
+// Re-export query types from shared types crate
+pub use baras_types::{
+    AbilityBreakdown, EncounterTimeline, EntityBreakdown, PhaseSegment, TimeRange, TimeSeriesPoint,
+};
 
 /// Query damage by ability for an encounter.
 /// Pass encounter_idx for historical, or None for live encounter.
-pub async fn query_damage_by_ability(encounter_idx: Option<u32>, source_name: Option<&str>) -> Option<Vec<AbilityBreakdown>> {
+pub async fn query_damage_by_ability(encounter_idx: Option<u32>, source_name: Option<&str>, time_range: Option<&TimeRange>) -> Option<Vec<AbilityBreakdown>> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
         js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::from_f64(idx as f64)).unwrap();
@@ -685,24 +661,36 @@ pub async fn query_damage_by_ability(encounter_idx: Option<u32>, source_name: Op
     } else {
         js_sys::Reflect::set(&obj, &JsValue::from_str("sourceName"), &JsValue::NULL).unwrap();
     }
+    if let Some(tr) = time_range {
+        let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
+        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &tr_js).unwrap();
+    } else {
+        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &JsValue::NULL).unwrap();
+    }
     let result = invoke("query_damage_by_ability", obj.into()).await;
     from_js(result)
 }
 
 /// Query breakdown by source entity.
-pub async fn query_entity_breakdown(encounter_idx: Option<u32>) -> Option<Vec<EntityBreakdown>> {
+pub async fn query_entity_breakdown(encounter_idx: Option<u32>, time_range: Option<&TimeRange>) -> Option<Vec<EntityBreakdown>> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
         js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::from_f64(idx as f64)).unwrap();
     } else {
         js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::NULL).unwrap();
     }
+    if let Some(tr) = time_range {
+        let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
+        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &tr_js).unwrap();
+    } else {
+        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &JsValue::NULL).unwrap();
+    }
     let result = invoke("query_entity_breakdown", obj.into()).await;
     from_js(result)
 }
 
 /// Query DPS over time with specified bucket size.
-pub async fn query_dps_over_time(encounter_idx: Option<u32>, bucket_ms: i64, source_name: Option<&str>) -> Option<Vec<TimeSeriesPoint>> {
+pub async fn query_dps_over_time(encounter_idx: Option<u32>, bucket_ms: i64, source_name: Option<&str>, time_range: Option<&TimeRange>) -> Option<Vec<TimeSeriesPoint>> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
         js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::from_f64(idx as f64)).unwrap();
@@ -715,6 +703,12 @@ pub async fn query_dps_over_time(encounter_idx: Option<u32>, bucket_ms: i64, sou
     } else {
         js_sys::Reflect::set(&obj, &JsValue::from_str("sourceName"), &JsValue::NULL).unwrap();
     }
+    if let Some(tr) = time_range {
+        let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
+        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &tr_js).unwrap();
+    } else {
+        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &JsValue::NULL).unwrap();
+    }
     let result = invoke("query_dps_over_time", obj.into()).await;
     from_js(result)
 }
@@ -722,5 +716,17 @@ pub async fn query_dps_over_time(encounter_idx: Option<u32>, bucket_ms: i64, sou
 /// List available encounter parquet files.
 pub async fn list_encounter_files() -> Option<Vec<u32>> {
     let result = invoke("list_encounter_files", JsValue::NULL).await;
+    from_js(result)
+}
+
+/// Query encounter timeline with phase segments.
+pub async fn query_encounter_timeline(encounter_idx: Option<u32>) -> Option<EncounterTimeline> {
+    let obj = js_sys::Object::new();
+    if let Some(idx) = encounter_idx {
+        js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::from_f64(idx as f64)).unwrap();
+    } else {
+        js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::NULL).unwrap();
+    }
+    let result = invoke("query_encounter_timeline", obj.into()).await;
     from_js(result)
 }

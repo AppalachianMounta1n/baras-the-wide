@@ -121,13 +121,16 @@ impl ParsingSession {
     /// Process a single event through the processor and dispatch signals
     pub fn process_event(&mut self, event: CombatEvent) {
         if let Some(cache) = &mut self.session_cache {
-            // Write event to parquet buffer if live writing is enabled
+            // Process event FIRST to detect phase transitions, boss detection, etc.
+            // This updates cache state (including current_phase) before we capture metadata.
+            let signals = self.processor.process_event(event.clone(), cache);
+
+            // Write event to parquet buffer AFTER processing
+            // (so metadata captures the updated phase state)
             if let Some(writer) = &mut self.encounter_writer {
                 let metadata = EventMetadata::from_cache(cache, self.encounter_idx, event.timestamp);
                 writer.push_event(&event, &metadata);
             }
-
-            let signals = self.processor.process_event(event, cache);
 
             // Flush parquet on combat end
             let should_flush = signals.iter().any(|s| matches!(s, GameSignal::CombatEnded { .. }));

@@ -2,7 +2,7 @@
 //!
 //! Provides SQL-based queries over encounter data using DataFusion.
 
-use baras_core::query::{AbilityBreakdown, EntityBreakdown, TimeSeriesPoint};
+use baras_core::query::{AbilityBreakdown, EncounterTimeline, EntityBreakdown, TimeRange, TimeSeriesPoint};
 use tauri::State;
 
 use crate::service::ServiceHandle;
@@ -14,8 +14,9 @@ pub async fn query_damage_by_ability(
     handle: State<'_, ServiceHandle>,
     encounter_idx: Option<u32>,
     source_name: Option<String>,
+    time_range: Option<TimeRange>,
 ) -> Result<Vec<AbilityBreakdown>, String> {
-    handle.query_damage_by_ability(encounter_idx, source_name).await
+    handle.query_damage_by_ability(encounter_idx, source_name, time_range).await
 }
 
 /// Query damage/healing breakdown by source entity.
@@ -23,8 +24,9 @@ pub async fn query_damage_by_ability(
 pub async fn query_entity_breakdown(
     handle: State<'_, ServiceHandle>,
     encounter_idx: Option<u32>,
+    time_range: Option<TimeRange>,
 ) -> Result<Vec<EntityBreakdown>, String> {
-    handle.query_entity_breakdown(encounter_idx).await
+    handle.query_entity_breakdown(encounter_idx, time_range).await
 }
 
 /// Query DPS over time with specified bucket size.
@@ -34,8 +36,9 @@ pub async fn query_dps_over_time(
     encounter_idx: Option<u32>,
     bucket_ms: i64,
     source_name: Option<String>,
+    time_range: Option<TimeRange>,
 ) -> Result<Vec<TimeSeriesPoint>, String> {
-    handle.query_dps_over_time(encounter_idx, bucket_ms, source_name).await
+    handle.query_dps_over_time(encounter_idx, bucket_ms, source_name, time_range).await
 }
 
 /// List available encounter parquet files.
@@ -44,4 +47,13 @@ pub async fn list_encounter_files(
     handle: State<'_, ServiceHandle>,
 ) -> Result<Vec<u32>, String> {
     handle.list_encounter_files().await
+}
+
+/// Get encounter timeline with phase segments.
+#[tauri::command]
+pub async fn query_encounter_timeline(
+    handle: State<'_, ServiceHandle>,
+    encounter_idx: Option<u32>,
+) -> Result<EncounterTimeline, String> {
+    handle.query_encounter_timeline(encounter_idx).await
 }

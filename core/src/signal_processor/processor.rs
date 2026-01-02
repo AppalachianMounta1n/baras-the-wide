@@ -400,7 +400,7 @@ impl EventProcessor {
                 });
 
                 // Check for HP-based phase transitions
-                signals.extend(phase::check_hp_phase_transitions(cache, old_hp, new_hp, entity.class_id, event.timestamp));
+                signals.extend(phase::check_hp_phase_transitions(cache, old_hp, new_hp, entity.class_id, resolve(entity.name), event.timestamp));
             }
         }
 

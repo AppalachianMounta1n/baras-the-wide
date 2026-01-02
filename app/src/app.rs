@@ -11,6 +11,7 @@ use crate::components::{DataExplorerPanel, EffectEditorPanel, EncounterEditorPan
 use crate::types::{LogFileInfo, MetricType, OverlaySettings, OverlayStatus, OverlayType, SessionInfo, UpdateInfo};
 
 static CSS: Asset = asset!("/assets/styles.css");
+static DATA_EXPLORER_CSS: Asset = asset!("/assets/data-explorer.css");
 static LOGO: Asset = asset!("/assets/logo.png");
 static FONT: Asset = asset!("/assets/StarJedi.ttf");
 
@@ -230,6 +231,7 @@ pub fn App() -> Element {
 
     rsx! {
         link { rel: "stylesheet", href: CSS }
+        link { rel: "stylesheet", href: DATA_EXPLORER_CSS }
         link { rel: "stylesheet", href: "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" }
         style { "@font-face {{ font-family: 'StarJedi'; src: url('{FONT}') format('truetype'); }}" }
 

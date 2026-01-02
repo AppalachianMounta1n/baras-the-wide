@@ -7,8 +7,9 @@ use dioxus::prelude::*;
 use std::collections::HashSet;
 use wasm_bindgen_futures::spawn_local as spawn;
 
-use crate::api::{self, AbilityBreakdown, EntityBreakdown};
+use crate::api::{self, AbilityBreakdown, EncounterTimeline, EntityBreakdown, TimeRange};
 use crate::components::history_panel::EncounterSummary;
+use crate::components::phase_timeline::PhaseTimelineFilter;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper Functions
@@ -78,6 +79,10 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
     let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
 
+    // Timeline state
+    let mut timeline = use_signal(|| None::<EncounterTimeline>);
+    let mut time_range = use_signal(|| TimeRange::default());
+
     // Load encounter list on mount
     use_effect(move || {
         spawn(async move {
@@ -95,6 +100,8 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
             abilities.set(Vec::new());
             entities.set(Vec::new());
             selected_source.set(None);
+            timeline.set(None);
+            time_range.set(TimeRange::default());
             error_msg.set(None);
 
             if idx.is_none() {
@@ -103,8 +110,14 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
 
             loading.set(true);
 
-            // Load entity breakdown first
-            match api::query_entity_breakdown(idx).await {
+            // Load timeline first (needed for time range filter)
+            if let Some(tl) = api::query_encounter_timeline(idx).await {
+                time_range.set(TimeRange::full(tl.duration_secs));
+                timeline.set(Some(tl));
+            }
+
+            // Load entity breakdown (no time filter on initial load - we don't have timeline yet)
+            match api::query_entity_breakdown(idx, None).await {
                 Some(data) => entities.set(data),
                 None => {
                     error_msg.set(Some("No data available for this encounter".to_string()));
@@ -113,10 +126,38 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
                 }
             }
 
-            // Load ability breakdown (all sources initially)
-            match api::query_damage_by_ability(idx, None).await {
+            // Load ability breakdown (all sources initially, no time filter)
+            match api::query_damage_by_ability(idx, None, None).await {
                 Some(data) => abilities.set(data),
                 None => error_msg.set(Some("Failed to load ability breakdown".to_string())),
+            }
+
+            loading.set(false);
+        });
+    });
+
+    // Reload data when time range changes
+    use_effect(move || {
+        let idx = *selected_encounter.read();
+        let tr = time_range();
+        let src = selected_source.read().clone();
+
+        // Skip if no encounter selected or time_range is default (initial load)
+        if idx.is_none() || (tr.start == 0.0 && tr.end == 0.0) {
+            return;
+        }
+
+        spawn(async move {
+            loading.set(true);
+
+            // Reload entity breakdown with time filter
+            if let Some(data) = api::query_entity_breakdown(idx, Some(&tr)).await {
+                entities.set(data);
+            }
+
+            // Reload ability breakdown with time filter
+            if let Some(data) = api::query_damage_by_ability(idx, src.as_deref(), Some(&tr)).await {
+                abilities.set(data);
             }
 
             loading.set(false);
@@ -127,6 +168,7 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
     let mut on_source_click = move |name: String| {
         let idx = *selected_encounter.read();
         let current = selected_source.read().clone();
+        let tr = time_range();
 
         // Toggle selection
         let new_source = if current.as_ref() == Some(&name) {
@@ -137,9 +179,12 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
 
         selected_source.set(new_source.clone());
 
+        // Use time_range if not default
+        let tr_opt = if tr.start == 0.0 && tr.end == 0.0 { None } else { Some(tr) };
+
         spawn(async move {
             loading.set(true);
-            if let Some(data) = api::query_damage_by_ability(idx, new_source.as_deref()).await {
+            if let Some(data) = api::query_damage_by_ability(idx, new_source.as_deref(), tr_opt.as_ref()).await {
                 abilities.set(data);
             }
             loading.set(false);
@@ -275,19 +320,14 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
                         p { class: "hint", "Choose an encounter from the sidebar to view detailed breakdown" }
                     }
                 } else {
-                    // Header
-                    div { class: "explorer-header",
-                        h3 {
-                            if let Some(idx) = *selected_encounter.read() {
-                                if let Some(enc) = encounters.read().get(idx as usize) {
-                                    "{enc.display_name}"
-                                } else {
-                                    "Encounter #{idx}"
-                                }
+                    // Phase timeline filter (when timeline is loaded)
+                    if let Some(tl) = timeline.read().as_ref() {
+                        PhaseTimelineFilter {
+                            timeline: tl.clone(),
+                            range: time_range(),
+                            on_range_change: move |new_range: TimeRange| {
+                                time_range.set(new_range);
                             }
-                        }
-                        if *loading.read() {
-                            span { class: "loading-indicator", "Loading..." }
                         }
                     }
 

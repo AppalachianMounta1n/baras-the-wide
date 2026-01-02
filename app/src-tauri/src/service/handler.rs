@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use baras_core::EncounterSummary;
 use baras_core::context::{AppConfig, AppConfigExt, resolve};
 use baras_core::encounter::EncounterState;
-use baras_core::query::{AbilityBreakdown, EncounterQuery, EntityBreakdown, TimeSeriesPoint};
+use baras_core::query::{AbilityBreakdown, EncounterQuery, EncounterTimeline, EntityBreakdown, TimeRange, TimeSeriesPoint};
 
 use super::{CombatData, LogFileInfo, ServiceCommand, SessionInfo};
 use crate::state::SharedState;
@@ -313,6 +313,7 @@ impl ServiceHandle {
         &self,
         encounter_idx: Option<u32>,
         source_name: Option<String>,
+        time_range: Option<TimeRange>,
     ) -> Result<Vec<AbilityBreakdown>, String> {
         let session_guard = self.shared.session.read().await;
         let session = session_guard.as_ref().ok_or("No active session")?;
@@ -335,13 +336,14 @@ impl ServiceHandle {
             query.register_batch(batch).await?;
         }
 
-        query.damage_by_ability(source_name.as_deref()).await
+        query.damage_by_ability(source_name.as_deref(), time_range.as_ref()).await
     }
 
     /// Query breakdown by entity for a specific encounter.
     pub async fn query_entity_breakdown(
         &self,
         encounter_idx: Option<u32>,
+        time_range: Option<TimeRange>,
     ) -> Result<Vec<EntityBreakdown>, String> {
         let session_guard = self.shared.session.read().await;
         let session = session_guard.as_ref().ok_or("No active session")?;
@@ -362,7 +364,7 @@ impl ServiceHandle {
             query.register_batch(batch).await?;
         }
 
-        query.breakdown_by_entity().await
+        query.breakdown_by_entity(time_range.as_ref()).await
     }
 
     /// Query DPS over time for a specific encounter.
@@ -371,6 +373,7 @@ impl ServiceHandle {
         encounter_idx: Option<u32>,
         bucket_ms: i64,
         source_name: Option<String>,
+        time_range: Option<TimeRange>,
     ) -> Result<Vec<TimeSeriesPoint>, String> {
         let session_guard = self.shared.session.read().await;
         let session = session_guard.as_ref().ok_or("No active session")?;
@@ -391,7 +394,7 @@ impl ServiceHandle {
             query.register_batch(batch).await?;
         }
 
-        query.dps_over_time(bucket_ms, source_name.as_deref()).await
+        query.dps_over_time(bucket_ms, source_name.as_deref(), time_range.as_ref()).await
     }
 
     /// Get list of available encounter parquet files.
@@ -416,6 +419,33 @@ impl ServiceHandle {
         }
         indices.sort();
         Ok(indices)
+    }
+
+    /// Query encounter timeline with phase segments.
+    pub async fn query_encounter_timeline(
+        &self,
+        encounter_idx: Option<u32>,
+    ) -> Result<EncounterTimeline, String> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref().ok_or("No active session")?;
+        let session = session.read().await;
+
+        let query = EncounterQuery::new();
+
+        if let Some(idx) = encounter_idx {
+            let dir = session.encounters_dir().ok_or("No encounters directory")?;
+            let path = dir.join(baras_core::storage::encounter_filename(idx));
+            if !path.exists() {
+                return Err(format!("Encounter file not found: {:?}", path));
+            }
+            query.register_parquet(&path).await?;
+        } else {
+            let writer = session.encounter_writer().ok_or("No live encounter buffer")?;
+            let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
+            query.register_batch(batch).await?;
+        }
+
+        query.encounter_timeline().await
     }
 
     // ─────────────────────────────────────────────────────────────────────────
