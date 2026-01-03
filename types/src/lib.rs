@@ -1102,7 +1102,7 @@ pub struct OverlaySettings {
     pub personal_opacity: u8,
     #[serde(default)]
     pub class_icons_enabled: bool,
-    #[serde(default, skip_deserializing)]
+    #[serde(default)]
     pub default_appearances: HashMap<String, OverlayAppearanceConfig>,
     #[serde(default)]
     pub raid_overlay: RaidOverlaySettings,
