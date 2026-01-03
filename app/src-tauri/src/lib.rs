@@ -55,6 +55,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -105,6 +106,7 @@ pub fn run() {
             }
         })
         .manage(overlay_state)
+        .manage(updater::PendingUpdate::default())
         .on_window_event(|window, event| {
             // Minimize to tray on close instead of quitting (if enabled)
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

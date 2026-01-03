@@ -78,9 +78,8 @@ jobs:
           name: linux-release
           path: |
             target/release/bundle/appimage/*.AppImage
-            target/release/bundle/appimage/*.AppImage.sig
-            target/release/bundle/appimage/*.AppImage.tar.gz
-            target/release/bundle/appimage/*.AppImage.tar.gz.sig
+            target/release/bundle/appimage/*.sig
+            target/release/bundle/appimage/*.tar.gz
 
   build-windows:
     runs-on: windows-latest
@@ -123,8 +122,8 @@ jobs:
           name: windows-release
           path: |
             target/release/bundle/nsis/*.exe
-            target/release/bundle/nsis/*.nsis.zip
-            target/release/bundle/nsis/*.nsis.zip.sig
+            target/release/bundle/nsis/*.sig
+            target/release/bundle/nsis/*.zip
 
   publish-release:
     needs: [build-linux, build-windows]
@@ -156,13 +155,23 @@ jobs:
           NOTES="${{ inputs.release_notes }}"
           PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-          # Find signature files
-          LINUX_SIG=$(cat artifacts/linux/*.tar.gz.sig 2>/dev/null || echo "")
-          WINDOWS_SIG=$(cat artifacts/windows/*.nsis.zip.sig 2>/dev/null || echo "")
+          # Find the tar.gz and zip files (updater artifacts)
+          LINUX_TARBALL=$(find artifacts/linux -name "*.tar.gz" -type f | head -1)
+          WINDOWS_ZIP=$(find artifacts/windows -name "*.zip" -type f | head -1)
 
-          # Get artifact filenames
-          LINUX_FILE=$(basename artifacts/linux/*.tar.gz 2>/dev/null | head -1)
-          WINDOWS_FILE=$(basename artifacts/windows/*.nsis.zip 2>/dev/null | head -1)
+          # Read signatures
+          LINUX_SIG=""
+          WINDOWS_SIG=""
+          if [ -f "${LINUX_TARBALL}.sig" ]; then
+            LINUX_SIG=$(cat "${LINUX_TARBALL}.sig")
+          fi
+          if [ -f "${WINDOWS_ZIP}.sig" ]; then
+            WINDOWS_SIG=$(cat "${WINDOWS_ZIP}.sig")
+          fi
+
+          # Get filenames for URLs
+          LINUX_FILE=$(basename "$LINUX_TARBALL" 2>/dev/null || echo "")
+          WINDOWS_FILE=$(basename "$WINDOWS_ZIP" 2>/dev/null || echo "")
 
           # Create latest.json
           cat > latest.json << EOF
@@ -197,7 +206,7 @@ jobs:
             artifacts/linux/*.AppImage
             artifacts/linux/*.tar.gz
             artifacts/windows/*.exe
-            artifacts/windows/*.nsis.zip
+            artifacts/windows/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

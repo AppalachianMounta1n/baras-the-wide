@@ -1,11 +1,16 @@
 //! Auto-updater module
 //!
-//! Checks for updates on startup and emits events to the frontend.
-//! The user can then choose to download and install the update.
+//! Checks for updates on startup and caches the Update object.
+//! The user can then download and install without re-fetching.
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
-use tauri_plugin_updater::UpdaterExt;
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_updater::{Update, UpdaterExt};
+
+/// Cached pending update stored in Tauri managed state
+#[derive(Default)]
+pub struct PendingUpdate(pub Mutex<Option<Update>>);
 
 #[derive(Clone, Serialize)]
 pub struct UpdateAvailable {
@@ -36,6 +41,11 @@ async fn check_for_update(app: &AppHandle) -> Result<(), Box<dyn std::error::Err
             date: update.date.map(|d| d.to_string()),
         };
 
+        // Cache the update for later installation
+        if let Some(state) = app.try_state::<PendingUpdate>() {
+            *state.0.lock().unwrap() = Some(update);
+        }
+
         // Emit event to frontend
         app.emit("update-available", info)?;
     }
@@ -43,38 +53,43 @@ async fn check_for_update(app: &AppHandle) -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
-/// Download and install a pending update (called from frontend)
+/// Download and install the cached pending update
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
-    let updater = app.updater().map_err(|e| e.to_string())?;
-
-    let update = updater
-        .check()
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or("No update available")?;
+    // Take the cached update (removes it from state)
+    let update = app
+        .try_state::<PendingUpdate>()
+        .and_then(|state| state.0.lock().unwrap().take())
+        .ok_or("No pending update available")?;
 
     // Download and install
-    let mut downloaded = 0;
+    let mut downloaded: usize = 0;
+    let app_handle = app.clone();
 
-    update
+    let result = update
         .download_and_install(
             |chunk, total| {
                 downloaded += chunk;
                 if let Some(total) = total {
                     let progress = (downloaded as f64 / total as f64) * 100.0;
-                    let _ = app.emit("update-progress", progress);
+                    let _ = app_handle.emit("update-progress", progress);
                 }
             },
-            || {
-                // Called before the app restarts
-                let _ = app.emit("update-installing", ());
-            },
+            || {},
         )
-        .await
-        .map_err(|e| e.to_string())?;
+        .await;
 
-    Ok(())
+    match result {
+        Ok(()) => {
+            app.restart();
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            // Emit failure event so frontend can show error and reset state
+            let _ = app.emit("update-failed", &msg);
+            return Err(msg);
+        }
+    }
 }
 
 /// Manually check for updates (called from frontend)
@@ -84,9 +99,18 @@ pub async fn check_update(app: AppHandle) -> Result<Option<UpdateAvailable>, Str
 
     let update = updater.check().await.map_err(|e| e.to_string())?;
 
-    Ok(update.map(|u| UpdateAvailable {
-        version: u.version,
-        notes: u.body,
-        date: u.date.map(|d| d.to_string()),
+    Ok(update.map(|u| {
+        let info = UpdateAvailable {
+            version: u.version.clone(),
+            notes: u.body.clone(),
+            date: u.date.map(|d| d.to_string()),
+        };
+
+        // Cache the update for later installation
+        if let Some(state) = app.try_state::<PendingUpdate>() {
+            *state.0.lock().unwrap() = Some(u);
+        }
+
+        info
     }))
 }

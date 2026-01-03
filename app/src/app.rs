@@ -209,6 +209,21 @@ pub fn App() -> Element {
         closure.forget();
     });
 
+    // Listen for update failures
+    use_future(move || async move {
+        let closure = Closure::new(move |event: JsValue| {
+            if let Ok(payload) = js_sys::Reflect::get(&event, &JsValue::from_str("payload")) {
+                if let Some(msg) = payload.as_string() {
+                    console::error_1(&format!("Update failed: {}", msg).into());
+                }
+            }
+            // Reset installing state so user can retry
+            let _ = update_installing.try_write().map(|mut w| *w = false);
+        });
+        api::tauri_listen("update-failed", &closure).await;
+        closure.forget();
+    });
+
     // ─────────────────────────────────────────────────────────────────────────
     // Computed Values
     // ─────────────────────────────────────────────────────────────────────────
