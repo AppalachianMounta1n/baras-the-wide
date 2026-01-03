@@ -126,7 +126,8 @@ pub fn HistoryPanel() -> Element {
                 && (event_type.contains("CombatEnded") || event_type.contains("TailingModeChanged") || event_type.contains("FileLoaded")) {
                     spawn(async move {
                         if let Some(history) = api::get_encounter_history().await {
-                            encounters.set(history);
+                            // Use try_write to handle signal being dropped when component unmounts
+                            let _ = encounters.try_write().map(|mut w| *w = history);
                         }
                     });
                 }

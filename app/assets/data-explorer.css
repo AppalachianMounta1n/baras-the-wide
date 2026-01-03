@@ -24,7 +24,8 @@
     flex: 1;
     height: 34px;
     background: hsl(210, 40%, 25%);
-    border-radius: var(--radius-sm);
+    border: 2px solid hsl(210, 20%, 15%);
+    border-radius: 6px;
     overflow: hidden;
     cursor: crosshair;
     user-select: none;
@@ -59,11 +60,11 @@
     align-items: center;
     gap: 4px;
     font-size: 9px;
-    color: rgba(255, 255, 255, 0.9);
+    color: rgba(255, 255, 255, 0.8);
     overflow: hidden;
     white-space: nowrap;
     padding: 0 4px;
-    border-right: 1px solid rgba(0, 0, 0, 0.3);
+    border-right: 2px solid hsl(210, 20%, 15%);
     transition: filter var(--transition-fast);
     user-select: none;
     z-index: 6; /* Above track markers (z-index: 5) */
@@ -584,8 +585,8 @@
    ───────────────────────────────────────────────────────────────────────────── */
 
 .death-tracker {
-    background: hsla(0, 40%, 20%, 0.4);
-    border: 1px solid hsl(0, 50%, 35%);
+    background: hsla(0, 0%, 25%, 0.4);
+    border: 1px solid hsl(0, 0%, 40%);
     border-radius: var(--radius-sm);
     padding: var(--space-sm);
     margin-bottom: var(--space-md);
@@ -595,7 +596,7 @@
     margin: 0 0 var(--space-xs) 0;
     font-size: 12px;
     font-weight: 600;
-    color: hsl(0, 60%, 65%);
+    color: hsl(0, 0%, 70%);
     display: flex;
     align-items: center;
     gap: 6px;
@@ -616,8 +617,8 @@
     align-items: center;
     gap: 6px;
     padding: 4px 10px;
-    background: hsla(0, 30%, 25%, 0.6);
-    border: 1px solid hsl(0, 40%, 35%);
+    background: hsla(0, 0%, 30%, 0.6);
+    border: 1px solid hsl(0, 0%, 45%);
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition: all var(--transition-fast);
@@ -625,8 +626,8 @@
 }
 
 .death-item:hover {
-    background: hsla(0, 40%, 30%, 0.8);
-    border-color: hsl(0, 50%, 45%);
+    background: hsla(0, 0%, 40%, 0.8);
+    border-color: hsl(0, 0%, 55%);
     transform: translateY(-1px);
 }
 
@@ -636,7 +637,7 @@
 }
 
 .death-time {
-    color: hsl(0, 50%, 60%);
+    color: hsl(0, 0%, 65%);
     font-family: var(--font-mono);
     font-size: 10px;
 }

@@ -18,6 +18,9 @@ const PAGE_SIZE: u64 = 200;
 pub struct CombatLogProps {
     pub encounter_idx: u32,
     pub time_range: TimeRange,
+    /// Optional initial search text (e.g., player name from death tracker)
+    #[props(default)]
+    pub initial_search: Option<String>,
 }
 
 /// Format time as M:SS.d
@@ -92,10 +95,16 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
         time_range_signal.set(props.time_range.clone());
     }
 
-    // Filter state
+    // Filter state - initialize search from props if provided (e.g., death tracker)
     let mut source_filter = use_signal(|| None::<String>);
     let mut target_filter = use_signal(|| None::<String>);
-    let mut search_text = use_signal(String::new);
+    let mut search_text = use_signal(|| props.initial_search.clone().unwrap_or_default());
+
+    // Update search text when prop changes (e.g., clicking different deaths)
+    let expected_search = props.initial_search.clone().unwrap_or_default();
+    if *search_text.read() != expected_search {
+        search_text.set(expected_search);
+    }
 
     // Data state
     let mut rows = use_signal(Vec::<CombatLogRow>::new);
@@ -247,11 +256,16 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
         });
     }
 
-    // Slice visible rows from loaded data
+    // Slice visible rows from loaded data (with bounds safety)
     let visible_rows: Vec<&CombatLogRow> = if !current_rows.is_empty() {
-        let rel_start = start_idx.saturating_sub(offset);
-        let rel_end = (end_idx.saturating_sub(offset)).min(current_rows.len());
-        current_rows[rel_start..rel_end].iter().collect()
+        let rel_start = start_idx.saturating_sub(offset).min(current_rows.len());
+        let rel_end = end_idx.saturating_sub(offset).min(current_rows.len());
+        // Ensure start <= end
+        if rel_start < rel_end {
+            current_rows[rel_start..rel_end].iter().collect()
+        } else {
+            vec![]
+        }
     } else {
         vec![]
     };

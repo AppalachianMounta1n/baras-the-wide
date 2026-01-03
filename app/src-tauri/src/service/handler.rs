@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use baras_core::EncounterSummary;
 use baras_core::context::{AppConfig, AppConfigExt, resolve};
 use baras_core::encounter::EncounterState;
-use baras_core::query::{AbilityBreakdown, BreakdownMode, CombatLogRow, DataTab, EffectChartData, EffectWindow, EncounterQuery, EncounterTimeline, EntityBreakdown, PlayerDeath, RaidOverviewRow, TimeRange, TimeSeriesPoint};
+use baras_core::query::{AbilityBreakdown, BreakdownMode, CombatLogRow, DataTab, EffectChartData, EffectWindow, EncounterTimeline, EntityBreakdown, PlayerDeath, RaidOverviewRow, TimeRange, TimeSeriesPoint};
 
 use super::{CombatData, LogFileInfo, ServiceCommand, SessionInfo};
 use crate::state::SharedState;
@@ -323,8 +323,6 @@ impl ServiceHandle {
         let session = session_guard.as_ref().ok_or("No active session")?;
         let session = session.read().await;
 
-        let query = EncounterQuery::new();
-
         if let Some(idx) = encounter_idx {
             // Query historical parquet
             let dir = session.encounters_dir().ok_or("No encounters directory")?;
@@ -332,16 +330,16 @@ impl ServiceHandle {
             if !path.exists() {
                 return Err(format!("Encounter file not found: {:?}", path));
             }
-            query.register_parquet(&path).await?;
+            self.shared.query_context.register_parquet(&path).await?;
         } else {
             // Query live buffer
             let writer = session.encounter_writer().ok_or("No live encounter buffer")?;
             let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
-            query.register_batch(batch).await?;
+            self.shared.query_context.register_batch(batch).await?;
         }
 
         let types_ref: Option<Vec<&str>> = entity_types.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
-        query.query_breakdown(
+        self.shared.query_context.query().query_breakdown(
             tab,
             entity_name.as_deref(),
             time_range.as_ref(),
@@ -362,22 +360,20 @@ impl ServiceHandle {
         let session = session_guard.as_ref().ok_or("No active session")?;
         let session = session.read().await;
 
-        let query = EncounterQuery::new();
-
         if let Some(idx) = encounter_idx {
             let dir = session.encounters_dir().ok_or("No encounters directory")?;
             let path = dir.join(baras_core::storage::encounter_filename(idx));
             if !path.exists() {
                 return Err(format!("Encounter file not found: {:?}", path));
             }
-            query.register_parquet(&path).await?;
+            self.shared.query_context.register_parquet(&path).await?;
         } else {
             let writer = session.encounter_writer().ok_or("No live encounter buffer")?;
             let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
-            query.register_batch(batch).await?;
+            self.shared.query_context.register_batch(batch).await?;
         }
 
-        query.breakdown_by_entity(tab, time_range.as_ref()).await
+        self.shared.query_context.query().breakdown_by_entity(tab, time_range.as_ref()).await
     }
 
     /// Query raid overview - aggregated stats per player.
@@ -391,22 +387,20 @@ impl ServiceHandle {
         let session = session_guard.as_ref().ok_or("No active session")?;
         let session = session.read().await;
 
-        let query = EncounterQuery::new();
-
         if let Some(idx) = encounter_idx {
             let dir = session.encounters_dir().ok_or("No encounters directory")?;
             let path = dir.join(baras_core::storage::encounter_filename(idx));
             if !path.exists() {
                 return Err(format!("Encounter file not found: {:?}", path));
             }
-            query.register_parquet(&path).await?;
+            self.shared.query_context.register_parquet(&path).await?;
         } else {
             let writer = session.encounter_writer().ok_or("No live encounter buffer")?;
             let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
-            query.register_batch(batch).await?;
+            self.shared.query_context.register_batch(batch).await?;
         }
 
-        query.query_raid_overview(time_range.as_ref(), duration_secs).await
+        self.shared.query_context.query().query_raid_overview(time_range.as_ref(), duration_secs).await
     }
 
     /// Query DPS over time for a specific encounter.
@@ -421,22 +415,20 @@ impl ServiceHandle {
         let session = session_guard.as_ref().ok_or("No active session")?;
         let session = session.read().await;
 
-        let query = EncounterQuery::new();
-
         if let Some(idx) = encounter_idx {
             let dir = session.encounters_dir().ok_or("No encounters directory")?;
             let path = dir.join(baras_core::storage::encounter_filename(idx));
             if !path.exists() {
                 return Err(format!("Encounter file not found: {:?}", path));
             }
-            query.register_parquet(&path).await?;
+            self.shared.query_context.register_parquet(&path).await?;
         } else {
             let writer = session.encounter_writer().ok_or("No live encounter buffer")?;
             let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
-            query.register_batch(batch).await?;
+            self.shared.query_context.register_batch(batch).await?;
         }
 
-        query.dps_over_time(bucket_ms, source_name.as_deref(), time_range.as_ref()).await
+        self.shared.query_context.query().dps_over_time(bucket_ms, source_name.as_deref(), time_range.as_ref()).await
     }
 
     /// Get list of available encounter parquet files.
@@ -472,22 +464,20 @@ impl ServiceHandle {
         let session = session_guard.as_ref().ok_or("No active session")?;
         let session = session.read().await;
 
-        let query = EncounterQuery::new();
-
         if let Some(idx) = encounter_idx {
             let dir = session.encounters_dir().ok_or("No encounters directory")?;
             let path = dir.join(baras_core::storage::encounter_filename(idx));
             if !path.exists() {
                 return Err(format!("Encounter file not found: {:?}", path));
             }
-            query.register_parquet(&path).await?;
+            self.shared.query_context.register_parquet(&path).await?;
         } else {
             let writer = session.encounter_writer().ok_or("No live encounter buffer")?;
             let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
-            query.register_batch(batch).await?;
+            self.shared.query_context.register_batch(batch).await?;
         }
 
-        query.encounter_timeline().await
+        self.shared.query_context.query().encounter_timeline().await
     }
 
     /// Query HPS over time for a specific encounter.
@@ -502,22 +492,20 @@ impl ServiceHandle {
         let session = session_guard.as_ref().ok_or("No active session")?;
         let session = session.read().await;
 
-        let query = EncounterQuery::new();
-
         if let Some(idx) = encounter_idx {
             let dir = session.encounters_dir().ok_or("No encounters directory")?;
             let path = dir.join(baras_core::storage::encounter_filename(idx));
             if !path.exists() {
                 return Err(format!("Encounter file not found: {:?}", path));
             }
-            query.register_parquet(&path).await?;
+            self.shared.query_context.register_parquet(&path).await?;
         } else {
             let writer = session.encounter_writer().ok_or("No live encounter buffer")?;
             let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
-            query.register_batch(batch).await?;
+            self.shared.query_context.register_batch(batch).await?;
         }
 
-        query.hps_over_time(bucket_ms, source_name.as_deref(), time_range.as_ref()).await
+        self.shared.query_context.query().hps_over_time(bucket_ms, source_name.as_deref(), time_range.as_ref()).await
     }
 
     /// Query DTPS over time for a specific encounter.
@@ -532,22 +520,20 @@ impl ServiceHandle {
         let session = session_guard.as_ref().ok_or("No active session")?;
         let session = session.read().await;
 
-        let query = EncounterQuery::new();
-
         if let Some(idx) = encounter_idx {
             let dir = session.encounters_dir().ok_or("No encounters directory")?;
             let path = dir.join(baras_core::storage::encounter_filename(idx));
             if !path.exists() {
                 return Err(format!("Encounter file not found: {:?}", path));
             }
-            query.register_parquet(&path).await?;
+            self.shared.query_context.register_parquet(&path).await?;
         } else {
             let writer = session.encounter_writer().ok_or("No live encounter buffer")?;
             let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
-            query.register_batch(batch).await?;
+            self.shared.query_context.register_batch(batch).await?;
         }
 
-        query.dtps_over_time(bucket_ms, target_name.as_deref(), time_range.as_ref()).await
+        self.shared.query_context.query().dtps_over_time(bucket_ms, target_name.as_deref(), time_range.as_ref()).await
     }
 
     /// Query effect uptime statistics for the charts panel.
@@ -562,22 +548,20 @@ impl ServiceHandle {
         let session = session_guard.as_ref().ok_or("No active session")?;
         let session = session.read().await;
 
-        let query = EncounterQuery::new();
-
         if let Some(idx) = encounter_idx {
             let dir = session.encounters_dir().ok_or("No encounters directory")?;
             let path = dir.join(baras_core::storage::encounter_filename(idx));
             if !path.exists() {
                 return Err(format!("Encounter file not found: {:?}", path));
             }
-            query.register_parquet(&path).await?;
+            self.shared.query_context.register_parquet(&path).await?;
         } else {
             let writer = session.encounter_writer().ok_or("No live encounter buffer")?;
             let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
-            query.register_batch(batch).await?;
+            self.shared.query_context.register_batch(batch).await?;
         }
 
-        query.query_effect_uptime(target_name.as_deref(), time_range.as_ref(), duration_secs).await
+        self.shared.query_context.query().query_effect_uptime(target_name.as_deref(), time_range.as_ref(), duration_secs).await
     }
 
     /// Query individual time windows for a specific effect.
@@ -593,22 +577,20 @@ impl ServiceHandle {
         let session = session_guard.as_ref().ok_or("No active session")?;
         let session = session.read().await;
 
-        let query = EncounterQuery::new();
-
         if let Some(idx) = encounter_idx {
             let dir = session.encounters_dir().ok_or("No encounters directory")?;
             let path = dir.join(baras_core::storage::encounter_filename(idx));
             if !path.exists() {
                 return Err(format!("Encounter file not found: {:?}", path));
             }
-            query.register_parquet(&path).await?;
+            self.shared.query_context.register_parquet(&path).await?;
         } else {
             let writer = session.encounter_writer().ok_or("No live encounter buffer")?;
             let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
-            query.register_batch(batch).await?;
+            self.shared.query_context.register_batch(batch).await?;
         }
 
-        query.query_effect_windows(effect_id, target_name.as_deref(), time_range.as_ref(), duration_secs).await
+        self.shared.query_context.query().query_effect_windows(effect_id, target_name.as_deref(), time_range.as_ref(), duration_secs).await
     }
 
     /// Query combat log rows with pagination for virtual scrolling.
@@ -626,22 +608,20 @@ impl ServiceHandle {
         let session = session_guard.as_ref().ok_or("No active session")?;
         let session = session.read().await;
 
-        let query = EncounterQuery::new();
-
         if let Some(idx) = encounter_idx {
             let dir = session.encounters_dir().ok_or("No encounters directory")?;
             let path = dir.join(baras_core::storage::encounter_filename(idx));
             if !path.exists() {
                 return Err(format!("Encounter file not found: {:?}", path));
             }
-            query.register_parquet(&path).await?;
+            self.shared.query_context.register_parquet(&path).await?;
         } else {
             let writer = session.encounter_writer().ok_or("No live encounter buffer")?;
             let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
-            query.register_batch(batch).await?;
+            self.shared.query_context.register_batch(batch).await?;
         }
 
-        query.query_combat_log(
+        self.shared.query_context.query().query_combat_log(
             offset,
             limit,
             source_filter.as_deref(),
@@ -664,22 +644,20 @@ impl ServiceHandle {
         let session = session_guard.as_ref().ok_or("No active session")?;
         let session = session.read().await;
 
-        let query = EncounterQuery::new();
-
         if let Some(idx) = encounter_idx {
             let dir = session.encounters_dir().ok_or("No encounters directory")?;
             let path = dir.join(baras_core::storage::encounter_filename(idx));
             if !path.exists() {
                 return Err(format!("Encounter file not found: {:?}", path));
             }
-            query.register_parquet(&path).await?;
+            self.shared.query_context.register_parquet(&path).await?;
         } else {
             let writer = session.encounter_writer().ok_or("No live encounter buffer")?;
             let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
-            query.register_batch(batch).await?;
+            self.shared.query_context.register_batch(batch).await?;
         }
 
-        query.query_combat_log_count(
+        self.shared.query_context.query().query_combat_log_count(
             source_filter.as_deref(),
             target_filter.as_deref(),
             search_filter.as_deref(),
@@ -696,22 +674,20 @@ impl ServiceHandle {
         let session = session_guard.as_ref().ok_or("No active session")?;
         let session = session.read().await;
 
-        let query = EncounterQuery::new();
-
         if let Some(idx) = encounter_idx {
             let dir = session.encounters_dir().ok_or("No encounters directory")?;
             let path = dir.join(baras_core::storage::encounter_filename(idx));
             if !path.exists() {
                 return Err(format!("Encounter file not found: {:?}", path));
             }
-            query.register_parquet(&path).await?;
+            self.shared.query_context.register_parquet(&path).await?;
         } else {
             let writer = session.encounter_writer().ok_or("No live encounter buffer")?;
             let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
-            query.register_batch(batch).await?;
+            self.shared.query_context.register_batch(batch).await?;
         }
 
-        query.query_source_names().await
+        self.shared.query_context.query().query_source_names().await
     }
 
     /// Get distinct target names for combat log filter dropdown.
@@ -723,22 +699,20 @@ impl ServiceHandle {
         let session = session_guard.as_ref().ok_or("No active session")?;
         let session = session.read().await;
 
-        let query = EncounterQuery::new();
-
         if let Some(idx) = encounter_idx {
             let dir = session.encounters_dir().ok_or("No encounters directory")?;
             let path = dir.join(baras_core::storage::encounter_filename(idx));
             if !path.exists() {
                 return Err(format!("Encounter file not found: {:?}", path));
             }
-            query.register_parquet(&path).await?;
+            self.shared.query_context.register_parquet(&path).await?;
         } else {
             let writer = session.encounter_writer().ok_or("No live encounter buffer")?;
             let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
-            query.register_batch(batch).await?;
+            self.shared.query_context.register_batch(batch).await?;
         }
 
-        query.query_target_names().await
+        self.shared.query_context.query().query_target_names().await
     }
 
     /// Query player deaths in an encounter.
@@ -750,22 +724,20 @@ impl ServiceHandle {
         let session = session_guard.as_ref().ok_or("No active session")?;
         let session = session.read().await;
 
-        let query = EncounterQuery::new();
-
         if let Some(idx) = encounter_idx {
             let dir = session.encounters_dir().ok_or("No encounters directory")?;
             let path = dir.join(baras_core::storage::encounter_filename(idx));
             if !path.exists() {
                 return Err(format!("Encounter file not found: {:?}", path));
             }
-            query.register_parquet(&path).await?;
+            self.shared.query_context.register_parquet(&path).await?;
         } else {
             let writer = session.encounter_writer().ok_or("No live encounter buffer")?;
             let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
-            query.register_batch(batch).await?;
+            self.shared.query_context.register_batch(batch).await?;
         }
 
-        query.query_player_deaths().await
+        self.shared.query_context.query().query_player_deaths().await
     }
 
     // ─────────────────────────────────────────────────────────────────────────

@@ -16,7 +16,6 @@ use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
 
 use crate::game_data::effect_id;
-use crate::storage::EncounterWriter;
 
 // Re-export query types from shared types crate
 pub use baras_types::{
@@ -117,43 +116,73 @@ fn col_bool(batch: &RecordBatch, idx: usize) -> Result<Vec<bool>, String> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Query Executor
+// Query Context (shared across queries to avoid repeated allocation)
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub struct EncounterQuery {
+/// Shared query context that reuses a single DataFusion SessionContext.
+/// This avoids the overhead of creating new contexts for each query.
+/// Uses a mutex to prevent concurrent registration race conditions.
+pub struct QueryContext {
     ctx: SessionContext,
+    /// Lock to serialize table registration (prevents "table already exists" races)
+    registration_lock: tokio::sync::Mutex<()>,
 }
 
-impl Default for EncounterQuery {
+impl Default for QueryContext {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl EncounterQuery {
+impl QueryContext {
     pub fn new() -> Self {
-        Self { ctx: SessionContext::new() }
+        Self {
+            ctx: SessionContext::new(),
+            registration_lock: tokio::sync::Mutex::new(()),
+        }
     }
 
-    pub async fn register_live(&self, writer: &EncounterWriter) -> Result<(), String> {
-        let batch = writer.to_record_batch().ok_or("No data in live buffer")?;
-        self.register_batch(batch).await
-    }
-
-    pub async fn register_batch(&self, batch: RecordBatch) -> Result<(), String> {
-        let schema = batch.schema();
-        let mem_table = MemTable::try_new(schema, vec![vec![batch]]).map_err(|e| e.to_string())?;
-        self.ctx.register_table("events", Arc::new(mem_table)).map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
+    /// Deregister any existing "events" table and register a new parquet file.
     pub async fn register_parquet(&self, path: &Path) -> Result<(), String> {
+        let _guard = self.registration_lock.lock().await;
+
+        // Deregister existing table if present (ignore errors - table may not exist)
+        let _ = self.ctx.deregister_table("events");
+
         self.ctx
             .register_parquet("events", path.to_string_lossy().as_ref(), ParquetReadOptions::default())
             .await
             .map_err(|e| e.to_string())
     }
 
+    /// Deregister any existing "events" table and register a RecordBatch (for live data).
+    pub async fn register_batch(&self, batch: RecordBatch) -> Result<(), String> {
+        let _guard = self.registration_lock.lock().await;
+
+        // Deregister existing table if present
+        let _ = self.ctx.deregister_table("events");
+
+        let schema = batch.schema();
+        let mem_table = MemTable::try_new(schema, vec![vec![batch]]).map_err(|e| e.to_string())?;
+        self.ctx.register_table("events", Arc::new(mem_table)).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Create an EncounterQuery that uses this shared context.
+    pub fn query(&self) -> EncounterQuery<'_> {
+        EncounterQuery { ctx: &self.ctx }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Query Executor
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub struct EncounterQuery<'a> {
+    ctx: &'a SessionContext,
+}
+
+impl EncounterQuery<'_> {
     async fn sql(&self, query: &str) -> Result<Vec<RecordBatch>, String> {
         let df = self.ctx.sql(query).await.map_err(|e| e.to_string())?;
         df.collect().await.map_err(|e| e.to_string())
@@ -365,14 +394,20 @@ impl EncounterQuery {
         let duration = duration_secs.unwrap_or(1.0).max(0.001) as f64;
 
         // CTE-based query to aggregate multiple metrics per player
-        // - damage_dealt: sum of dmg_amount WHERE source = player
-        // - threat: sum of threat WHERE source = player
-        // - damage_taken: sum of dmg_amount WHERE target = player
-        // - absorbed: sum of dmg_absorbed WHERE target = player
-        // - healing: sum of heal_amount WHERE source = player
+        // participants: all unique source names (players who did anything)
+        // damage_dealt: sum of dmg_amount WHERE source = player
+        // threat: sum of threat WHERE source = player
+        // damage_taken: sum of dmg_amount WHERE target = player
+        // absorbed: sum of dmg_absorbed WHERE target = player
+        // healing: sum of heal_amount WHERE source = player
         let batches = self.sql(&format!(r#"
-            WITH damage_dealt AS (
-                SELECT source_name as name, MIN(source_entity_type) as entity_type,
+            WITH participants AS (
+                SELECT DISTINCT source_name as name, source_entity_type as entity_type
+                FROM events
+                WHERE 1=1 {time_filter}
+            ),
+            damage_dealt AS (
+                SELECT source_name as name,
                        SUM(dmg_amount) as damage_total,
                        SUM(threat) as threat_total
                 FROM events
@@ -394,13 +429,10 @@ impl EncounterQuery {
                 FROM events
                 WHERE heal_amount > 0 {time_filter}
                 GROUP BY source_name
-            ),
-            total_effective_healing AS (
-                SELECT SUM(heal_effective) as total FROM events WHERE heal_amount > 0 {time_filter}
             )
             SELECT
-                COALESCE(d.name, t.name, h.name) as name,
-                COALESCE(d.entity_type, 'Unknown') as entity_type,
+                p.name,
+                p.entity_type,
                 COALESCE(d.damage_total, 0) as damage_total,
                 COALESCE(d.threat_total, 0) as threat_total,
                 COALESCE(t.damage_taken_total, 0) as damage_taken_total,
@@ -408,9 +440,10 @@ impl EncounterQuery {
                 COALESCE(h.healing_total, 0) as healing_total,
                 COALESCE(h.healing_effective, 0) as healing_effective,
                 COALESCE(h.healing_effective * 100.0 / NULLIF(h.healing_total, 0), 0) as healing_pct
-            FROM damage_dealt d
-            FULL OUTER JOIN damage_taken t ON d.name = t.name
-            FULL OUTER JOIN healing_done h ON COALESCE(d.name, t.name) = h.name
+            FROM participants p
+            LEFT JOIN damage_dealt d ON p.name = d.name
+            LEFT JOIN damage_taken t ON p.name = t.name
+            LEFT JOIN healing_done h ON p.name = h.name
             ORDER BY damage_total DESC
         "#)).await?;
 
@@ -830,7 +863,7 @@ impl EncounterQuery {
 
         let batches = self.sql(&format!(r#"
             SELECT
-                ROW_NUMBER() OVER (ORDER BY combat_time_secs) as row_idx,
+                line_number,
                 combat_time_secs,
                 source_name,
                 source_entity_type,
@@ -854,7 +887,7 @@ impl EncounterQuery {
 
         let mut results = Vec::new();
         for batch in &batches {
-            let row_idxs = col_i64(batch, 0)?;
+            let line_numbers = col_i64(batch, 0)?;
             let times = col_f32(batch, 1)?;
             let source_names = col_strings(batch, 2)?;
             let source_types = col_strings(batch, 3)?;
@@ -873,7 +906,7 @@ impl EncounterQuery {
 
             for i in 0..batch.num_rows() {
                 results.push(CombatLogRow {
-                    row_idx: row_idxs[i] as u64,
+                    row_idx: line_numbers[i] as u64,
                     time_secs: times[i],
                     source_name: source_names[i].clone(),
                     source_type: source_types[i].clone(),

@@ -15,15 +15,16 @@ fn format_time(secs: f32) -> String {
 
 /// Generate a consistent HSL color based on phase_id string.
 /// All instances of the same phase type will get the same color.
+/// Uses muted colors that blend with the dark UI theme.
 fn phase_color(phase_id: &str) -> String {
     // Simple hash function to get a consistent hue
     let hash: u32 = phase_id
         .bytes()
         .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
     let hue = hash % 360;
-    // Vary saturation/lightness slightly based on hash for visual distinction
-    let sat = 45 + (hash % 20); // 45-65%
-    let light = 35 + (hash % 15); // 35-50%
+    // Muted saturation and moderate lightness for subtle distinction
+    let sat = 25 + (hash % 15); // 25-40% (muted)
+    let light = 30 + (hash % 10); // 30-40% (darker, subtle)
     format!("hsl({}, {}%, {}%)", hue, sat, light)
 }
 
@@ -121,24 +122,26 @@ pub fn PhaseTimelineFilter(props: PhaseTimelineProps) -> Element {
         let mut committed_range_clone = committed_range.clone();
         let on_mousemove =
             Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |e: web_sys::MouseEvent| {
-                if let Some(start_time) = *drag_start_clone.read()
-                    && let Some(el) = web_sys::window()
-                        .and_then(|w| w.document())
-                        .and_then(|d| d.get_element_by_id("phase-timeline-track"))
-                {
-                    let rect = el.get_bounding_client_rect();
-                    let x = e.client_x() as f64 - rect.left();
-                    let width = rect.width();
-                    if width > 0.0 && duration > 0.0 {
-                        let pct = (x / width).clamp(0.0, 1.0);
-                        let current_time = (pct as f32) * duration;
-                        let (start, end) = if current_time < start_time {
-                            (current_time, start_time)
-                        } else {
-                            (start_time, current_time)
-                        };
-                        committed_range_clone.set(Some(TimeRange::new(start, end)));
-                    }
+                // Use try_read to handle signal being dropped when component unmounts
+                let Ok(drag_guard) = drag_start_clone.try_read() else { return };
+                let Some(start_time) = *drag_guard else { return };
+                let Some(el) = web_sys::window()
+                    .and_then(|w| w.document())
+                    .and_then(|d| d.get_element_by_id("phase-timeline-track"))
+                else { return };
+
+                let rect = el.get_bounding_client_rect();
+                let x = e.client_x() as f64 - rect.left();
+                let width = rect.width();
+                if width > 0.0 && duration > 0.0 {
+                    let pct = (x / width).clamp(0.0, 1.0);
+                    let current_time = (pct as f32) * duration;
+                    let (start, end) = if current_time < start_time {
+                        (current_time, start_time)
+                    } else {
+                        (start_time, current_time)
+                    };
+                    let _ = committed_range_clone.try_write().map(|mut w| *w = Some(TimeRange::new(start, end)));
                 }
             });
 
@@ -148,36 +151,46 @@ pub fn PhaseTimelineFilter(props: PhaseTimelineProps) -> Element {
         let on_range_change = props.on_range_change.clone();
         let on_mouseup =
             Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |e: web_sys::MouseEvent| {
-                if let Some(start_time) = *drag_start_clone2.read()
-                    && let Some(el) = web_sys::window()
-                        .and_then(|w| w.document())
-                        .and_then(|d| d.get_element_by_id("phase-timeline-track"))
-                {
-                    let rect = el.get_bounding_client_rect();
-                    let x = e.client_x() as f64 - rect.left();
-                    let width = rect.width();
-                    if width > 0.0 && duration > 0.0 {
-                        let pct = (x / width).clamp(0.0, 1.0);
-                        let end_time = (pct as f32) * duration;
+                // Use try_read to handle signal being dropped when component unmounts
+                let Ok(drag_guard) = drag_start_clone2.try_read() else { return };
+                let Some(start_time) = *drag_guard else {
+                    // Not dragging, just return
+                    return;
+                };
+                drop(drag_guard); // Release read lock before writing
 
-                        let (start, end) = if end_time < start_time {
-                            (end_time, start_time)
-                        } else {
-                            (start_time, end_time)
-                        };
+                let Some(el) = web_sys::window()
+                    .and_then(|w| w.document())
+                    .and_then(|d| d.get_element_by_id("phase-timeline-track"))
+                else {
+                    let _ = drag_start_clone2.try_write().map(|mut w| { *w = None; });
+                    return;
+                };
 
-                        // If just a click (no drag), reset to full
-                        let final_range = if (end - start).abs() < 1.0 {
-                            TimeRange::full(duration)
-                        } else {
-                            TimeRange::new(start, end)
-                        };
+                let rect = el.get_bounding_client_rect();
+                let x = e.client_x() as f64 - rect.left();
+                let width = rect.width();
+                if width > 0.0 && duration > 0.0 {
+                    let pct = (x / width).clamp(0.0, 1.0);
+                    let end_time = (pct as f32) * duration;
 
-                        committed_range_clone2.set(Some(final_range));
-                        on_range_change.call(final_range);
-                    }
+                    let (start, end) = if end_time < start_time {
+                        (end_time, start_time)
+                    } else {
+                        (start_time, end_time)
+                    };
+
+                    // If just a click (no drag), reset to full
+                    let final_range = if (end - start).abs() < 1.0 {
+                        TimeRange::full(duration)
+                    } else {
+                        TimeRange::new(start, end)
+                    };
+
+                    let _ = committed_range_clone2.try_write().map(|mut w| *w = Some(final_range));
+                    on_range_change.call(final_range);
                 }
-                drag_start_clone2.set(None);
+                let _ = drag_start_clone2.try_write().map(|mut w| { *w = None; });
             });
 
         // Add listeners

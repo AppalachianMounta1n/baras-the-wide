@@ -140,12 +140,31 @@ fn build_time_series_option(
     .unwrap();
     js_sys::Reflect::set(&obj, &JsValue::from_str("grid"), &grid).unwrap();
 
+    // Get min/max time from data to set axis bounds
+    let min_time_ms = data.iter().map(|p| p.bucket_start_ms).min().unwrap_or(0);
+    let max_time_ms = data.iter().map(|p| p.bucket_start_ms).max().unwrap_or(0);
+    let min_time_secs = min_time_ms as f64 / 1000.0;
+    let max_time_secs = max_time_ms as f64 / 1000.0;
+
     // X-Axis (time in seconds) - format as M:SS
     let x_axis = js_sys::Object::new();
     js_sys::Reflect::set(
         &x_axis,
         &JsValue::from_str("type"),
         &JsValue::from_str("value"),
+    )
+    .unwrap();
+    // Set explicit min/max to match data range (only draw x-axis for selected period)
+    js_sys::Reflect::set(
+        &x_axis,
+        &JsValue::from_str("min"),
+        &JsValue::from_f64(min_time_secs),
+    )
+    .unwrap();
+    js_sys::Reflect::set(
+        &x_axis,
+        &JsValue::from_str("max"),
+        &JsValue::from_f64(max_time_secs),
     )
     .unwrap();
     let axis_label = js_sys::Object::new();
@@ -206,13 +225,12 @@ fn build_time_series_option(
     .unwrap();
     js_sys::Reflect::set(&obj, &JsValue::from_str("tooltip"), &tooltip).unwrap();
 
-    // Build time spine: fill ALL seconds from 0 to max with values (0 if no data)
+    // Build time spine: fill ALL seconds within the data range with values (0 if no data)
     // This ensures continuous average calculation even when no events occur
     let bucket_ms: i64 = 1000;
 
-    // Find max time from data
-    let max_time_ms = data.iter().map(|p| p.bucket_start_ms).max().unwrap_or(0);
-    let num_buckets = (max_time_ms / bucket_ms + 1) as usize;
+    // Calculate buckets from min to max time (data range)
+    let num_buckets = ((max_time_ms - min_time_ms) / bucket_ms + 1) as usize;
 
     // Create sparse lookup from data
     let sparse: std::collections::HashMap<i64, f64> = data
@@ -226,13 +244,14 @@ fn build_time_series_option(
     let mut cumulative_sum = 0.0;
 
     for i in 0..num_buckets {
-        let time_ms = (i as i64) * bucket_ms;
+        let time_ms = min_time_ms + (i as i64) * bucket_ms;
         let time_secs = time_ms as f64 / 1000.0;
         let value = sparse.get(&time_ms).copied().unwrap_or(0.0);
 
         cumulative_sum += value;
-        let elapsed = time_secs + 1.0; // Time at end of this bucket
-        let avg = (cumulative_sum / elapsed).round();
+        // Elapsed time since start of this range (for average calculation)
+        let elapsed_in_range = (i as f64) + 1.0;
+        let avg = (cumulative_sum / elapsed_in_range).round();
 
         dense_data.push((time_secs, value));
         avg_data.push((time_secs, avg));
@@ -665,6 +684,25 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
             gloo_timers::future::TimeoutFuture::new(50).await;
             resize_all_charts();
         });
+    });
+
+    // Window resize listener - resize all ECharts instances
+    use_effect(|| {
+        use wasm_bindgen::closure::Closure;
+
+        let closure = Closure::wrap(Box::new(move || {
+            resize_all_charts();
+        }) as Box<dyn Fn()>);
+
+        if let Some(window) = web_sys::window() {
+            let _ = window.add_event_listener_with_callback(
+                "resize",
+                closure.as_ref().unchecked_ref(),
+            );
+        }
+
+        // Keep closure alive and remove listener on cleanup
+        closure.forget();
     });
 
     // Cleanup charts on unmount

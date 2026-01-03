@@ -185,9 +185,9 @@ impl TimerListItem {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Get the user's encounters config directory
-/// Returns ~/.config/baras/encounters/ (or equivalent on Windows/Mac)
+/// Returns ~/.config/baras/definitions/encounters/ (or equivalent on Windows/Mac)
 fn get_user_encounters_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|p| p.join("baras").join("encounters"))
+    dirs::config_dir().map(|p| p.join("baras").join("definitions").join("encounters"))
 }
 
 /// Get the bundled default encounters directory

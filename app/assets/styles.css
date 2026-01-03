@@ -2093,6 +2093,27 @@ details[open] .collapsible-summary::before {
   color: var(--swtor-blue-dim);
 }
 
+.file-browser-search {
+  flex: 1;
+  max-width: 300px;
+  margin: 0 1em;
+  padding: 0.4em 0.75em;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 0.9em;
+}
+
+.file-browser-search:focus {
+  outline: none;
+  border-color: var(--swtor-blue-dim);
+}
+
+.file-browser-search::placeholder {
+  color: var(--text-muted);
+}
+
 .file-browser-list {
   flex: 1;
   overflow-y: auto;

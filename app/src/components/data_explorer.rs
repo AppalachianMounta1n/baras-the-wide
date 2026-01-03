@@ -81,6 +81,34 @@ fn dispose_overview_chart(element_id: &str) {
     }
 }
 
+/// Dispose all overview donut charts - call when leaving overview or changing encounters
+fn dispose_all_overview_charts() {
+    dispose_overview_chart("donut-damage");
+    dispose_overview_chart("donut-threat");
+    dispose_overview_chart("donut-healing");
+    dispose_overview_chart("donut-taken");
+}
+
+/// Resize all overview donut charts - call on window resize
+fn resize_all_overview_charts() {
+    for id in [
+        "donut-damage",
+        "donut-threat",
+        "donut-healing",
+        "donut-taken",
+    ] {
+        if let Some(window) = web_sys::window()
+            && let Some(document) = window.document()
+            && let Some(element) = document.get_element_by_id(id)
+        {
+            let instance = echarts_get_instance(&element);
+            if !instance.is_null() && !instance.is_undefined() {
+                resize_overview_chart(&instance);
+            }
+        }
+    }
+}
+
 /// Build donut chart option for ECharts
 fn build_donut_option(title: &str, data: &[(String, f64)], color: &str) -> JsValue {
     let obj = js_sys::Object::new();
@@ -385,6 +413,9 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
     // Combat Log mode - show virtualized combat log table
     let mut show_combat_log = use_signal(|| false);
 
+    // Death search text - set when clicking a death to search combat log (source OR target)
+    let mut death_search_text = use_signal(|| None::<String>);
+
     // Memoized overview table data (rows + totals) - prevents recomputation on every render
     let overview_table_data = use_memo(move || {
         let data = overview_data.read();
@@ -454,8 +485,14 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
         let (damage_data, threat_data, healing_data, taken_data) = chart_data();
         let is_overview = *show_overview.read() && !*show_charts.read() && !*show_combat_log.read();
 
+        // Dispose charts when not showing overview (cleanup old instances)
+        if !is_overview {
+            dispose_all_overview_charts();
+            return;
+        }
+
         // Only initialize charts when overview is visible and we have an encounter
-        if !is_overview || selected_encounter.read().is_none() {
+        if selected_encounter.read().is_none() {
             return;
         }
 
@@ -476,7 +513,7 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
             if !threat_data.is_empty()
                 && let Some(chart) = init_overview_chart("donut-threat")
             {
-                let opt = build_donut_option("Threat", &threat_data, "hsl(45, 70%, 55%)");
+                let opt = build_donut_option("Threat", &threat_data, "hsl(210, 70%, 55%)");
                 set_chart_option(&chart, &opt);
                 resize_overview_chart(&chart);
             }
@@ -502,6 +539,20 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
         });
     });
 
+    // Window resize listener for overview donut charts
+    use_effect(|| {
+        let closure = Closure::wrap(Box::new(move || {
+            resize_all_overview_charts();
+        }) as Box<dyn Fn()>);
+
+        if let Some(window) = web_sys::window() {
+            let _ =
+                window.add_event_listener_with_callback("resize", closure.as_ref().unchecked_ref());
+        }
+
+        closure.forget();
+    });
+
     // Load encounter list on mount
     use_effect(move || {
         spawn(async move {
@@ -520,13 +571,14 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
                 && (event_type.contains("CombatEnded") || event_type.contains("FileLoaded"))
             {
                 // Reset selection only on file load (new file invalidates old encounter indices)
+                // Use try_write to handle signal being dropped when component unmounts
                 if event_type.contains("FileLoaded") {
-                    selected_encounter.set(None);
+                    let _ = selected_encounter.try_write().map(|mut w| *w = None);
                 }
                 spawn(async move {
                     // Refresh encounter list
                     if let Some(list) = api::get_encounter_history().await {
-                        encounters.set(list);
+                        let _ = encounters.try_write().map(|mut w| *w = list);
                     }
                 });
             }
@@ -535,12 +587,21 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
         closure.forget();
     });
 
-    // Load data when encounter selection or tab changes
+    // Cleanup on component unmount
+    use_drop(move || {
+        dispose_all_overview_charts();
+    });
+
+    // Load data when encounter changes - ONLY loads timeline (shared by all views)
+    // Each view loads its own data lazily
     use_effect(move || {
         let idx = *selected_encounter.read();
-        let tab = *selected_tab.read();
+
+        // Dispose charts immediately when encounter changes
+        dispose_all_overview_charts();
+
         spawn(async move {
-            // Clear previous data
+            // Clear ALL previous data when encounter changes
             abilities.set(Vec::new());
             entities.set(Vec::new());
             overview_data.set(Vec::new());
@@ -556,28 +617,93 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
 
             loading.set(true);
 
-            // Load timeline first (needed for time range filter and DPS calc)
-            let duration = if let Some(tl) = api::query_encounter_timeline(idx).await {
+            // Only load timeline (needed for phase filter in all views)
+            if let Some(tl) = api::query_encounter_timeline(idx).await {
                 let dur = tl.duration_secs;
                 time_range.set(TimeRange::full(dur));
                 timeline.set(Some(tl));
-                Some(dur)
-            } else {
+            }
+
+            loading.set(false);
+        });
+    });
+
+    // Lazy load: Overview tab data (overview_data + deaths)
+    use_effect(move || {
+        let idx = *selected_encounter.read();
+        let is_overview = *show_overview.read() && !*show_charts.read() && !*show_combat_log.read();
+        let tr = time_range();
+
+        // Only load when Overview tab is active and we have an encounter
+        if !is_overview || idx.is_none() {
+            // Clear overview data when leaving the tab
+            if !is_overview {
+                overview_data.set(Vec::new());
+                player_deaths.set(Vec::new());
+            }
+            return;
+        }
+
+        spawn(async move {
+            loading.set(true);
+            let full_duration = timeline.read().as_ref().map(|t| t.duration_secs);
+            let tr_opt = if tr.start == 0.0 && tr.end == 0.0 {
                 None
+            } else {
+                Some(tr)
             };
 
-            // Load raid overview data
-            if let Some(data) = api::query_raid_overview(idx, None, duration).await {
+            // Use selected time range duration for rate calculations, or full fight duration
+            let duration = if let Some(ref range) = tr_opt {
+                Some(range.end - range.start)
+            } else {
+                full_duration
+            };
+
+            // Load raid overview
+            if let Some(data) = api::query_raid_overview(idx, tr_opt.as_ref(), duration).await {
                 overview_data.set(data);
             }
 
-            // Load player deaths for death tracker
+            // Load player deaths
             if let Some(deaths) = api::query_player_deaths(idx).await {
                 player_deaths.set(deaths);
             }
 
-            // Load entity breakdown for current tab (no time filter on initial load)
-            match api::query_entity_breakdown(tab, idx, None).await {
+            loading.set(false);
+        });
+    });
+
+    // Lazy load: Detailed tab data (entities + abilities) for Damage/Healing/etc tabs
+    use_effect(move || {
+        let idx = *selected_encounter.read();
+        let tab = *selected_tab.read();
+        let is_detailed =
+            !*show_overview.read() && !*show_charts.read() && !*show_combat_log.read();
+        let tr = time_range();
+
+        // Only load when a detailed tab is active and we have an encounter
+        if !is_detailed || idx.is_none() {
+            // Clear detailed data when leaving
+            if !is_detailed {
+                entities.set(Vec::new());
+                abilities.set(Vec::new());
+                selected_source.set(None);
+            }
+            return;
+        }
+
+        spawn(async move {
+            loading.set(true);
+            let duration = timeline.read().as_ref().map(|t| t.duration_secs);
+            let tr_opt = if tr.start == 0.0 && tr.end == 0.0 {
+                None
+            } else {
+                Some(tr)
+            };
+
+            // Load entity breakdown
+            match api::query_entity_breakdown(tab, idx, tr_opt.as_ref()).await {
                 Some(data) => entities.set(data),
                 None => {
                     error_msg.set(Some("No data available for this encounter".to_string()));
@@ -586,7 +712,7 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
                 }
             }
 
-            // Load ability breakdown (filtered by entity type if players-only)
+            // Load ability breakdown
             let entity_filter: Option<&[&str]> = if *show_players_only.read() {
                 Some(&["Player", "Companion"])
             } else {
@@ -604,58 +730,8 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
         });
     });
 
-    // Reload data when time range changes
-    use_effect(move || {
-        let idx = *selected_encounter.read();
-        let tab = *selected_tab.read();
-        let tr = time_range();
-        let src = selected_source.read().clone();
-
-        // Skip if no encounter selected or time_range is default (initial load)
-        if idx.is_none() || (tr.start == 0.0 && tr.end == 0.0) {
-            return;
-        }
-
-        spawn(async move {
-            loading.set(true);
-
-            // Use filtered duration for DPS/HPS calculations, not full encounter duration
-            let filtered_duration = Some(tr.end - tr.start);
-
-            // Reload raid overview with time filter
-            if let Some(data) = api::query_raid_overview(idx, Some(&tr), filtered_duration).await {
-                overview_data.set(data);
-            }
-
-            // Reload entity breakdown with time filter
-            if let Some(data) = api::query_entity_breakdown(tab, idx, Some(&tr)).await {
-                entities.set(data);
-            }
-
-            // Reload ability breakdown with time filter (apply entity filter if no source selected)
-            let entity_filter: Option<&[&str]> = if src.is_none() && *show_players_only.read() {
-                Some(&["Player", "Companion"])
-            } else {
-                None
-            };
-            let mode = *breakdown_mode.read();
-            if let Some(data) = api::query_breakdown(
-                tab,
-                idx,
-                src.as_deref(),
-                Some(&tr),
-                entity_filter,
-                Some(&mode),
-                filtered_duration,
-            )
-            .await
-            {
-                abilities.set(data);
-            }
-
-            loading.set(false);
-        });
-    });
+    // NOTE: Time range changes are now handled by the tab-specific effects above
+    // They read time_range() which triggers reload when it changes
 
     // Reload abilities when entity filter or breakdown mode changes (only if no source selected)
     use_effect(move || {
@@ -665,9 +741,11 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
         let tab = *selected_tab.read();
         let src = selected_source.read().clone();
         let tr = time_range();
+        let is_detailed =
+            !*show_overview.read() && !*show_charts.read() && !*show_combat_log.read();
 
-        // Skip if no encounter or a specific source is selected
-        if idx.is_none() || src.is_some() {
+        // Skip if not on detailed tab, no encounter, or a specific source is selected
+        if !is_detailed || idx.is_none() || src.is_some() {
             return;
         }
 
@@ -802,7 +880,7 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
                                 checked: *show_only_bosses.read(),
                                 onchange: move |e| show_only_bosses.set(e.checked())
                             }
-                            span { "Trash" }
+                            span { "Bosses Only" }
                         }
                         span { class: "encounter-count",
                             "{filtered_history().len()}"
@@ -942,7 +1020,7 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
                         }
                         button {
                             class: if *show_combat_log.read() { "data-tab active" } else { "data-tab" },
-                            onclick: move |_| { show_overview.set(false); show_charts.set(false); show_combat_log.set(true); },
+                            onclick: move |_| { death_search_text.set(None); show_overview.set(false); show_charts.set(false); show_combat_log.set(true); },
                             "Combat Log"
                         }
                     }
@@ -959,6 +1037,7 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
                             CombatLog {
                                 encounter_idx: enc_idx,
                                 time_range: time_range(),
+                                initial_search: death_search_text(),
                             }
                         }
                     } else if *show_charts.read() {
@@ -994,12 +1073,16 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
                                                             button {
                                                                 class: "death-item",
                                                                 title: "Click to view 10 seconds before death in Combat Log",
-                                                                onclick: move |_| {
-                                                                    let start = (death_time - 10.0).max(0.0);
-                                                                    time_range.set(TimeRange { start, end: death_time });
-                                                                    show_overview.set(false);
-                                                                    show_charts.set(false);
-                                                                    show_combat_log.set(true);
+                                                                onclick: {
+                                                                    let player_name = name.clone();
+                                                                    move |_| {
+                                                                        let start = (death_time - 10.0).max(0.0);
+                                                                        time_range.set(TimeRange { start, end: death_time });
+                                                                        death_search_text.set(Some(player_name.clone()));
+                                                                        show_overview.set(false);
+                                                                        show_charts.set(false);
+                                                                        show_combat_log.set(true);
+                                                                    }
                                                                 },
                                                                 span { class: "death-name", "{name}" }
                                                                 span { class: "death-time", "@ {time_str}" }

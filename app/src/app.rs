@@ -45,6 +45,7 @@ pub fn App() -> Element {
     let mut file_browser_open = use_signal(|| false);
     let mut log_files = use_signal(Vec::<LogFileInfo>::new);
     let mut upload_status = use_signal(|| None::<(String, bool, String)>); // (path, success, message)
+    let mut file_browser_filter = use_signal(String::new);
 
     // UI state
     let mut active_tab = use_signal(|| "session".to_string());
@@ -149,7 +150,8 @@ pub fn App() -> Element {
             if let Ok(payload) = js_sys::Reflect::get(&event, &JsValue::from_str("payload"))
                 && let Some(path) = payload.as_string()
             {
-                active_file.set(path);
+                // Use try_write to handle signal being dropped when component unmounts
+                let _ = active_file.try_write().map(|mut w| *w = path);
             }
         });
         api::tauri_listen("active-file-changed", &closure).await;
@@ -163,7 +165,7 @@ pub fn App() -> Element {
             spawn_local(async move {
                 let result = api::get_log_files().await;
                 if let Ok(files) = serde_wasm_bindgen::from_value::<Vec<LogFileInfo>>(result) {
-                    log_files.set(files);
+                    let _ = log_files.try_write().map(|mut w| *w = files);
                 }
             });
         });
@@ -182,9 +184,12 @@ pub fn App() -> Element {
         let closure = Closure::new(move |_event: JsValue| {
             // Use spawn_local for JS callbacks (no Dioxus runtime context available)
             spawn_local(async move {
-                session_info.set(api::get_session_info().await);
-                is_watching.set(api::get_watching_status().await);
-                is_live_tailing.set(api::is_live_tailing().await);
+                let info = api::get_session_info().await;
+                let watching = api::get_watching_status().await;
+                let tailing = api::is_live_tailing().await;
+                let _ = session_info.try_write().map(|mut w| *w = info);
+                let _ = is_watching.try_write().map(|mut w| *w = watching);
+                let _ = is_live_tailing.try_write().map(|mut w| *w = tailing);
             });
         });
         api::tauri_listen("session-updated", &closure).await;
@@ -196,7 +201,7 @@ pub fn App() -> Element {
         let closure = Closure::new(move |event: JsValue| {
             if let Ok(payload) = js_sys::Reflect::get(&event, &JsValue::from_str("payload")) {
                 if let Ok(info) = serde_wasm_bindgen::from_value::<UpdateInfo>(payload) {
-                    update_available.set(Some(info));
+                    let _ = update_available.try_write().map(|mut w| *w = Some(info));
                 }
             }
         });
@@ -321,7 +326,12 @@ pub fn App() -> Element {
                     button {
                         class: "btn-header-restart",
                         title: "Restart watcher",
-                        onclick: move |_| { spawn(async move { api::restart_watcher().await; }); },
+                        onclick: move |_| {
+                            spawn(async move {
+                                api::restart_watcher().await;
+                                is_live_tailing.set(true);
+                            });
+                        },
                         i { class: "fa-solid fa-rotate" }
                     }
                 }
@@ -407,6 +417,7 @@ pub fn App() -> Element {
                         class: "btn btn-header-files",
                         title: "Browse log files",
                         onclick: move |_| {
+                            file_browser_filter.set(String::new()); // Clear filter on open
                             file_browser_open.set(true);
                             // Fetch files when opening
                             spawn(async move {
@@ -1127,6 +1138,13 @@ pub fn App() -> Element {
                                 i { class: "fa-solid fa-folder-open" }
                                 " Log Files"
                             }
+                            input {
+                                class: "file-browser-search",
+                                r#type: "text",
+                                placeholder: "Filter by name or date...",
+                                value: "{file_browser_filter}",
+                                oninput: move |e| file_browser_filter.set(e.value()),
+                            }
                             button {
                                 class: "btn btn-close",
                                 onclick: move |_| file_browser_open.set(false),
@@ -1141,7 +1159,18 @@ pub fn App() -> Element {
                                     " Loading files..."
                                 }
                             } else {
-                                for file in log_files().iter() {
+                                {
+                                    let filter = file_browser_filter().to_lowercase();
+                                    let filtered: Vec<_> = log_files().iter().filter(|f| {
+                                        if filter.is_empty() {
+                                            return true;
+                                        }
+                                        let name = f.character_name.as_deref().unwrap_or("").to_lowercase();
+                                        let date = f.date.to_lowercase();
+                                        name.contains(&filter) || date.contains(&filter)
+                                    }).cloned().collect();
+                                    rsx! {
+                                        for file in filtered.iter() {
                                     {
                                         let path = file.path.clone();
                                         let path_for_upload = file.path.clone();
@@ -1238,6 +1267,8 @@ pub fn App() -> Element {
                                                     }
                                                 }
                                             }
+                                        }
+                                    }
                                         }
                                     }
                                 }

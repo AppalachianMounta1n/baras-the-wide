@@ -143,7 +143,7 @@ struct EffectWithPath {
 
 /// Get the user's effects config directory
 fn get_user_effects_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|p| p.join("baras").join("effects"))
+    dirs::config_dir().map(|p| p.join("baras").join("definitions").join("effects"))
 }
 
 /// Get the bundled default effects directory

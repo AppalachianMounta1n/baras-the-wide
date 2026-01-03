@@ -4,15 +4,15 @@
 //! classification of encounters by phase type, and human-readable naming.
 
 use hashbrown::HashMap;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-use super::metrics::PlayerMetrics;
-use super::PhaseType;
 use super::CombatEncounter;
-use crate::state::info::AreaInfo;
-use crate::game_data::{lookup_boss, lookup_area_content_type, BossInfo, ContentType, is_pvp_area};
+use super::PhaseType;
+use super::metrics::PlayerMetrics;
 use crate::combat_log::EntityType;
 use crate::context::resolve;
+use crate::game_data::{BossInfo, ContentType, is_pvp_area, lookup_area_content_type, lookup_boss};
+use crate::state::info::AreaInfo;
 
 /// Summary of a completed encounter with computed metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,7 +65,10 @@ impl EncounterHistory {
 
     /// Check if area changed and update tracking
     pub fn check_area_change(&mut self, area_name: &str) -> bool {
-        let changed = self.current_area_name.as_ref().is_none_or(|prev| prev != area_name);
+        let changed = self
+            .current_area_name
+            .as_ref()
+            .is_none_or(|prev| prev != area_name);
         if changed {
             self.current_area_name = Some(area_name.to_string());
             // Reset trash count on area change
@@ -77,13 +80,14 @@ impl EncounterHistory {
     /// Generate a human-readable name for an encounter based on its type and boss
     pub fn generate_name(&mut self, phase_type: PhaseType, boss_info: Option<&BossInfo>) -> String {
         match (phase_type, boss_info) {
-            // Boss encounter: "Brontes Pull 7"
+            // Boss encounter: "Brontes - 7"
             (_, Some(info)) => {
-                let count = self.boss_pull_counts
+                let count = self
+                    .boss_pull_counts
                     .entry(info.boss.to_string())
                     .or_insert(0);
                 *count += 1;
-                format!("{} Pull {}", info.boss, count)
+                format!("{} - {}", info.boss, count)
             }
             (PhaseType::Raid, None) => {
                 self.trash_pull_count += 1;
@@ -116,7 +120,9 @@ pub fn classify_encounter(
     area: &AreaInfo,
 ) -> (PhaseType, Option<&'static BossInfo>) {
     // Find the first boss NPC in the encounter (sorted by first_seen_at for consistency)
-    let mut boss_npcs: Vec<_> = encounter.npcs.values()
+    let mut boss_npcs: Vec<_> = encounter
+        .npcs
+        .values()
         .filter_map(|npc| lookup_boss(npc.class_id).map(|info| (npc, info)))
         .collect();
 
@@ -218,7 +224,9 @@ pub fn create_encounter_summary(
         encounter_id: encounter.id,
         display_name,
         phase_type,
-        start_time: encounter.enter_combat_time.map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string()),
+        start_time: encounter
+            .enter_combat_time
+            .map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string()),
         duration_seconds: encounter.duration_seconds().unwrap_or(0),
         success: determine_success(encounter),
         area_name: area.area_name.clone(),

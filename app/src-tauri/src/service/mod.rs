@@ -397,7 +397,7 @@ impl CombatService {
             .ok();
 
         // User config directories
-        let effects_dir = dirs::config_dir().map(|p| p.join("baras").join("effects"));
+        let effects_dir = dirs::config_dir().map(|p| p.join("baras").join("definitions").join("effects"));
         let defaults_dir = effects_dir.as_ref().map(|p| p.join("defaults"));
 
         // Load definitions from TOML files
@@ -566,6 +566,9 @@ impl CombatService {
         // Stop any active tailing
         self.stop_tailing().await;
 
+        // Resume live tailing mode (restart means we want to watch for new files)
+        self.shared.is_live_tailing.store(true, Ordering::SeqCst);
+
         // Start new watcher (reads directory from config)
         self.start_watcher().await;
     }
@@ -681,6 +684,11 @@ impl CombatService {
 
     async fn start_tailing(&mut self, path: PathBuf) {
         self.stop_tailing().await;
+
+        // Clear old parquet data from previous session
+        if let Err(e) = baras_core::storage::clear_data_dir() {
+            eprintln!("[TAILING] Failed to clear data directory: {}", e);
+        }
 
         // Clear all overlay data when switching files
         let _ = self.overlay_tx.try_send(OverlayUpdate::ClearAllData);
@@ -1079,7 +1087,7 @@ impl CombatService {
         let shared = self.shared.clone();
         let area_index = self.area_index.clone();
         let is_live = self.shared.is_live_tailing.load(Ordering::SeqCst);
-        let user_encounters_dir = dirs::config_dir().map(|p| p.join("baras").join("encounters"));
+        let user_encounters_dir = dirs::config_dir().map(|p| p.join("baras").join("definitions").join("encounters"));
         let area_loader_handle = if is_live {
             Some(tokio::spawn(async move {
                 let mut loaded_area_id: i64 = 0;

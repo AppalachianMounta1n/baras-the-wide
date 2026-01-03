@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 
 use baras_core::context::{AppConfig, DirectoryIndex, ParsingSession};
+use baras_core::query::QueryContext;
 
 /// State shared between the combat service and Tauri commands.
 ///
@@ -49,6 +50,9 @@ pub struct SharedState {
     pub timer_overlay_active: AtomicBool,
     /// Whether effects countdown overlay is currently running
     pub effects_overlay_active: AtomicBool,
+
+    /// Shared query context for DataFusion queries (reuses SessionContext)
+    pub query_context: QueryContext,
 }
 
 impl SharedState {
@@ -67,6 +71,8 @@ impl SharedState {
             boss_health_overlay_active: AtomicBool::new(false),
             timer_overlay_active: AtomicBool::new(false),
             effects_overlay_active: AtomicBool::new(false),
+            // Shared query context for DataFusion (reuses SessionContext across queries)
+            query_context: QueryContext::new(),
         }
     }
 

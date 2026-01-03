@@ -67,6 +67,11 @@ pub fn run() {
                 // Create channel for audio events
                 let (audio_tx, audio_rx) = create_audio_channel();
 
+                // Clear old parquet data from previous sessions
+                if let Err(e) = baras_core::storage::clear_data_dir() {
+                    eprintln!("[STARTUP] Failed to clear data directory: {}", e);
+                }
+
                 // Create and spawn the combat service (includes audio service)
                 let (service, handle) =
                     CombatService::new(app.handle().clone(), overlay_tx, audio_tx, audio_rx);
