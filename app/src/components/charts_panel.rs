@@ -127,10 +127,10 @@ fn build_time_series_option(
     js_sys::Reflect::set(&title_obj, &JsValue::from_str("textStyle"), &title_style).unwrap();
     js_sys::Reflect::set(&obj, &JsValue::from_str("title"), &title_obj).unwrap();
 
-    // Grid (leave room for axis labels)
+    // Grid (leave room for axis labels on both sides)
     let grid = js_sys::Object::new();
     js_sys::Reflect::set(&grid, &JsValue::from_str("left"), &JsValue::from_str("60")).unwrap();
-    js_sys::Reflect::set(&grid, &JsValue::from_str("right"), &JsValue::from_str("20")).unwrap();
+    js_sys::Reflect::set(&grid, &JsValue::from_str("right"), &JsValue::from_str("60")).unwrap();
     js_sys::Reflect::set(&grid, &JsValue::from_str("top"), &JsValue::from_str("35")).unwrap();
     js_sys::Reflect::set(
         &grid,
@@ -187,33 +187,76 @@ fn build_time_series_option(
     js_sys::Reflect::set(&x_axis, &JsValue::from_str("splitLine"), &x_split).unwrap();
     js_sys::Reflect::set(&obj, &JsValue::from_str("xAxis"), &x_axis).unwrap();
 
-    // Y-Axis
-    let y_axis = js_sys::Object::new();
+    // Dual Y-Axes: Left = raw damage, Right = rate (DPS/HPS)
+    let y_axis_arr = js_sys::Array::new();
+
+    // Left Y-Axis (raw damage/healing totals per second)
+    let y_axis_left = js_sys::Object::new();
     js_sys::Reflect::set(
-        &y_axis,
+        &y_axis_left,
         &JsValue::from_str("type"),
         &JsValue::from_str("value"),
     )
     .unwrap();
     js_sys::Reflect::set(
-        &y_axis,
+        &y_axis_left,
+        &JsValue::from_str("name"),
+        &JsValue::from_str("Burst"),
+    )
+    .unwrap();
+    js_sys::Reflect::set(
+        &y_axis_left,
+        &JsValue::from_str("position"),
+        &JsValue::from_str("left"),
+    )
+    .unwrap();
+    let y_label_left = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &y_label_left,
+        &JsValue::from_str("color"),
+        &JsValue::from_str("#666"),
+    )
+    .unwrap();
+    js_sys::Reflect::set(&y_axis_left, &JsValue::from_str("axisLabel"), &y_label_left).unwrap();
+    let y_split_left = js_sys::Object::new();
+    js_sys::Reflect::set(&y_split_left, &JsValue::from_str("show"), &JsValue::FALSE).unwrap();
+    js_sys::Reflect::set(&y_axis_left, &JsValue::from_str("splitLine"), &y_split_left).unwrap();
+    y_axis_arr.push(&y_axis_left);
+
+    // Right Y-Axis (rate - DPS/HPS average)
+    let y_axis_right = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &y_axis_right,
+        &JsValue::from_str("type"),
+        &JsValue::from_str("value"),
+    )
+    .unwrap();
+    js_sys::Reflect::set(
+        &y_axis_right,
         &JsValue::from_str("name"),
         &JsValue::from_str(y_axis_name),
     )
     .unwrap();
-    let y_label = js_sys::Object::new();
     js_sys::Reflect::set(
-        &y_label,
-        &JsValue::from_str("color"),
-        &JsValue::from_str("#888"),
+        &y_axis_right,
+        &JsValue::from_str("position"),
+        &JsValue::from_str("right"),
     )
     .unwrap();
-    js_sys::Reflect::set(&y_axis, &JsValue::from_str("axisLabel"), &y_label).unwrap();
-    // Hide gridlines
-    let y_split = js_sys::Object::new();
-    js_sys::Reflect::set(&y_split, &JsValue::from_str("show"), &JsValue::FALSE).unwrap();
-    js_sys::Reflect::set(&y_axis, &JsValue::from_str("splitLine"), &y_split).unwrap();
-    js_sys::Reflect::set(&obj, &JsValue::from_str("yAxis"), &y_axis).unwrap();
+    let y_label_right = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &y_label_right,
+        &JsValue::from_str("color"),
+        &JsValue::from_str(color),
+    )
+    .unwrap();
+    js_sys::Reflect::set(&y_axis_right, &JsValue::from_str("axisLabel"), &y_label_right).unwrap();
+    let y_split_right = js_sys::Object::new();
+    js_sys::Reflect::set(&y_split_right, &JsValue::from_str("show"), &JsValue::FALSE).unwrap();
+    js_sys::Reflect::set(&y_axis_right, &JsValue::from_str("splitLine"), &y_split_right).unwrap();
+    y_axis_arr.push(&y_axis_right);
+
+    js_sys::Reflect::set(&obj, &JsValue::from_str("yAxis"), &y_axis_arr).unwrap();
 
     // Tooltip
     let tooltip = js_sys::Object::new();
@@ -278,6 +321,13 @@ fn build_time_series_option(
         &series,
         &JsValue::from_str("symbol"),
         &JsValue::from_str("none"),
+    )
+    .unwrap();
+    // Use left Y-axis (index 0) for burst data
+    js_sys::Reflect::set(
+        &series,
+        &JsValue::from_str("yAxisIndex"),
+        &JsValue::from_f64(0.0),
     )
     .unwrap();
 
@@ -374,6 +424,13 @@ fn build_time_series_option(
         &avg_series,
         &JsValue::from_str("symbol"),
         &JsValue::from_str("none"),
+    )
+    .unwrap();
+    // Use right Y-axis (index 1) for average/rate data
+    js_sys::Reflect::set(
+        &avg_series,
+        &JsValue::from_str("yAxisIndex"),
+        &JsValue::from_f64(1.0),
     )
     .unwrap();
 
