@@ -9,8 +9,40 @@ use std::collections::HashSet;
 use dioxus::prelude::*;
 
 use crate::api;
-use crate::types::{AudioConfig, EffectCategory, EffectListItem, EffectSelector, EffectTriggerMode, EntityFilter};
+use crate::types::{AbilitySelector, AudioConfig, EffectCategory, EffectListItem, EffectSelector, EffectTriggerMode, EntityFilter, Trigger};
 use super::encounter_editor::triggers::EffectSelectorEditor;
+
+/// UI-level trigger type for effect tracking
+#[derive(Clone, Copy, PartialEq, Default)]
+enum EffectTriggerType {
+    /// Track based on game effect applied/removed
+    #[default]
+    EffectBased,
+    /// Track based on ability cast (for procs/cooldowns)
+    AbilityCast,
+}
+
+impl EffectTriggerType {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::EffectBased => "Effect Based",
+            Self::AbilityCast => "Ability Cast",
+        }
+    }
+
+    fn all() -> &'static [Self] {
+        &[Self::EffectBased, Self::AbilityCast]
+    }
+
+    /// Determine trigger type from effect data
+    fn from_effect(effect: &EffectListItem) -> Self {
+        if effect.start_trigger.is_some() {
+            Self::AbilityCast
+        } else {
+            Self::EffectBased
+        }
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Panel
@@ -417,6 +449,7 @@ fn EffectEditForm(
 ) -> Element {
     let mut draft = use_signal(|| effect.clone());
     let mut confirm_delete = use_signal(|| false);
+    let mut trigger_type = use_signal(|| EffectTriggerType::from_effect(&effect));
 
     let effect_original = effect.clone();
     let has_changes = use_memo(move || draft() != effect_original);
@@ -465,7 +498,7 @@ fn EffectEditForm(
                 }
             }
 
-            // Category, Trigger, Color, Enabled, Raid Frames, Effects Overlay
+            // Category, Trigger Type, Color, Enabled
             div { class: "form-row-hz",
                 label { "Category" }
                 select {
@@ -489,21 +522,58 @@ fn EffectEditForm(
                         option { value: "{cat.label()}", "{cat.label()}" }
                     }
                 }
-                label { "Trigger" }
+                label { "Trigger Type" }
                 select {
                     class: "select-inline",
-                    value: "{draft().trigger.label()}",
+                    value: "{trigger_type().label()}",
                     onchange: move |e| {
-                        let mut d = draft();
-                        d.trigger = match e.value().as_str() {
-                            "Effect Applied" => EffectTriggerMode::EffectApplied,
-                            "Effect Removed" => EffectTriggerMode::EffectRemoved,
-                            _ => d.trigger,
+                        let new_type = match e.value().as_str() {
+                            "Effect Based" => EffectTriggerType::EffectBased,
+                            "Ability Cast" => EffectTriggerType::AbilityCast,
+                            _ => trigger_type(),
                         };
+                        trigger_type.set(new_type);
+                        // Clear the opposite trigger data
+                        let mut d = draft();
+                        match new_type {
+                            EffectTriggerType::EffectBased => {
+                                d.start_trigger = None;
+                            }
+                            EffectTriggerType::AbilityCast => {
+                                d.effects = vec![];
+                                // Set default AbilityCast trigger if none
+                                if d.start_trigger.is_none() {
+                                    d.start_trigger = Some(Trigger::AbilityCast {
+                                        abilities: vec![],
+                                        source: EntityFilter::LocalPlayer,
+                                    });
+                                }
+                            }
+                        }
                         draft.set(d);
                     },
-                    for trigger in EffectTriggerMode::all() {
-                        option { value: "{trigger.label()}", "{trigger.label()}" }
+                    for tt in EffectTriggerType::all() {
+                        option { value: "{tt.label()}", "{tt.label()}" }
+                    }
+                }
+                // Show Effect Applied/Removed only for Effect Based
+                if trigger_type() == EffectTriggerType::EffectBased {
+                    label { "When" }
+                    select {
+                        class: "select-inline",
+                        value: "{draft().trigger.label()}",
+                        onchange: move |e| {
+                            let mut d = draft();
+                            d.trigger = match e.value().as_str() {
+                                "Effect Applied" => EffectTriggerMode::EffectApplied,
+                                "Effect Removed" => EffectTriggerMode::EffectRemoved,
+                                _ => d.trigger,
+                            };
+                            draft.set(d);
+                        },
+                        for trigger in EffectTriggerMode::all() {
+                            option { value: "{trigger.label()}", "{trigger.label()}" }
+                        }
                     }
                 }
                 label { "Color" }
@@ -529,6 +599,10 @@ fn EffectEditForm(
                         draft.set(d);
                     }
                 }
+            }
+
+            // Display options row
+            div { class: "form-row-hz",
                 label { "Raid Frames" }
                 input {
                     r#type: "checkbox",
@@ -546,6 +620,17 @@ fn EffectEditForm(
                     onchange: move |e| {
                         let mut d = draft();
                         d.show_on_effects_overlay = e.checked();
+                        draft.set(d);
+                    }
+                }
+                label { "Fixed Duration" }
+                input {
+                    r#type: "checkbox",
+                    checked: draft().fixed_duration,
+                    title: "Ignore game EffectRemoved - only expire via duration timer",
+                    onchange: move |e| {
+                        let mut d = draft();
+                        d.fixed_duration = e.checked();
                         draft.set(d);
                     }
                 }
@@ -662,15 +747,43 @@ fn EffectEditForm(
                 span { class: "text-sm text-secondary", "seconds remaining (0 = always show)" }
             }
 
-            // Effects (with chips above input)
+            // Effects or Trigger Abilities (based on trigger type)
             div { class: "form-row-hz",
-                EffectSelectorEditor {
-                    label: "Effects",
-                    selectors: draft().effects.clone(),
-                    on_change: move |selectors| {
-                        let mut d = draft();
-                        d.effects = selectors;
-                        draft.set(d);
+                if trigger_type() == EffectTriggerType::EffectBased {
+                    EffectSelectorEditor {
+                        label: "Effects",
+                        selectors: draft().effects.clone(),
+                        on_change: move |selectors| {
+                            let mut d = draft();
+                            d.effects = selectors;
+                            draft.set(d);
+                        }
+                    }
+                } else {
+                    // Ability Cast trigger - show abilities input
+                    TriggerAbilitiesEditor {
+                        abilities: draft().start_trigger.as_ref()
+                            .and_then(|t| match t {
+                                Trigger::AbilityCast { abilities, .. } => Some(abilities.clone()),
+                                _ => None,
+                            })
+                            .unwrap_or_default(),
+                        on_change: move |abilities| {
+                            let mut d = draft();
+                            // Update the abilities in the trigger
+                            if let Some(Trigger::AbilityCast { source, .. }) = &d.start_trigger {
+                                d.start_trigger = Some(Trigger::AbilityCast {
+                                    abilities,
+                                    source: source.clone(),
+                                });
+                            } else {
+                                d.start_trigger = Some(Trigger::AbilityCast {
+                                    abilities,
+                                    source: EntityFilter::LocalPlayer,
+                                });
+                            }
+                            draft.set(d);
+                        }
                     }
                 }
             }
@@ -873,8 +986,6 @@ fn EntityFilterSelect(
 // Ability Selector Editor (ID or Name, with chips displayed above input)
 // ─────────────────────────────────────────────────────────────────────────────
 
-use crate::types::AbilitySelector;
-
 #[component]
 fn AbilitySelectorEditor(
     label: &'static str,
@@ -956,6 +1067,89 @@ fn AbilitySelectorEditor(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Trigger Abilities Editor (for AbilityCast triggers)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[component]
+fn TriggerAbilitiesEditor(
+    abilities: Vec<AbilitySelector>,
+    on_change: EventHandler<Vec<AbilitySelector>>,
+) -> Element {
+    let mut new_input = use_signal(String::new);
+
+    let abilities_for_keydown = abilities.clone();
+    let abilities_for_click = abilities.clone();
+
+    rsx! {
+        div { class: "flex-col gap-xs items-start",
+            span { class: "text-sm text-secondary text-left", "Trigger Abilities:" }
+
+            // Ability chips
+            div { class: "flex flex-wrap gap-xs",
+                for (idx, sel) in abilities.iter().enumerate() {
+                    {
+                        let abilities_clone = abilities.clone();
+                        let display = sel.display();
+                        rsx! {
+                            span { class: "chip",
+                                "{display}"
+                                button {
+                                    class: "chip-remove",
+                                    onclick: move |_| {
+                                        let mut new_abs = abilities_clone.clone();
+                                        new_abs.remove(idx);
+                                        on_change.call(new_abs);
+                                    },
+                                    "×"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Add new ability
+            div { class: "flex gap-xs",
+                input {
+                    r#type: "text",
+                    class: "input-inline",
+                    style: "width: 180px;",
+                    placeholder: "Ability ID or Name (Enter)",
+                    value: "{new_input}",
+                    oninput: move |e| new_input.set(e.value()),
+                    onkeydown: move |e| {
+                        if e.key() == Key::Enter && !new_input().trim().is_empty() {
+                            let selector = AbilitySelector::from_input(&new_input());
+                            let mut new_abs = abilities_for_keydown.clone();
+                            if !new_abs.iter().any(|s| s.display() == selector.display()) {
+                                new_abs.push(selector);
+                                on_change.call(new_abs);
+                            }
+                            new_input.set(String::new());
+                        }
+                    }
+                }
+                button {
+                    class: "btn btn-sm",
+                    onclick: move |_| {
+                        if !new_input().trim().is_empty() {
+                            let selector = AbilitySelector::from_input(&new_input());
+                            let mut new_abs = abilities_for_click.clone();
+                            if !new_abs.iter().any(|s| s.display() == selector.display()) {
+                                new_abs.push(selector);
+                                on_change.call(new_abs);
+                            }
+                            new_input.set(String::new());
+                        }
+                    },
+                    "Add"
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // New Effect Form
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -966,6 +1160,7 @@ fn NewEffectForm(
 ) -> Element {
     let mut name = use_signal(String::new);
     let mut category = use_signal(|| EffectCategory::Hot);
+    let mut trigger_type = use_signal(|| EffectTriggerType::EffectBased);
     let mut trigger = use_signal(|| EffectTriggerMode::EffectApplied);
     let mut color = use_signal(|| [80u8, 200, 80, 255]);
     let mut source = use_signal(|| EntityFilter::LocalPlayer);
@@ -973,10 +1168,12 @@ fn NewEffectForm(
     let mut duration = use_signal(|| 15.0f32);
     let mut max_stacks = use_signal(|| 1u8);
     let mut effects = use_signal(Vec::<EffectSelector>::new);
+    let mut trigger_abilities = use_signal(Vec::<AbilitySelector>::new);
     let mut refresh_abilities = use_signal(Vec::<AbilitySelector>::new);
     let mut show_on_raid_frames = use_signal(|| true);
     let mut show_on_effects_overlay = use_signal(|| false);
     let mut show_at_secs = use_signal(|| 0.0f32);
+    let mut fixed_duration = use_signal(|| false);
     let mut persist_past_death = use_signal(|| false);
     let mut track_outside_combat = use_signal(|| true);
     let mut audio = use_signal(AudioConfig::default);
@@ -1007,7 +1204,7 @@ fn NewEffectForm(
                 }
             }
 
-            // Category, Trigger, Color, Raid Frames, Effects Overlay
+            // Category, Trigger Type, Color
             div { class: "form-row-hz",
                 label { "Category" }
                 select {
@@ -1029,19 +1226,43 @@ fn NewEffectForm(
                         option { value: "{cat.label()}", "{cat.label()}" }
                     }
                 }
-                label { "Trigger" }
+                label { "Trigger Type" }
                 select {
                     class: "select-inline",
-                    value: "{trigger().label()}",
+                    value: "{trigger_type().label()}",
                     onchange: move |e| {
-                        trigger.set(match e.value().as_str() {
-                            "Effect Applied" => EffectTriggerMode::EffectApplied,
-                            "Effect Removed" => EffectTriggerMode::EffectRemoved,
-                            _ => trigger(),
-                        });
+                        let new_type = match e.value().as_str() {
+                            "Effect Based" => EffectTriggerType::EffectBased,
+                            "Ability Cast" => EffectTriggerType::AbilityCast,
+                            _ => trigger_type(),
+                        };
+                        trigger_type.set(new_type);
+                        // Clear the opposite data
+                        match new_type {
+                            EffectTriggerType::EffectBased => trigger_abilities.set(vec![]),
+                            EffectTriggerType::AbilityCast => effects.set(vec![]),
+                        }
                     },
-                    for t in EffectTriggerMode::all() {
-                        option { value: "{t.label()}", "{t.label()}" }
+                    for tt in EffectTriggerType::all() {
+                        option { value: "{tt.label()}", "{tt.label()}" }
+                    }
+                }
+                // Show Effect Applied/Removed only for Effect Based
+                if trigger_type() == EffectTriggerType::EffectBased {
+                    label { "When" }
+                    select {
+                        class: "select-inline",
+                        value: "{trigger().label()}",
+                        onchange: move |e| {
+                            trigger.set(match e.value().as_str() {
+                                "Effect Applied" => EffectTriggerMode::EffectApplied,
+                                "Effect Removed" => EffectTriggerMode::EffectRemoved,
+                                _ => trigger(),
+                            });
+                        },
+                        for t in EffectTriggerMode::all() {
+                            option { value: "{t.label()}", "{t.label()}" }
+                        }
                     }
                 }
                 label { "Color" }
@@ -1055,6 +1276,10 @@ fn NewEffectForm(
                         }
                     }
                 }
+            }
+
+            // Display options
+            div { class: "form-row-hz",
                 label { "Raid Frames" }
                 input {
                     r#type: "checkbox",
@@ -1066,6 +1291,13 @@ fn NewEffectForm(
                     r#type: "checkbox",
                     checked: show_on_effects_overlay(),
                     onchange: move |e| show_on_effects_overlay.set(e.checked())
+                }
+                label { "Fixed Duration" }
+                input {
+                    r#type: "checkbox",
+                    checked: fixed_duration(),
+                    title: "Ignore game EffectRemoved - only expire via duration timer",
+                    onchange: move |e| fixed_duration.set(e.checked())
                 }
             }
 
@@ -1149,12 +1381,19 @@ fn NewEffectForm(
                 span { class: "text-sm text-secondary", "seconds remaining (0 = always show)" }
             }
 
-            // Effects (chips above input)
+            // Effects or Trigger Abilities (based on trigger type)
             div { class: "form-row-hz",
-                EffectSelectorEditor {
-                    label: "Effects",
-                    selectors: effects(),
-                    on_change: move |sels| effects.set(sels)
+                if trigger_type() == EffectTriggerType::EffectBased {
+                    EffectSelectorEditor {
+                        label: "Effects",
+                        selectors: effects(),
+                        on_change: move |sels| effects.set(sels)
+                    }
+                } else {
+                    TriggerAbilitiesEditor {
+                        abilities: trigger_abilities(),
+                        on_change: move |abs| trigger_abilities.set(abs)
+                    }
                 }
             }
 
@@ -1233,8 +1472,24 @@ fn NewEffectForm(
             div { class: "form-actions",
                 button {
                     class: "btn-save",
-                    disabled: name().is_empty() || (effects().is_empty() && refresh_abilities().is_empty()),
+                    disabled: name().is_empty() || (
+                        trigger_type() == EffectTriggerType::EffectBased
+                            && effects().is_empty() && refresh_abilities().is_empty()
+                    ) || (
+                        trigger_type() == EffectTriggerType::AbilityCast
+                            && trigger_abilities().is_empty()
+                    ),
                     onclick: move |_| {
+                        // Build start_trigger for AbilityCast
+                        let start_trigger = if trigger_type() == EffectTriggerType::AbilityCast {
+                            Some(Trigger::AbilityCast {
+                                abilities: trigger_abilities(),
+                                source: source(),
+                            })
+                        } else {
+                            None
+                        };
+
                         let new_effect = EffectListItem {
                             id: String::new(),
                             name: name(),
@@ -1243,6 +1498,8 @@ fn NewEffectForm(
                             enabled: true,
                             category: category(),
                             trigger: trigger(),
+                            start_trigger,
+                            fixed_duration: fixed_duration(),
                             effects: effects(),
                             refresh_abilities: refresh_abilities(),
                             source: source(),

@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::dsl::AudioConfig;
+use crate::dsl::Trigger;
 
 // Re-export EntityFilter from shared module
 pub use crate::dsl::EntityFilter;
@@ -84,13 +85,25 @@ pub struct EffectDefinition {
     pub enabled: bool,
 
     // ─── Matching ───────────────────────────────────────────────────────────
-    /// Effect selectors (ID or name) that match this definition
+    /// Effect selectors (ID or name) that match this definition.
+    /// Used when trigger is EffectApplied/EffectRemoved (or not set).
     #[serde(default)]
     pub effects: Vec<EffectSelector>,
 
-    /// When to start tracking: on effect gained or effect lost
+    /// What starts tracking. Defaults to EffectApplied matching `effects`.
+    /// Use AbilityCast for proc/cooldown tracking independent of game effects.
     #[serde(default)]
     pub trigger: EffectTriggerMode,
+
+    /// Optional explicit trigger (AbilityCast, EffectApplied, EffectRemoved).
+    /// When set, overrides `trigger` and `effects` fields.
+    #[serde(default, rename = "start_trigger")]
+    pub start_trigger: Option<Trigger>,
+
+    /// If true, ignore game EffectRemoved signals - only expire via duration_secs.
+    /// Useful for tracking cooldowns that shouldn't end when the buff is consumed.
+    #[serde(default)]
+    pub fixed_duration: bool,
 
     /// Abilities (ID or name) that can apply or refresh this effect
     #[serde(default)]
@@ -188,6 +201,29 @@ impl EffectDefinition {
     /// Check if an ability can refresh this effect
     pub fn can_refresh_with(&self, ability_id: u64, ability_name: Option<&str>) -> bool {
         self.refresh_abilities.iter().any(|s| s.matches(ability_id, ability_name))
+    }
+
+    /// Check if this definition uses an AbilityCast start trigger
+    pub fn has_ability_cast_trigger(&self) -> bool {
+        matches!(self.start_trigger, Some(Trigger::AbilityCast { .. }))
+    }
+
+    /// Check if an ability cast matches this definition's start_trigger
+    pub fn matches_ability_cast(&self, ability_id: u64, ability_name: Option<&str>) -> bool {
+        if let Some(Trigger::AbilityCast { ref abilities, .. }) = self.start_trigger {
+            abilities.is_empty() || abilities.iter().any(|s| s.matches(ability_id, ability_name))
+        } else {
+            false
+        }
+    }
+
+    /// Get the source filter from start_trigger (if AbilityCast)
+    pub fn ability_cast_source_filter(&self) -> Option<&EntityFilter> {
+        if let Some(Trigger::AbilityCast { ref source, .. }) = self.start_trigger {
+            Some(source)
+        } else {
+            None
+        }
     }
 }
 

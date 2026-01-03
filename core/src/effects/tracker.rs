@@ -34,9 +34,10 @@ impl DefinitionSet {
         let mut duplicates = Vec::new();
         for def in definitions {
             // Warn about effects that will never match anything
-            if def.effects.is_empty() && def.refresh_abilities.is_empty() {
+            // (unless they have an explicit start_trigger like AbilityCast)
+            if def.effects.is_empty() && def.refresh_abilities.is_empty() && def.start_trigger.is_none() {
                 eprintln!(
-                    "[EFFECT WARNING] Effect '{}' has no effects or refresh_abilities - it will never match anything!",
+                    "[EFFECT WARNING] Effect '{}' has no effects, refresh_abilities, or start_trigger - it will never match anything!",
                     def.id
                 );
             }
@@ -63,6 +64,14 @@ impl DefinitionSet {
         self.effects
             .values()
             .filter(|def| def.enabled && def.matches_effect(effect_id, effect_name))
+            .collect()
+    }
+
+    /// Find effect definitions that match an ability cast trigger
+    pub fn find_ability_cast_matching(&self, ability_id: u64, ability_name: Option<&str>) -> Vec<&EffectDefinition> {
+        self.effects
+            .values()
+            .filter(|def| def.enabled && def.matches_ability_cast(ability_id, ability_name))
             .collect()
     }
 
@@ -412,6 +421,120 @@ impl EffectTracker {
         }
     }
 
+    /// Handle ability cast for AbilityCast-triggered effects (procs, cooldowns)
+    fn handle_ability_cast(
+        &mut self,
+        ability_id: i64,
+        ability_name: IStr,
+        source_id: i64,
+        source_name: IStr,
+        source_entity_type: EntityType,
+        source_npc_id: i64,
+        target_id: i64,
+        target_name: IStr,
+        _target_entity_type: EntityType,
+        timestamp: NaiveDateTime,
+        encounter: Option<&crate::encounter::CombatEncounter>,
+    ) {
+        // Skip when not in live mode
+        if !self.live_mode {
+            return;
+        }
+
+        let local_player_id = self.local_player_id;
+        let ability_name_str = crate::context::resolve(ability_name);
+
+        // Find definitions with AbilityCast triggers that match this ability
+        let matching_defs: Vec<_> = self
+            .definitions
+            .find_ability_cast_matching(ability_id as u64, Some(&ability_name_str))
+            .into_iter()
+            .collect();
+
+        if matching_defs.is_empty() {
+            return;
+        }
+
+        // Build entity info for source filter matching
+        let source_info = EntityInfo {
+            id: source_id,
+            npc_id: source_npc_id,
+            entity_type: source_entity_type,
+            name: source_name,
+        };
+
+        // Get boss IDs for filter matching
+        let boss_ids: HashSet<i64> = encounter
+            .map(|e| e.hp_by_entity.keys().copied().collect())
+            .unwrap_or_default();
+
+        let is_from_local = local_player_id == Some(source_id);
+
+        for def in matching_defs {
+            // Check source filter from the trigger
+            if let Some(source_filter) = def.ability_cast_source_filter() {
+                if !source_filter.matches(
+                    source_info.id,
+                    source_info.entity_type,
+                    source_info.name,
+                    source_info.npc_id,
+                    local_player_id,
+                    &boss_ids,
+                ) {
+                    continue;
+                }
+            }
+
+            // For procs, the effect is typically shown on the caster (source)
+            // Use target from definition's target filter, or default to source
+            let effect_target_id = if def.target.is_local_player() {
+                local_player_id.unwrap_or(source_id)
+            } else {
+                target_id
+            };
+            let effect_target_name = if effect_target_id == source_id {
+                source_name
+            } else {
+                target_name
+            };
+
+            let key = EffectInstanceKey {
+                definition_id: def.id.clone(),
+                target_entity_id: effect_target_id,
+            };
+
+            let duration = def.duration_secs.map(Duration::from_secs_f32);
+
+            if let Some(existing) = self.active_effects.get_mut(&key) {
+                // Refresh if allowed
+                if def.can_be_refreshed {
+                    existing.refresh(timestamp, duration);
+                }
+            } else {
+                // Create new effect
+                let display_text = def.display_text.clone().unwrap_or_else(|| def.name.clone());
+                let effect = ActiveEffect::new(
+                    def.id.clone(),
+                    ability_id as u64, // Use ability ID since this is ability-triggered
+                    def.name.clone(),
+                    display_text,
+                    source_id,
+                    effect_target_id,
+                    effect_target_name,
+                    is_from_local,
+                    timestamp,
+                    duration,
+                    def.effective_color(),
+                    def.category,
+                    def.show_on_raid_frames,
+                    def.show_on_effects_overlay,
+                    &def.audio,
+                );
+                self.active_effects.insert(key, effect);
+            }
+        }
+    }
+
     /// Handle effect removal signal
     fn handle_effect_removed(
         &mut self,
@@ -451,8 +574,11 @@ impl EffectTracker {
             match def.trigger {
                 EffectTriggerMode::EffectApplied => {
                     // Mark existing effect as removed (normal behavior)
-                    if let Some(effect) = self.active_effects.get_mut(&key) {
-                        effect.mark_removed();
+                    // But skip if fixed_duration is set - only expire via timer
+                    if !def.fixed_duration {
+                        if let Some(effect) = self.active_effects.get_mut(&key) {
+                            effect.mark_removed();
+                        }
                     }
                 }
                 EffectTriggerMode::EffectRemoved => {
@@ -666,13 +792,34 @@ impl SignalHandler for EffectTracker {
                 ability_id,
                 ability_name,
                 source_id,
+                source_name,
+                source_entity_type,
+                source_npc_id,
                 target_id,
                 target_name,
                 target_entity_type,
                 timestamp,
                 ..
             } => {
-                // Only process abilities from local player
+                self.current_game_time = Some(*timestamp);
+
+                // Handle AbilityCast-triggered effects (procs, cooldowns)
+                // This works for any source, not just local player
+                self.handle_ability_cast(
+                    *ability_id,
+                    *ability_name,
+                    *source_id,
+                    *source_name,
+                    *source_entity_type,
+                    *source_npc_id,
+                    *target_id,
+                    *target_name,
+                    *target_entity_type,
+                    *timestamp,
+                    encounter,
+                );
+
+                // Refresh existing effects (local player only)
                 let local_player_id = self.local_player_id;
                 if local_player_id == Some(*source_id) {
                     // Resolve target: if target is self/empty, use tracked target from TargetSet

@@ -347,6 +347,14 @@ pub struct EffectListItem {
     pub category: EffectCategory,
     pub trigger: EffectTriggerMode,
 
+    // AbilityCast trigger (overrides trigger + effects when set)
+    #[serde(default)]
+    pub start_trigger: Option<Trigger>,
+
+    // If true, ignore game EffectRemoved - use duration_secs only
+    #[serde(default)]
+    pub fixed_duration: bool,
+
     // Matching
     pub effects: Vec<EffectSelector>,
     pub refresh_abilities: Vec<AbilitySelector>,

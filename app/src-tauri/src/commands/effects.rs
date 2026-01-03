@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, State};
 
-use baras_core::dsl::AudioConfig;
+use baras_core::dsl::{AudioConfig, Trigger};
 use baras_core::effects::{
     DefinitionConfig, EffectCategory, EffectDefinition, EffectSelector, EffectTriggerMode,
     EntityFilter,
@@ -37,6 +37,8 @@ pub struct EffectListItem {
     pub enabled: bool,
     pub category: EffectCategory,
     pub trigger: EffectTriggerMode,
+    pub start_trigger: Option<Trigger>,
+    pub fixed_duration: bool,
     pub effects: Vec<EffectSelector>,
     pub refresh_abilities: Vec<AbilitySelector>,
     pub source: EntityFilter,
@@ -78,6 +80,8 @@ impl EffectListItem {
             enabled: def.enabled,
             category: def.category,
             trigger: def.trigger,
+            start_trigger: def.start_trigger.clone(),
+            fixed_duration: def.fixed_duration,
             effects: def.effects.clone(),
             refresh_abilities: def.refresh_abilities.clone(),
             source: def.source.clone(),
@@ -108,6 +112,8 @@ impl EffectListItem {
             enabled: self.enabled,
             category: self.category,
             trigger: self.trigger,
+            start_trigger: self.start_trigger.clone(),
+            fixed_duration: self.fixed_duration,
             effects: self.effects.clone(),
             refresh_abilities: self.refresh_abilities.clone(),
             source: self.source.clone(),
@@ -346,9 +352,10 @@ pub async fn update_effect_definition(
     effect: EffectListItem,
 ) -> Result<(), String> {
     // Validate effect has at least one way to match
-    if effect.effects.is_empty() && effect.refresh_abilities.is_empty() {
+    // (start_trigger like AbilityCast can also trigger effects)
+    if effect.effects.is_empty() && effect.refresh_abilities.is_empty() && effect.start_trigger.is_none() {
         return Err(
-            "Effect must have at least one effect ID or refresh ability to match against. \
+            "Effect must have at least one effect ID, refresh ability, or start_trigger to match against. \
             Without these, the effect will never trigger."
                 .to_string(),
         );
@@ -402,9 +409,10 @@ pub async fn create_effect_definition(
     mut effect: EffectListItem,
 ) -> Result<EffectListItem, String> {
     // Validate effect has at least one way to match
-    if effect.effects.is_empty() && effect.refresh_abilities.is_empty() {
+    // (start_trigger like AbilityCast can also trigger effects)
+    if effect.effects.is_empty() && effect.refresh_abilities.is_empty() && effect.start_trigger.is_none() {
         return Err(
-            "Effect must have at least one effect ID or refresh ability to match against. \
+            "Effect must have at least one effect ID, refresh ability, or start_trigger to match against. \
             Without these, the effect will never trigger."
                 .to_string(),
         );

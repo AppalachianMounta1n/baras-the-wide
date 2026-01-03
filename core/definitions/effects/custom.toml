@@ -1,14 +1,13 @@
 # Custom Effect Definitions
 # Add your own effects here - this file is preserved across updates
 #
-# Example effect:
+# ─── Standard Effect (tracks game buffs/debuffs) ───────────────────────────
 # [[effect]]
-# # Identity
 # id = "effect_id"                      # Unique identifier
 # name = "Effect Name"
 # display_text = "Short"                # Optional override
 #
-# # Matching
+# # Matching (for standard effects)
 # effects = [814832605462528, "Name"]   # Effect IDs or names
 # trigger = "effect_applied"            # effect_applied | effect_removed
 # refresh_abilities = [123, "Ability"]  # Abilities that refresh this effect
@@ -21,7 +20,7 @@
 # max_stacks = 0                        # 0 = don't show stacks
 #
 # # Display
-# category = "hot"                      # See categories below
+# category = "hot"                      # hot | shield | buff | debuff | cleansable | proc | mechanic
 # color = [80, 200, 80, 255]            # Override RGBA (None = use category)
 # show_on_raid_frames = false
 # show_on_effects_overlay = false
@@ -32,18 +31,18 @@
 # persist_past_death = false
 # track_outside_combat = true
 #
-# # Alerts
-# alert_near_expiration = false
-# alert_threshold_secs = 3.0
+# ─── Proc/Cooldown Tracking (triggers on ability cast) ─────────────────────
+# [[effect]]
+# id = "recklessness_cd"
+# name = "Recklessness"
+# start_trigger = { type = "ability_cast", abilities = [123456], source = "local_player" }
+# duration_secs = 90.0                  # Cooldown duration
+# fixed_duration = true                 # Ignore EffectRemoved - expire only via timer
+# category = "proc"
+# target = "local_player"               # Show on your own raid frame
+# show_on_raid_frames = true
 #
-# # Timer Integration
-# on_apply_trigger_timer = "timer_id"
-# on_expire_trigger_timer = "timer_id"
-#
-# # Context
-# encounters = ["Encounter Name"]       # Empty = all encounters
-#
-# # Audio
+# ─── Audio Settings ────────────────────────────────────────────────────────
 # [effect.audio]
 # enabled = false
 # file = "sound.wav"
