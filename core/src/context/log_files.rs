@@ -248,13 +248,23 @@ pub fn parse_log_filename(filename: &str) -> Option<(NaiveDate, NaiveDateTime)> 
 }
 
 const CHECK_N_LINES: usize = 25;
+/// Read only the first 32KB - enough for 25+ lines (lines are ~200-500 bytes)
+const READ_LIMIT: usize = 32 * 1024;
 
 pub fn extract_character_name(path: &Path, session_date: NaiveDateTime) -> Result<Option<String>> {
-    let bytes = fs::read(path)?;
-    let (content, _, _) = WINDOWS_1252.decode(&bytes);
+    use std::io::Read;
+
+    // Only read the first 32KB instead of the entire file
+    let file = fs::File::open(path)?;
+    let mut reader = std::io::BufReader::new(file);
+    let mut buffer = vec![0u8; READ_LIMIT];
+    let bytes_read = reader.read(&mut buffer)?;
+    buffer.truncate(bytes_read);
+
+    let (content, _, _) = WINDOWS_1252.decode(&buffer);
     let parser = LogParser::new(session_date);
 
-    //take first 25 lines. If not in first 25 something is probably wrong
+    // Take first 25 lines. If not in first 25 something is probably wrong
     for (idx, line) in content.lines().take(CHECK_N_LINES).enumerate() {
         if let Some(event) = &parser.parse_line(idx as u64, line)
             && event.effect.type_id == effect_type_id::DISCIPLINECHANGED
