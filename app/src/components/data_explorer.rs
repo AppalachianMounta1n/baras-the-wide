@@ -759,7 +759,8 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
 
             // Auto-select first player if none selected
             let auto_selected = if selected_source.read().is_none() {
-                entity_data.iter()
+                entity_data
+                    .iter()
                     .find(|e| e.entity_type == "Player" || e.entity_type == "Companion")
                     .map(|e| e.source_name.clone())
             } else {
@@ -775,7 +776,7 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
                 idx,
                 auto_selected.as_deref(),
                 tr_opt.as_ref(),
-                None,  // No entity filter when source is selected
+                None, // No entity filter when source is selected
                 Some(&mode),
                 timeline.read().as_ref().map(|t| t.duration_secs),
             )
@@ -914,7 +915,12 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
         let filtered = filtered_history();
         group_by_area(&filtered)
             .into_iter()
-            .map(|(area, diff, encs)| (area, diff, encs.into_iter().cloned().collect::<Vec<_>>()))
+            .map(|(area, diff, encs)| {
+                let mut reversed: Vec<_> = encs.into_iter().cloned().collect();
+                reversed.reverse();
+                (area, diff, reversed)
+            })
+            .rev()
             .collect::<Vec<_>>()
     });
 
@@ -954,12 +960,27 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
             items.sort_by(|a, b| {
                 let cmp = match col {
                     SortColumn::Target | SortColumn::Ability => a.ability_name.cmp(&b.ability_name),
-                    SortColumn::Total => a.total_value.partial_cmp(&b.total_value).unwrap_or(std::cmp::Ordering::Equal),
-                    SortColumn::Percent => a.percent_of_total.partial_cmp(&b.percent_of_total).unwrap_or(std::cmp::Ordering::Equal),
-                    SortColumn::Rate => a.dps.partial_cmp(&b.dps).unwrap_or(std::cmp::Ordering::Equal),
+                    SortColumn::Total => a
+                        .total_value
+                        .partial_cmp(&b.total_value)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                    SortColumn::Percent => a
+                        .percent_of_total
+                        .partial_cmp(&b.percent_of_total)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                    SortColumn::Rate => a
+                        .dps
+                        .partial_cmp(&b.dps)
+                        .unwrap_or(std::cmp::Ordering::Equal),
                     SortColumn::Hits => a.hit_count.cmp(&b.hit_count),
-                    SortColumn::Avg => a.avg_hit.partial_cmp(&b.avg_hit).unwrap_or(std::cmp::Ordering::Equal),
-                    SortColumn::CritPct => a.crit_rate.partial_cmp(&b.crit_rate).unwrap_or(std::cmp::Ordering::Equal),
+                    SortColumn::Avg => a
+                        .avg_hit
+                        .partial_cmp(&b.avg_hit)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                    SortColumn::CritPct => a
+                        .crit_rate
+                        .partial_cmp(&b.crit_rate)
+                        .unwrap_or(std::cmp::Ordering::Equal),
                 };
                 match dir {
                     SortDirection::Asc => cmp,
@@ -986,7 +1007,10 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
             } else {
                 None
             };
-            groups.entry((target, instance_key)).or_default().push(ability);
+            groups
+                .entry((target, instance_key))
+                .or_default()
+                .push(ability);
         }
 
         // Convert to vec with aggregate group stats
@@ -1000,7 +1024,11 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
                 let crits: i64 = abilities.iter().map(|a| a.crit_count).sum();
                 let first_hit = abilities.first().and_then(|a| a.target_first_hit_secs);
                 let avg = if hits > 0 { total / hits as f64 } else { 0.0 };
-                let crit_pct = if hits > 0 { crits as f64 / hits as f64 * 100.0 } else { 0.0 };
+                let crit_pct = if hits > 0 {
+                    crits as f64 / hits as f64 * 100.0
+                } else {
+                    0.0
+                };
 
                 let stats = GroupStats {
                     target: Some(target),
@@ -1020,10 +1048,20 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
         result.sort_by(|a, b| {
             let cmp = match col {
                 SortColumn::Target => a.0.target.cmp(&b.0.target),
-                _ => a.0.total.partial_cmp(&b.0.total).unwrap_or(std::cmp::Ordering::Equal),
+                _ => {
+                    a.0.total
+                        .partial_cmp(&b.0.total)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                }
             };
             match col {
-                SortColumn::Target => if dir == SortDirection::Asc { cmp } else { cmp.reverse() },
+                SortColumn::Target => {
+                    if dir == SortDirection::Asc {
+                        cmp
+                    } else {
+                        cmp.reverse()
+                    }
+                }
                 _ => cmp.reverse(),
             }
         });
