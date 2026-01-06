@@ -6,7 +6,7 @@ The **Battle Analysis and Raid Assessment System** (BARAS) is the ultimate compa
   <img src="etc/app-icon.png" alt="BARAS Icon" width="150">
 </p>
 
-**NOTE**: BARAS is still undergoing active development and is not yet complete. Find a bug? Have a feature you want added? Let us know!
+**NOTE**: BARAS is still undergoing active development. Open an issue on github or send bug reports and feature requests to: baras-app@proton.me
 
 ## Installation
 
