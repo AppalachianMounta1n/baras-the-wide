@@ -30,4 +30,10 @@ parquet = { version = "57", default-features = false, features = [
   "snap",
   "zstd",
 ] }
-datafusion = { version = "51", features = ["parquet"] }
+datafusion = { version = "51", default-features = false, features = [
+  "parquet",
+  "sql",
+  "nested_expressions",
+] }
+datafusion-functions-nested = "51.0"
+datafusion-functions-table = "51.0"
