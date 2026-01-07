@@ -1,15 +1,15 @@
 {
-  "version": "2026.1.4",
-  "notes": "- timer trigger bug fixes",
-  "pub_date": "2026-01-04T00:39:08Z",
+  "version": "2026.1.6",
+  "notes": "-",
+  "pub_date": "2026-01-07T00:53:44Z",
   "platforms": {
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTY0pJZnZRK3YyNHU4dG1SbFZTdnNHY3cwd08yQ1JUU0NVR2dHNkJoUlVwbDRNRHJrS09tTnlTUmR4eFJFRmhqU0E2Tld5TWtjQmpXc2lVNG00Z0pHa2NCV3R6U2NoL1FnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY3NDg2ODY2CWZpbGU6QkFSQVNfMjAyNi4xLjRfYW1kNjQuQXBwSW1hZ2UKYXV5S2p1a2NWZzU1dE0rNHRYdlc4Z3JDVVF6Uk8vUjN4R3poaTI2UEwzUlljMXRqR0lZNmthTHgxOFUvN0Q2c094bXdhSnM2SWNUU1NxdHFiN2dBQXc9PQo=",
-      "url": "https://github.com/baras-app/baras/releases/download/v2026.1.4/BARAS_2026.1.4_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTY0pJZnZRK3YyNHJ2aTUwUmc1YU1TSEZZemVRSzNUTi9ZVHNrbW5BMklvY0Uvd3FGRHF6bDFXeFBiY0RHL21QYTNtZzBmNzdXVVgvUWZjM0RZcFpsNk9uUThiSjNEeFE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY3NzQ1OTIzCWZpbGU6QkFSQVNfMjAyNi4xLjZfYW1kNjQuQXBwSW1hZ2UKUGkvbFZXYkJ2TjNMWjFhbXVGOTdaVWJlMGJIbEdQaEg3dXRqci9iUys3SHB1Q3BmSTlPNnRmZFo1ZlhScE9LQ0JyREVGeXhuc01IU0YvbmNhckhzQkE9PQo=",
+      "url": "https://github.com/baras-app/baras/releases/download/v2026.1.6/BARAS_2026.1.6_amd64.AppImage"
     },
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTY0pJZnZRK3YyNGxiTGw3alQrZTlxUWs1bmxUMmJXd2VKeW56RGpKUDF0MDJDL3JYOVlXRnR0c3g4dDBJbVpWUERIcklIWGZ3SVppS2pxRURVQ1ZCRklENzhpQnRLTFFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY3NDg3MDkwCWZpbGU6QkFSQVNfMjAyNi4xLjRfeDY0LXNldHVwLmV4ZQovZk5HTnFxODIybVpmMUV2bzdUajB4R0xPajZGUnhsSllWVWRHTW9KdnF2dndpMkpQNFVjWWF2ZGFuVXRUQ2NsSDgrTHRJdC9MRk1tUEpMN0xvb0lBUT09Cg==",
-      "url": "https://github.com/baras-app/baras/releases/download/v2026.1.4/BARAS_2026.1.4_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTY0pJZnZRK3YyNG90WnBVY0VjVnB6WFJyNGtNNHNGMThEYmkrRnVQZDllY2ZMYy81RVp2RWY0aDRiWXJ1Q0k1Vk1UaWl6VjgxdSsvZXkrQXJCU0Npd05HSUxNTEZONXd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY3NzQ3MDE5CWZpbGU6QkFSQVNfMjAyNi4xLjZfeDY0LXNldHVwLmV4ZQpmVHFTSjZGVy9sRjZNTHFlbWJVeGZ0dCtYdHovaVBlcFNvR1RwUVdTSFdFaW9kUVRkcVJ2aXFnejVyUG1ITDI2MTNBYnNnWmVrNldMWUhYSVI3SGhCdz09Cg==",
+      "url": "https://github.com/baras-app/baras/releases/download/v2026.1.6/BARAS_2026.1.6_x64-setup.exe"
     }
   }
 }
