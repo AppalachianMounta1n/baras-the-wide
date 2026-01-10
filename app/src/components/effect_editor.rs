@@ -6,7 +6,6 @@
 //! - Full CRUD operations
 
 use dioxus::prelude::*;
-use std::collections::HashSet;
 
 use super::encounter_editor::InlineNameCreator;
 use super::encounter_editor::triggers::{
@@ -90,16 +89,20 @@ impl EffectTriggerType {
 // Main Panel
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Marker ID for a draft effect that hasn't been saved yet
+const DRAFT_EFFECT_ID: &str = "__new_draft__";
+
 #[component]
 pub fn EffectEditorPanel() -> Element {
     // State
     let mut effects = use_signal(Vec::<EffectListItem>::new);
     let mut search_query = use_signal(String::new);
     let mut expanded_effect = use_signal(|| None::<String>);
-    let mut expanded_files = use_signal(HashSet::<String>::new);
     let mut loading = use_signal(|| true);
     let mut save_status = use_signal(String::new);
     let mut status_is_error = use_signal(|| false);
+    // Draft for new effects - not yet saved to backend
+    let mut draft_effect = use_signal(|| None::<EffectListItem>);
 
     // Load effects on mount
     use_future(move || async move {
@@ -127,29 +130,6 @@ pub fn EffectEditorPanel() -> Element {
             .collect::<Vec<_>>()
     });
 
-    // Group filtered effects by category
-    let grouped_effects = use_memo(move || {
-        let mut groups: Vec<(EffectCategory, Vec<EffectListItem>)> = Vec::new();
-
-        for effect in filtered_effects() {
-            let cat = effect.category;
-            if let Some(group) = groups.iter_mut().find(|(k, _)| *k == cat) {
-                group.1.push(effect);
-            } else {
-                groups.push((cat, vec![effect]));
-            }
-        }
-
-        // Sort groups by category order (HoT, Shield, Buff, etc.)
-        let cat_order = |c: &EffectCategory| -> usize {
-            EffectCategory::all()
-                .iter()
-                .position(|x| x == c)
-                .unwrap_or(99)
-        };
-        groups.sort_by(|a, b| cat_order(&a.0).cmp(&cat_order(&b.0)));
-        groups
-    });
 
     // Handlers
     let on_save = move |updated_effect: EffectListItem| {
@@ -209,26 +189,57 @@ pub fn EffectEditorPanel() -> Element {
     };
 
     let on_create = move |name: String| {
-        let new_effect = default_effect(name);
+        // Create a local draft - don't save to backend yet
+        let mut new_effect = default_effect(name);
+        new_effect.id = DRAFT_EFFECT_ID.to_string();
+
+        // Set the draft and expand it
+        draft_effect.set(Some(new_effect));
+        expanded_effect.set(Some(DRAFT_EFFECT_ID.to_string()));
+        save_status.set("Fill in effect details and click Save".to_string());
+        status_is_error.set(false);
+    };
+
+    // Handler for saving a draft (creates new effect on backend)
+    let on_save_draft = move |mut effect: EffectListItem| {
+        // Generate ID from name (snake_case)
+        effect.id = effect
+            .name
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '_' })
+            .collect::<String>()
+            .split('_')
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("_");
+
         spawn(async move {
-            if let Some(created) = api::create_effect_definition(&new_effect).await {
-                let created_id = created.id.clone();
-                let cat = created.category;
-                let mut current = effects();
-                current.push(created);
-                effects.set(current);
-                // Auto-expand the category and the new effect
-                let mut cats = expanded_files();
-                cats.insert(cat.label().to_string());
-                expanded_files.set(cats);
-                expanded_effect.set(Some(created_id));
-                save_status.set("Created".to_string());
-                status_is_error.set(false);
-            } else {
-                save_status.set("Failed to create".to_string());
-                status_is_error.set(true);
+            match api::create_effect_definition(&effect).await {
+                Ok(created) => {
+                    let created_id = created.id.clone();
+                    let mut current = effects();
+                    current.push(created);
+                    effects.set(current);
+                    // Clear draft and expand the new effect
+                    draft_effect.set(None);
+                    expanded_effect.set(Some(created_id));
+                    save_status.set("Created".to_string());
+                    status_is_error.set(false);
+                }
+                Err(e) => {
+                    save_status.set(e);
+                    status_is_error.set(true);
+                }
             }
         });
+    };
+
+    // Handler for canceling draft creation
+    let on_cancel_draft = move |_: ()| {
+        draft_effect.set(None);
+        expanded_effect.set(None);
+        save_status.set(String::new());
     };
 
     rsx! {
@@ -263,10 +274,10 @@ pub fn EffectEditorPanel() -> Element {
                 }
             }
 
-            // Effect list grouped by file
+            // Effect list (flat)
             if loading() {
                 div { class: "effect-loading", "Loading effects..." }
-            } else if grouped_effects().is_empty() {
+            } else if filtered_effects().is_empty() && draft_effect().is_none() {
                 div { class: "effect-empty",
                     if effects().is_empty() {
                         "No effect definitions found"
@@ -276,65 +287,58 @@ pub fn EffectEditorPanel() -> Element {
                 }
             } else {
                 div { class: "effect-list",
-                    for (category, cat_effects) in grouped_effects() {
+                    // Draft effect at the top (if any)
+                    if let Some(draft) = draft_effect() {
                         {
-                            let cat_key = category.label().to_string();
-                            let is_expanded = expanded_files().contains(&cat_key);
-                            let cat_key_toggle = cat_key.clone();
-                            let cat_label = category.label();
-                            let effect_count = cat_effects.len();
+                            let is_draft_expanded = expanded_effect() == Some(DRAFT_EFFECT_ID.to_string());
+                            rsx! {
+                                EffectRow {
+                                    key: "{DRAFT_EFFECT_ID}",
+                                    effect: draft,
+                                    expanded: is_draft_expanded,
+                                    is_draft: true,
+                                    on_toggle: move |_| {
+                                        if is_draft_expanded {
+                                            expanded_effect.set(None);
+                                        } else {
+                                            expanded_effect.set(Some(DRAFT_EFFECT_ID.to_string()));
+                                        }
+                                    },
+                                    on_save: on_save_draft,
+                                    on_delete: on_cancel_draft,
+                                    on_duplicate: move |_| {},
+                                    on_cancel: on_cancel_draft,
+                                }
+                            }
+                        }
+                    }
+
+                    // Existing effects
+                    for effect in filtered_effects() {
+                        {
+                            let effect_key = effect.id.clone();
+                            let is_effect_expanded = expanded_effect() == Some(effect_key.clone());
+                            let effect_clone = effect.clone();
+                            let effect_for_delete = effect.clone();
+                            let effect_for_duplicate = effect.clone();
 
                             rsx! {
-                                // Category header
-                                div {
-                                    class: "file-header",
-                                    onclick: move |_| {
-                                        let mut set = expanded_files();
-                                        if set.contains(&cat_key_toggle) {
-                                            set.remove(&cat_key_toggle);
+                                EffectRow {
+                                    key: "{effect_key}",
+                                    effect: effect_clone,
+                                    expanded: is_effect_expanded,
+                                    is_draft: false,
+                                    on_toggle: move |_| {
+                                        if is_effect_expanded {
+                                            expanded_effect.set(None);
                                         } else {
-                                            set.insert(cat_key_toggle.clone());
+                                            expanded_effect.set(Some(effect_key.clone()));
                                         }
-                                        expanded_files.set(set);
                                     },
-                                    span { class: "file-expand-icon",
-                                        if is_expanded { "▼" } else { "▶" }
-                                    }
-                                    span { class: "file-name", "{cat_label}" }
-                                    span { class: "file-effect-count", "({effect_count})" }
-                                }
-
-                                // Effects (only if expanded)
-                                if is_expanded {
-                                    div { class: "file-effects",
-                                        for effect in cat_effects {
-                                            {
-                                                let effect_key = effect.id.clone();
-                                                let is_effect_expanded = expanded_effect() == Some(effect_key.clone());
-                                                let effect_clone = effect.clone();
-                                                let effect_for_delete = effect.clone();
-                                                let effect_for_duplicate = effect.clone();
-
-                                                rsx! {
-                                                    EffectRow {
-                                                        key: "{effect_key}",
-                                                        effect: effect_clone,
-                                                        expanded: is_effect_expanded,
-                                                        on_toggle: move |_| {
-                                                            if is_effect_expanded {
-                                                                expanded_effect.set(None);
-                                                            } else {
-                                                                expanded_effect.set(Some(effect_key.clone()));
-                                                            }
-                                                        },
-                                                        on_save: on_save,
-                                                        on_delete: move |_| on_delete(effect_for_delete.clone()),
-                                                        on_duplicate: move |_| on_duplicate(effect_for_duplicate.clone()),
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                                    on_save: on_save,
+                                    on_delete: move |_| on_delete(effect_for_delete.clone()),
+                                    on_duplicate: move |_| on_duplicate(effect_for_duplicate.clone()),
+                                    on_cancel: move |_| {},
                                 }
                             }
                         }
@@ -353,10 +357,12 @@ pub fn EffectEditorPanel() -> Element {
 fn EffectRow(
     effect: EffectListItem,
     expanded: bool,
+    #[props(default = false)] is_draft: bool,
     on_toggle: EventHandler<()>,
     on_save: EventHandler<EffectListItem>,
     on_delete: EventHandler<()>,
     on_duplicate: EventHandler<()>,
+    #[props(default)] on_cancel: EventHandler<()>,
 ) -> Element {
     let color = effect.color.unwrap_or([128, 128, 128, 255]);
     let color_hex = format!("#{:02x}{:02x}{:02x}", color[0], color[1], color[2]);
@@ -385,12 +391,17 @@ fn EffectRow(
                     }
 
                     span { class: "effect-name", "{effect.name}" }
+                    if is_draft {
+                        span { class: "effect-new-badge", "(New)" }
+                    }
                     if let Some(ref dt) = effect.display_text {
                         if dt != &effect.name {
                             span { class: "effect-display-text", "→ \"{dt}\"" }
                         }
                     }
-                    span { class: "effect-id-inline", "{effect.id}" }
+                    if !is_draft {
+                        span { class: "effect-id-inline", "{effect.id}" }
+                    }
                     span { class: "effect-category-badge", "{effect.category.label()}" }
 
                     if let Some(dur) = effect.duration_secs {
@@ -469,6 +480,7 @@ fn EffectRow(
             if expanded {
                 EffectEditForm {
                     effect: effect.clone(),
+                    is_draft: is_draft,
                     on_save: on_save,
                     on_delete: on_delete,
                     on_duplicate: on_duplicate,
@@ -485,6 +497,7 @@ fn EffectRow(
 #[component]
 fn EffectEditForm(
     effect: EffectListItem,
+    #[props(default = false)] is_draft: bool,
     on_save: EventHandler<EffectListItem>,
     on_delete: EventHandler<()>,
     on_duplicate: EventHandler<()>,
@@ -494,7 +507,8 @@ fn EffectEditForm(
     let mut trigger_type = use_signal(|| EffectTriggerType::from_effect(&effect));
 
     let effect_original = effect.clone();
-    let has_changes = use_memo(move || draft() != effect_original);
+    // For drafts, always enable save; for existing effects, only when changed
+    let has_changes = use_memo(move || is_draft || draft() != effect_original);
 
     let color = draft().color.unwrap_or([128, 128, 128, 255]);
     let color_hex = format!("#{:02x}{:02x}{:02x}", color[0], color[1], color[2]);
@@ -504,10 +518,12 @@ fn EffectEditForm(
                 div { class: "effect-edit-grid",
                     // ═══ LEFT COLUMN: Main Effect Settings ═══════════════════════════
                     div { class: "effect-edit-left",
-                        // Effect ID (read-only)
-                        div { class: "form-row-hz",
-                            label { "Effect ID" }
-                            code { class: "effect-id-display", "{effect.id}" }
+                        // Effect ID (read-only) - hidden for drafts
+                        if !is_draft {
+                            div { class: "form-row-hz",
+                                label { "Effect ID" }
+                                code { class: "effect-id-display", "{effect.id}" }
+                            }
                         }
 
                         // Name
@@ -1008,13 +1024,22 @@ fn EffectEditForm(
                         "Save"
                     }
 
-                    button {
-                        class: "btn-duplicate",
-                        onclick: move |_| on_duplicate.call(()),
-                        "Duplicate"
+                    if !is_draft {
+                        button {
+                            class: "btn-duplicate",
+                            onclick: move |_| on_duplicate.call(()),
+                            "Duplicate"
+                        }
                     }
 
-                    if confirm_delete() {
+                    if is_draft {
+                        // For drafts, show Cancel button (no confirmation needed)
+                        button {
+                            class: "btn-delete",
+                            onclick: move |_| on_delete.call(()),
+                            "Cancel"
+                        }
+                    } else if confirm_delete() {
                         span { class: "delete-confirm",
                             "Delete? "
                             button {

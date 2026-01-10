@@ -29,13 +29,14 @@ pub fn CounterConditionEditor(
         ComparisonOp::Ne => "ne",
     };
 
+    let selected_counter = cond.counter_id.clone();
+
     rsx! {
         div { class: "flex items-center gap-xs",
             // Counter ID selector (empty = no condition)
             select {
                 class: "select",
                 style: "width: 140px;",
-                value: "{cond.counter_id}",
                 onchange: {
                     let cond_clone = cond.clone();
                     move |e| {
@@ -50,12 +51,16 @@ pub fn CounterConditionEditor(
                         }
                     }
                 },
-                option { value: "", "(none)" }
+                option { value: "", selected: selected_counter.is_empty(), "(none)" }
                 if counters.is_empty() {
                     option { value: "", disabled: true, "No counters defined" }
                 }
                 for counter_id in &counters {
-                    option { value: "{counter_id}", "{counter_id}" }
+                    option {
+                        value: "{counter_id}",
+                        selected: counter_id == &selected_counter,
+                        "{counter_id}"
+                    }
                 }
             }
 

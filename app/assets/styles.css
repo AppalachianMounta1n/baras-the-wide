@@ -4242,6 +4242,15 @@ details[open] .collapsible-summary::before {
   font-size: 0.75em;
 }
 
+.effect-new-badge {
+  background: var(--success-alpha-30);
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  color: var(--success);
+  font-size: 0.75em;
+  font-weight: 500;
+}
+
 .effect-duration {
   color: var(--swtor-blue-dim);
   font-size: 0.85em;

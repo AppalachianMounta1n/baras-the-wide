@@ -592,10 +592,11 @@ pub async fn duplicate_effect_definition(
 }
 
 /// Create a new effect
-pub async fn create_effect_definition(effect: &EffectListItem) -> Option<EffectListItem> {
+/// Returns Ok(created effect) on success, Err(message) on failure (e.g., validation error)
+pub async fn create_effect_definition(effect: &EffectListItem) -> Result<EffectListItem, String> {
     let args = build_args("effect", effect);
-    let result = invoke("create_effect_definition", args).await;
-    from_js(result)
+    let result = try_invoke("create_effect_definition", args).await?;
+    from_js(result).ok_or_else(|| "Failed to deserialize created effect".to_string())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
