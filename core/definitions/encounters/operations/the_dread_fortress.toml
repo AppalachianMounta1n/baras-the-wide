@@ -596,7 +596,6 @@ difficulties = ["veteran", "master"]
 # Boss 5: Dread Master Brontes
 # ═══════════════════════════════════════════════════════════════════════════════
 # Complex multi-phase fight with hands, fingers, orbs, and clocks.
-# Source: ORBS timer data
 
 [[boss]]
 id = "brontes"
@@ -623,9 +622,15 @@ is_boss = true
 name = "Hand of Brontes"
 ids = [3303276527222784]
 is_boss = false
+
 [[boss.entities]]
-name = "Finger of Brontes"
+name = "Finger"
 ids = [3275642707640320]
+is_boss = false
+
+[[boss.entities]]
+name = "Fingers-2"
+ids = [3303289412124672]
 is_boss = false
 
 [[boss.entities]]
@@ -648,7 +653,14 @@ start_trigger = { type = "combat_start" }
 [[boss.phases]]
 id = "reaches"
 name = "Reaches"
-start_trigger = { type = "npc_appears", selector = [3298277185290240] }
+start_trigger = { type = "npc_appears", selector = ["Reach of Brontes"] }
+
+[[boss.phases]]
+id = "kebus"
+name = "Kephess"
+start_trigger = { type = "boss_hp_below", hp_percent = 99.9, selector = [
+  "Dread Master Brontes",
+] }
 
 [[boss.phases]]
 id = "clock"
@@ -664,3 +676,119 @@ start_trigger = { type = "effect_removed", effects = [3300802626060575] }
 id = "burn"
 name = "Burn"
 start_trigger = { type = "ability_cast", abilities = [3311840692011008] }
+
+[[boss.counter]]
+id = "finger_deaths"
+name = "Finger Deaths"
+increment_on = { type = "entity_death", selector = ["Fingers-2"] }
+
+[[boss.challenges]]
+id = "brontes_burn"
+name = "Brontes Burn"
+metric = "damage"
+conditions = [
+  { type = "target", match = { selector = [
+    "Dread Master Brontes",
+  ] } },
+  { type = "phase", phase_ids = [
+    "burn",
+  ] },
+]
+color = [100, 210, 237, 255]
+
+[[boss.timer]]
+id = "brontes_clone_1st"
+# orbs_id = "8d2926ec-52aa-4964-8248-58e76f263816"
+name = "Clone 1st"
+display_text = "Kephess Clone"
+trigger = { type = "boss_hp_below", hp_percent = 96.0, selector = [
+  "Dread Master Brontes",
+] }
+is_alert = true
+alert_text = "Clone Spawning"
+color = [32, 168, 18, 255]
+difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "brontes_clone"
+# orbs_id = "80468d76-58be-4049-9706-d09f0cfec56f"
+name = "Clone Spawn"
+trigger = { type = "ability_cast", abilities = [3309152042483712] }
+cancel_trigger = { type = "timer_expires", timer_id = "brontes_cant_clone" }
+display_text = "Kephess Clone"
+duration_secs = 30.0
+color = [32, 168, 18, 255]
+difficulties = ["veteran", "master"]
+
+
+[[boss.timer]]
+id = "brontes_cant_clone"
+name = "Brontes No More Clones"
+trigger = { type = "boss_hp_below", hp_percent = 52.0, selector = [
+  "Dread Master Brontes",
+] }
+is_alert = true
+alert_text = "Brontes Below 52% - No More Clones"
+color = [32, 168, 18, 255]
+difficulties = ["veteran", "master"]
+phases = ["kebus"]
+
+[[boss.timer]]
+id = "brontes_reaches_active"
+name = "Reaches Active"
+trigger = { type = "any_of", conditions = [
+  { type = "entity_death", selector = [
+    3275625527771136,
+  ] },
+  { type = "entity_death", selector = [
+    3277721471811584,
+  ] },
+] }
+duration_secs = 23.0
+color = [32, 220, 220, 255]
+difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "brontes_hands_finger_spawn"
+name = "Finger Spawn"
+trigger = { type = "npc_appears", selector = ["Finger"] }
+cancel_trigger = { type = "phase_ended", phase_id = "hands" }
+duration_secs = 40.0
+color = [32, 220, 220, 255]
+can_refresh = false
+difficulties = ["veteran", "master"]
+phases = ["hands"]
+
+[[boss.timer]]
+id = "brontes_sphere_aggro"
+# orbs_id = "579f6248-7b3c-47ff-8571-d8f6350a6b08"
+name = "Sphere Aggro"
+trigger = { type = "target_set", selector = [
+  "Energy Sphere",
+], target = "local_player" }
+is_alert = true
+alert_text = "Sphere Targeting You!"
+color = [213, 41, 31, 255]
+difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "brontes_fingers_knock_1st"
+# orbs_id = "db354336-4ce7-4917-9bf4-2dd5cef510fa"
+name = "Fingers Knockback 1st"
+trigger = { type = "ability_cast", abilities = [3303572879966208] }
+duration_secs = 12.0
+color = [224, 38, 29, 255]
+difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "brontes_fingers_knock"
+trigger = { type = "any_of", conditions = [
+  { type = "timer_expires", timer_id = "brontes_fingers_knock_1st" },
+] }
+# orbs_id = "7d3d2462-2f57-4967-9692-91034ce06598"
+name = "Fingers Knockback"
+duration_secs = 30.0
+color = [219, 33, 32, 255]
+difficulties = ["veteran", "master"]
+cancel_trigger = { type = "counter_reaches", counter_id = "finger_deaths", value = 6 }
+chains_to = "brontes_fingers_knock"
