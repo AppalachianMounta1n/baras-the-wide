@@ -122,10 +122,28 @@ difficulties = ["veteran", "master"]
 id = "holding_pens"
 name = "Lights Out"
 
+[[boss.entities]]
+name = "Pursuit Droid"
+ids = [4389417921806336]
+is_boss = true
+triggers_encounter = true
+
+[[boss.entities]]
+name = "Rampaging Charger"
+ids = [4250514384486400]
+is_boss = false
+triggers_encounter = true
+
 [[boss]]
 id = "breach"
-name = "The Breach"
+name = "According To Plan"
 
+[[boss.entities]]
+name = "Delicious Rampaging Charger"
+ids = [4397956316790784]
+is_boss = false
+is_kill_target = false
+triggers_encounter = true
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Boss 2: trandos (Pack Leader)
