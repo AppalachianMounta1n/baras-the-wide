@@ -139,12 +139,24 @@ pub struct NewTargetInfo {
     pub name: IStr,
 }
 
-/// Cached target info from TargetSet events
+/// Pending AoE refresh waiting for damage correlation
 #[derive(Debug, Clone)]
-struct TrackedTarget {
-    entity_id: i64,
-    name: IStr,
-    entity_type: EntityType,
+struct PendingAoeRefresh {
+    /// The ability that was activated
+    ability_id: i64,
+    /// When the ability was activated
+    timestamp: NaiveDateTime,
+}
+
+/// State for collecting AoE damage targets after finding anchor
+#[derive(Debug, Clone)]
+struct AoeRefreshCollecting {
+    /// The ability being tracked
+    ability_id: i64,
+    /// Anchor timestamp (when primary target was hit)
+    anchor_timestamp: NaiveDateTime,
+    /// Targets collected so far (within ±10ms window)
+    targets: Vec<i64>,
 }
 
 /// Tracks active effects for overlay display.
@@ -174,9 +186,13 @@ pub struct EffectTracker {
     /// The registry itself handles duplicate rejection.
     new_targets: Vec<NewTargetInfo>,
 
-    /// Current target for each entity (source_id -> target info)
-    /// Used to resolve target when AbilityActivated has empty/self target
-    current_targets: HashMap<i64, TrackedTarget>,
+    /// Pending AoE refresh waiting for damage correlation.
+    /// Set when AbilityActivate happens for a refresh ability with [=] target.
+    pending_aoe_refresh: Option<PendingAoeRefresh>,
+
+    /// State when we've found the anchor (primary target damage) and are
+    /// collecting other targets hit within ±10ms.
+    aoe_collecting: Option<AoeRefreshCollecting>,
 }
 
 impl Default for EffectTracker {
@@ -195,7 +211,8 @@ impl EffectTracker {
             live_mode: false, // Start in historical mode
             local_player_id: None,
             new_targets: Vec::new(),
-            current_targets: HashMap::new(),
+            pending_aoe_refresh: None,
+            aoe_collecting: None,
         }
     }
 
@@ -365,15 +382,16 @@ impl EffectTracker {
             let duration = def.duration_secs.map(Duration::from_secs_f32);
 
             if let Some(existing) = self.active_effects.get_mut(&key) {
-                // Refresh existing effect if this action is in refresh_abilities
-                let action_name_str = crate::context::resolve(action_name);
-                if def.can_refresh_with(action_id as u64, Some(action_name_str)) {
-                    existing.refresh(timestamp, duration);
-                    if let Some(c) = charges {
-                        existing.set_stacks(c);
-                    }
-                    should_register = true;
+                // Always refresh when the same effect is applied again.
+                // The game is telling us the effect was (re)applied, so reset the timer.
+                // Note: refresh_abilities is for DIFFERENT abilities that can extend
+                // an effect (e.g., Surgical Probe extending Kolto Probe), which is
+                // handled in refresh_effects_by_action() via AbilityActivated signals.
+                existing.refresh(timestamp, duration);
+                if let Some(c) = charges {
+                    existing.set_stacks(c);
                 }
+                should_register = true;
             } else {
                 // Create new effect
                 let display_text = def.display_text().to_string();
@@ -421,54 +439,156 @@ impl EffectTracker {
         }
     }
 
-    /// Refresh any tracked effects on this target that have this action in their refresh_abilities.
+    /// Refresh any tracked effects that have this action in their refresh_abilities.
     fn refresh_effects_by_action(
         &mut self,
         action_id: i64,
         action_name: IStr,
         target_id: i64,
-        target_name: IStr,
-        target_entity_type: &EntityType,
+        _target_name: IStr,
+        _target_entity_type: &EntityType,
         timestamp: NaiveDateTime,
     ) {
-        // Find all definitions that have this action in their refresh_abilities
+        // For AoE abilities (target_id == 0), we can't reliably detect which targets
+        // were actually hit. Damage events from ongoing DOTs on other targets look
+        // identical to first ticks from the new cast. Rather than risk false refreshes
+        // on targets that weren't in the AoE, we skip refresh detection entirely.
+        // New applications are still tracked via ApplyEffect signals.
+        if target_id == 0 {
+            return;
+        }
+
+        // Single-target case: refresh effect on specific target
         let action_name_str = crate::context::resolve(action_name);
-        let refreshable_defs: Vec<_> = self
+        let refreshable_def_ids: Vec<_> = self
             .definitions
             .enabled()
             .filter(|def| def.can_refresh_with(action_id as u64, Some(action_name_str)))
-            .map(|def| {
-                (
-                    def.id.clone(),
-                    def.duration_secs.map(Duration::from_secs_f32),
-                )
-            })
+            .map(|def| (def.id.clone(), def.duration_secs.map(Duration::from_secs_f32)))
             .collect();
 
-        let mut did_refresh = false;
-        for (def_id, duration) in refreshable_defs {
+        for (def_id, duration) in refreshable_def_ids {
             let key = EffectKey {
                 definition_id: def_id,
                 target_entity_id: target_id,
             };
-
             if let Some(effect) = self.active_effects.get_mut(&key) {
                 effect.refresh(timestamp, duration);
-                did_refresh = true;
+            }
+        }
+    }
+
+    /// Check if an ability has any refresh definitions (used for AoE detection)
+    fn has_refresh_definitions(&self, ability_id: i64) -> bool {
+        let ability_name_str: Option<&str> = None; // We only check by ID
+        self.definitions
+            .enabled()
+            .any(|def| def.can_refresh_with(ability_id as u64, ability_name_str))
+    }
+
+    /// Set up pending AoE refresh state when AbilityActivate has [=] target
+    fn setup_pending_aoe_refresh(&mut self, ability_id: i64, timestamp: NaiveDateTime) {
+        // Only track if this ability can refresh effects
+        if self.has_refresh_definitions(ability_id) {
+            self.pending_aoe_refresh = Some(PendingAoeRefresh {
+                ability_id,
+                timestamp,
+            });
+            // Clear any stale collecting state
+            self.aoe_collecting = None;
+        }
+    }
+
+    /// Handle damage event for AoE refresh correlation.
+    /// Returns true if the damage was processed as part of AoE refresh detection.
+    fn handle_damage_for_aoe_refresh(
+        &mut self,
+        ability_id: i64,
+        target_id: i64,
+        timestamp: NaiveDateTime,
+        current_target_id: Option<i64>,
+    ) {
+        // Timeout for pending state (2 seconds - longer than any grenade travel time)
+        const PENDING_TIMEOUT_MS: i64 = 2000;
+        // Window for collecting additional targets after anchor (±10ms)
+        const COLLECT_WINDOW_MS: i64 = 10;
+
+        // Check if we're in collecting state and this damage is within window
+        if let Some(ref mut collecting) = self.aoe_collecting {
+            if collecting.ability_id == ability_id {
+                let diff_ms = (timestamp - collecting.anchor_timestamp)
+                    .num_milliseconds()
+                    .abs();
+                if diff_ms <= COLLECT_WINDOW_MS {
+                    // Within window - add target if not already collected
+                    if !collecting.targets.contains(&target_id) {
+                        collecting.targets.push(target_id);
+                    }
+                    return;
+                } else {
+                    // Outside window - finalize and refresh all collected targets
+                    self.finalize_aoe_refresh();
+                }
             }
         }
 
-        // Push to new_targets if we actually refreshed an effect
-        if did_refresh
-            && matches!(
-                target_entity_type,
-                EntityType::Player | EntityType::Companion
-            )
-        {
-            self.new_targets.push(NewTargetInfo {
-                entity_id: target_id,
-                name: target_name,
+        // Check if we have a pending AoE refresh for this ability
+        let Some(ref pending) = self.pending_aoe_refresh else {
+            return;
+        };
+
+        if pending.ability_id != ability_id {
+            return;
+        }
+
+        // Check if pending has timed out
+        let elapsed_ms = (timestamp - pending.timestamp).num_milliseconds();
+        if elapsed_ms > PENDING_TIMEOUT_MS {
+            self.pending_aoe_refresh = None;
+            return;
+        }
+
+        // Check if this damage is on the primary target (current target)
+        let Some(primary_target) = current_target_id else {
+            return;
+        };
+
+        if target_id == primary_target {
+            // This is our anchor! Start collecting targets
+            self.aoe_collecting = Some(AoeRefreshCollecting {
+                ability_id,
+                anchor_timestamp: timestamp,
+                targets: vec![target_id],
             });
+            self.pending_aoe_refresh = None;
+        }
+    }
+
+    /// Finalize AoE refresh - refresh effects on all collected targets
+    fn finalize_aoe_refresh(&mut self) {
+        let Some(collecting) = self.aoe_collecting.take() else {
+            return;
+        };
+
+        // Get refresh definitions for this ability
+        let refreshable_def_ids: Vec<_> = self
+            .definitions
+            .enabled()
+            .filter(|def| def.can_refresh_with(collecting.ability_id as u64, None))
+            .map(|def| (def.id.clone(), def.duration_secs.map(Duration::from_secs_f32)))
+            .collect();
+
+        // Refresh effects on all collected targets
+        for target_id in collecting.targets {
+            for (def_id, duration) in &refreshable_def_ids {
+                let key = EffectKey {
+                    definition_id: def_id.clone(),
+                    target_entity_id: target_id,
+                };
+                if let Some(effect) = self.active_effects.get_mut(&key) {
+                    effect.refresh(collecting.anchor_timestamp, *duration);
+                }
+            }
         }
     }
 
@@ -637,7 +757,16 @@ impl EffectTracker {
                 // But skip if fixed_duration is set - only expire via timer
                 if !def.fixed_duration {
                     if let Some(effect) = self.active_effects.get_mut(&key) {
-                        effect.mark_removed();
+                        // Skip removal if the effect was refreshed recently (within 1 second).
+                        // When a DoT is reapplied, the game sends ApplyEffect (new) then
+                        // RemoveEffect (old) - sometimes in the same batch, sometimes with
+                        // a slight delay. We don't want to remove the effect we just refreshed.
+                        let since_refresh = timestamp
+                            .signed_duration_since(effect.last_refreshed_at)
+                            .num_milliseconds();
+                        if since_refresh > 1000 {
+                            effect.mark_removed();
+                        }
                     }
                 }
             } else if def.is_effect_removed_trigger() {
@@ -733,6 +862,10 @@ impl EffectTracker {
 
     /// Handle combat end - optionally clear combat-only effects
     fn handle_combat_ended(&mut self) {
+        // Clear pending AoE refresh state
+        self.pending_aoe_refresh = None;
+        self.aoe_collecting = None;
+
         // Mark effects that don't track outside combat as removed
         let outside_combat_ids: std::collections::HashSet<_> = self
             .definitions
@@ -750,10 +883,13 @@ impl EffectTracker {
 
     /// Handle area change (zone transition) - clear all active effects
     fn handle_area_change(&mut self) {
+        // Clear pending AoE refresh state
+        self.pending_aoe_refresh = None;
+        self.aoe_collecting = None;
+
         for (_key, effect) in self.active_effects.iter_mut() {
             effect.mark_removed();
         }
-        self.current_targets.clear();
     }
 
     /// Check if an effect matches source/target filters
@@ -915,48 +1051,52 @@ impl SignalHandler for EffectTracker {
                 );
 
                 // Refresh existing effects (local player only)
+                // Use explicit target if available, otherwise query encounter for current target
                 let local_player_id = self.local_player_id;
                 if local_player_id == Some(*source_id) {
-                    // Resolve target: if target is self/empty, use tracked target from TargetSet
-                    let (resolved_id, resolved_name, resolved_type) =
-                        if *target_id == *source_id || *target_id == 0 {
-                            if let Some(tracked) = self.current_targets.get(source_id).cloned() {
-                                (tracked.entity_id, tracked.name, tracked.entity_type)
-                            } else {
-                                (*source_id, *target_name, *target_entity_type)
-                            }
-                        } else {
-                            (*target_id, *target_name, *target_entity_type)
-                        };
+                    let is_self_or_empty = *target_id == 0 || *target_id == *source_id;
+                    let resolved_target = if is_self_or_empty {
+                        // Query encounter for caster's current target
+                        encounter.and_then(|e| e.get_current_target(*source_id))
+                    } else {
+                        Some(*target_id)
+                    };
 
-                    self.refresh_effects_by_action(
-                        *ability_id,
-                        *ability_name,
-                        resolved_id,
-                        resolved_name,
-                        &resolved_type,
-                        *timestamp,
-                    );
+                    if let Some(refresh_target) = resolved_target {
+                        self.refresh_effects_by_action(
+                            *ability_id,
+                            *ability_name,
+                            refresh_target,
+                            *target_name,
+                            target_entity_type,
+                            *timestamp,
+                        );
+                    }
+
+                    // For AoE abilities ([=] target), set up pending state for damage correlation
+                    // This allows us to detect and refresh effects on secondary targets too
+                    if is_self_or_empty {
+                        self.setup_pending_aoe_refresh(*ability_id, *timestamp);
+                    }
                 }
             }
-            GameSignal::TargetChanged {
+            GameSignal::DamageTaken {
+                ability_id,
                 source_id,
                 target_id,
-                target_name,
-                target_entity_type,
+                timestamp,
                 ..
             } => {
-                self.current_targets.insert(
-                    *source_id,
-                    TrackedTarget {
-                        entity_id: *target_id,
-                        name: *target_name,
-                        entity_type: *target_entity_type,
-                    },
-                );
-            }
-            GameSignal::TargetCleared { source_id, .. } => {
-                self.current_targets.remove(source_id);
+                // Only process for local player's damage
+                if self.local_player_id == Some(*source_id) && self.live_mode {
+                    let current_target = encounter.and_then(|e| e.get_current_target(*source_id));
+                    self.handle_damage_for_aoe_refresh(
+                        *ability_id,
+                        *target_id,
+                        *timestamp,
+                        current_target,
+                    );
+                }
             }
             // Boss entity IDs are now read from encounter.hp_by_entity in matches_filters
             _ => {}

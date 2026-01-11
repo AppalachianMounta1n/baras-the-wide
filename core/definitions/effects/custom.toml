@@ -7,17 +7,21 @@
 # name = "Effect Name"
 # display_text = "Short"                # Optional override
 #
-# # Matching (for standard effects)
-# effects = [814832605462528, "Name"]   # Effect IDs or names
-# trigger = "effect_applied"            # effect_applied | effect_removed
-# refresh_abilities = [123, "Ability"]  # Abilities that refresh this effect
-# source = "local_player"               # EntityFilter
-# target = "group_members"              # EntityFilter
+# # Trigger - what starts tracking this effect
+# trigger = { type = "effect_applied", effects = [814832605462528], source = "local_player", target = "group_members" }
+#   - type: "effect_applied" | "effect_removed" | "ability_cast"
+#   - effects: list of effect IDs (for effect_applied/effect_removed)
+#   - abilities: list of ability IDs (for ability_cast)
+#   - source: EntityFilter (local_player, other_players, group_members, any_npc, boss, any)
+#   - target: EntityFilter
 #
-# # Duration & Stacks
+# # Refresh - abilities that extend this effect's duration
+# refresh_abilities = [123, 456]        # Ability IDs that refresh
+# is_refreshed_on_modify = false        # Refresh when stacks change
+#
+# # Duration
 # duration_secs = 21.0                  # None = indefinite
-# can_be_refreshed = true
-# max_stacks = 0                        # 0 = don't show stacks
+# fixed_duration = false                # Ignore game EffectRemoved events
 #
 # # Display
 # category = "hot"                      # hot | shield | buff | debuff | cleansable | proc | mechanic
@@ -35,11 +39,10 @@
 # [[effect]]
 # id = "recklessness_cd"
 # name = "Recklessness"
-# start_trigger = { type = "ability_cast", abilities = [123456], source = "local_player" }
+# trigger = { type = "ability_cast", abilities = [123456], source = "local_player", target = "any" }
 # duration_secs = 90.0                  # Cooldown duration
 # fixed_duration = true                 # Ignore EffectRemoved - expire only via timer
 # category = "proc"
-# target = "local_player"               # Show on your own raid frame
 # show_on_raid_frames = true
 #
 # ─── Audio Settings ────────────────────────────────────────────────────────

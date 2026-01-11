@@ -12,6 +12,7 @@ pub struct PlayerInfo {
     pub discipline_name: String,
     pub is_dead: bool,
     pub death_time: Option<NaiveDateTime>,
+    pub current_target_id: i64,
 }
 
 impl Default for PlayerInfo {
@@ -25,6 +26,7 @@ impl Default for PlayerInfo {
             discipline_name: String::new(),
             is_dead: false,
             death_time: None,
+            current_target_id: 0,
         }
     }
 }

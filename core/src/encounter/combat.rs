@@ -514,17 +514,12 @@ impl CombatEncounter {
         }
 
 
-        // For TARGETSET/TARGETCLEARED, only track NPC/Companion sources (not players)
-        // This ensures bosses are registered before we try to set their target
+        // For TARGETSET/TARGETCLEARED, track the source entity (player, NPC, or companion)
+        // so we can set their current target before the entity lookup
         if event.effect.effect_id == effect_id::TARGETSET
             || event.effect.effect_id == effect_id::TARGETCLEARED
         {
-            if matches!(
-                event.source_entity.entity_type,
-                EntityType::Npc | EntityType::Companion
-            ) {
-                self.try_track_entity(&event.source_entity, event.timestamp);
-            }
+            self.try_track_entity(&event.source_entity, event.timestamp);
             return;
         }
 
@@ -588,16 +583,36 @@ impl CombatEncounter {
         }
     }
 
-    pub fn set_npc_target(&mut self, npc_id: i64, target_id: i64) {
-        if let Some(npc) = self.npcs.get_mut(&npc_id) {
+    /// Set an entity's current target (works for both players and NPCs)
+    pub fn set_entity_target(&mut self, entity_id: i64, target_id: i64) {
+        if let Some(player) = self.players.get_mut(&entity_id) {
+            player.current_target_id = target_id;
+        } else if let Some(npc) = self.npcs.get_mut(&entity_id) {
             npc.current_target_id = target_id;
         }
     }
 
-    pub fn clear_npc_target(&mut self, npc_id: i64) {
-        if let Some(npc) = self.npcs.get_mut(&npc_id) {
+    /// Clear an entity's current target (works for both players and NPCs)
+    pub fn clear_entity_target(&mut self, entity_id: i64) {
+        if let Some(player) = self.players.get_mut(&entity_id) {
+            player.current_target_id = 0;
+        } else if let Some(npc) = self.npcs.get_mut(&entity_id) {
             npc.current_target_id = 0;
         }
+    }
+
+    /// Get an entity's current target (works for both players and NPCs)
+    pub fn get_current_target(&self, entity_id: i64) -> Option<i64> {
+        if let Some(player) = self.players.get(&entity_id) {
+            if player.current_target_id != 0 {
+                return Some(player.current_target_id);
+            }
+        } else if let Some(npc) = self.npcs.get(&entity_id) {
+            if npc.current_target_id != 0 {
+                return Some(npc.current_target_id);
+            }
+        }
+        None
     }
     // ═══════════════════════════════════════════════════════════════════════
     // Effect Instances

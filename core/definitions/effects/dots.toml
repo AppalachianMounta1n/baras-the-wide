@@ -6,13 +6,9 @@
 id = "affliction"
 name = "Affliction"
 category = "debuff"
-effects = [808192586022912]
+trigger = { type = "effect_applied", effects = [808192586022912], source = "any", target = "any" }
 refresh_abilities = [808192586022912]
-source = "local_player"
-target = "any_npc"
 duration_secs = 18.0
-can_be_refreshed = true
-max_stacks = 1
 color = [62, 173, 28, 255]
 show_on_raid_frames = false
 
@@ -20,13 +16,9 @@ show_on_raid_frames = false
 id = "weaken_mind"
 name = "Weaken Mind"
 category = "debuff"
-effects = [812861215473664]
+trigger = { type = "effect_applied", effects = [812861215473664], source = "any", target = "any" }
 refresh_abilities = [812861215473664]
-source = "local_player"
-target = "any_npc"
 duration_secs = 18.0
-can_be_refreshed = true
-max_stacks = 1
 color = [153, 143, 121, 255]
 show_on_raid_frames = false
 
@@ -34,13 +26,9 @@ show_on_raid_frames = false
 id = "creeping_terror"
 name = "Creeping Terror"
 category = "debuff"
-effects = [808424514256896]
+trigger = { type = "effect_applied", effects = [808424514256896], source = "local_player", target = "any_npc" }
 refresh_abilities = [808424514256896]
-source = "local_player"
-target = "any_npc"
 duration_secs = 18.0
-can_be_refreshed = true
-max_stacks = 1
 color = [145, 66, 9, 255]
 show_on_raid_frames = false
 
@@ -48,13 +36,9 @@ show_on_raid_frames = false
 id = "sever_force"
 name = "Sever Force"
 category = "debuff"
-effects = [813226287693824]
+trigger = { type = "effect_applied", effects = [813226287693824], source = "local_player", target = "any_npc" }
 refresh_abilities = [813226287693824]
-source = "local_player"
-target = "any_npc"
 duration_secs = 18.0
-can_be_refreshed = true
-max_stacks = 1
 color = [64, 145, 76, 255]
 show_on_raid_frames = false
 
@@ -62,13 +46,9 @@ show_on_raid_frames = false
 id = "force_breach"
 name = "Force Breach"
 category = "debuff"
-effects = [964675424485376]
+trigger = { type = "effect_applied", effects = [964675424485376], source = "local_player", target = "any_npc" }
 refresh_abilities = [964675424485376]
-source = "local_player"
-target = "any_npc"
 duration_secs = 18.0
-can_be_refreshed = true
-max_stacks = 1
 color = [184, 79, 15, 255]
 show_on_raid_frames = false
 
@@ -76,13 +56,9 @@ show_on_raid_frames = false
 id = "corrosive_dart"
 name = "Corrosive Dart"
 category = "debuff"
-effects = [3465720780292096]
+trigger = { type = "effect_applied", effects = [3465720780292096], source = "local_player", target = "any_npc" }
 refresh_abilities = [3465720780292096]
-source = "local_player"
-target = "any_npc"
 duration_secs = 24.0
-can_be_refreshed = true
-max_stacks = 1
 color = [145, 64, 98, 255]
 show_on_raid_frames = false
 
@@ -90,13 +66,9 @@ show_on_raid_frames = false
 id = "vital_shot"
 name = "Vital Shot"
 category = "debuff"
-effects = [2115340112756736]
+trigger = { type = "effect_applied", effects = [2115340112756736], source = "local_player", target = "any_npc" }
 refresh_abilities = [2115340112756736]
-source = "local_player"
-target = "any_npc"
 duration_secs = 24.0
-can_be_refreshed = true
-max_stacks = 1
 color = [64, 64, 145, 255]
 show_on_raid_frames = false
 
@@ -104,13 +76,9 @@ show_on_raid_frames = false
 id = "corrosive_grenade_op"
 name = "Corrosive Grenade (Op)"
 category = "debuff"
-effects = [1703989619982930]
+trigger = { type = "effect_applied", effects = [1703989619982930], source = "local_player", target = "any_npc" }
 refresh_abilities = [1703989619982930]
-source = "local_player"
-target = "any_npc"
 duration_secs = 24.0
-can_be_refreshed = true
-max_stacks = 1
 color = [32, 173, 7, 255]
 show_on_raid_frames = false
 
@@ -118,13 +86,9 @@ show_on_raid_frames = false
 id = "corrosive_grenade_snipe"
 name = "Corrosive Grenade (Sniper)"
 category = "debuff"
-effects = [1703989619982932]
+trigger = { type = "effect_applied", effects = [1703989619982932], source = "local_player", target = "any_npc" }
 refresh_abilities = [1703989619982932]
-source = "local_player"
-target = "any_npc"
 duration_secs = 24.0
-can_be_refreshed = true
-max_stacks = 1
 color = [32, 173, 7, 255]
 show_on_raid_frames = false
 
@@ -132,13 +96,9 @@ show_on_raid_frames = false
 id = "shrap_bomb"
 name = "Shrap Bomb"
 category = "debuff"
-effects = [807698664783872]
+trigger = { type = "effect_applied", effects = [807698664783872], source = "local_player", target = "any_npc" }
 refresh_abilities = [807698664783872]
-source = "local_player"
-target = "any_npc"
 duration_secs = 18.0
-can_be_refreshed = true
-max_stacks = 1
 color = [148, 114, 34, 255]
 show_on_raid_frames = false
 
@@ -146,13 +106,9 @@ show_on_raid_frames = false
 id = "scorch"
 name = "Scorch"
 category = "debuff"
-effects = [3384812186370048]
+trigger = { type = "effect_applied", effects = [3384812186370048], source = "local_player", target = "any_npc" }
 refresh_abilities = [3384812186370048]
-source = "local_player"
-target = "any_npc"
 duration_secs = 30.0
-can_be_refreshed = true
-max_stacks = 1
 color = [173, 46, 3, 255]
 show_on_raid_frames = false
 
@@ -160,13 +116,9 @@ show_on_raid_frames = false
 id = "plasmatize"
 name = "Plasmatize"
 category = "debuff"
-effects = [3391666954174464]
+trigger = { type = "effect_applied", effects = [3391666954174464], source = "local_player", target = "any_npc" }
 refresh_abilities = [3391666954174464]
-source = "local_player"
-target = "any_npc"
 duration_secs = 30.0
-can_be_refreshed = true
-max_stacks = 1
 color = [173, 3, 171, 255]
 show_on_raid_frames = false
 
@@ -174,13 +126,9 @@ show_on_raid_frames = false
 id = "incendiary_missile"
 name = "Incendiary Missile"
 category = "debuff"
-effects = [2027022700249344]
+trigger = { type = "effect_applied", effects = [2027022700249344], source = "local_player", target = "any_npc" }
 refresh_abilities = [2027022700249088]
-source = "local_player"
-target = "any_npc"
 duration_secs = 15.0
-can_be_refreshed = true
-max_stacks = 1
 color = [204, 145, 37, 255]
 show_on_raid_frames = false
 
@@ -188,13 +136,9 @@ show_on_raid_frames = false
 id = "serrated_shot"
 name = "Serrated Shot"
 category = "debuff"
-effects = [3394707791020290]
+trigger = { type = "effect_applied", effects = [3394707791020290], source = "local_player", target = "any_npc" }
 refresh_abilities = [3394707791020032]
-source = "local_player"
-target = "any_npc"
 duration_secs = 15.0
-can_be_refreshed = true
-max_stacks = 1
 color = [144, 80, 204, 255]
 show_on_raid_frames = false
 
@@ -202,13 +146,9 @@ show_on_raid_frames = false
 id = "incendiary_round"
 name = "Incendiary Round"
 category = "debuff"
-effects = [3391477975613734]
+trigger = { type = "effect_applied", effects = [3391477975613734], source = "local_player", target = "any_npc" }
 refresh_abilities = [3391477975613440]
-source = "local_player"
-target = "any_npc"
 duration_secs = 15.0
-can_be_refreshed = true
-max_stacks = 1
 color = [173, 72, 14, 255]
 show_on_raid_frames = false
 
@@ -216,13 +156,9 @@ show_on_raid_frames = false
 id = "shatter"
 name = "Shatter"
 category = "debuff"
-effects = [1169953386397696]
+trigger = { type = "effect_applied", effects = [1169953386397696], source = "local_player", target = "any_npc" }
 refresh_abilities = [1169953386397696]
-source = "local_player"
-target = "any_npc"
 duration_secs = 12.0
-can_be_refreshed = true
-max_stacks = 1
 color = [194, 116, 8, 255]
 show_on_raid_frames = false
 
@@ -230,13 +166,9 @@ show_on_raid_frames = false
 id = "plasma_brand"
 name = "Plasma Brand"
 category = "debuff"
-effects = [3429368177098752]
+trigger = { type = "effect_applied", effects = [3429368177098752], source = "local_player", target = "any_npc" }
 refresh_abilities = [3429368177098752]
-source = "local_player"
-target = "any_npc"
 duration_secs = 12.0
-can_be_refreshed = true
-max_stacks = 1
 color = [8, 157, 194, 255]
 show_on_raid_frames = false
 
@@ -244,13 +176,9 @@ show_on_raid_frames = false
 id = "eviscerate"
 name = "Eviscerate"
 category = "debuff"
-effects = [3426078232150278]
+trigger = { type = "effect_applied", effects = [3426078232150278], source = "local_player", target = "any_npc" }
 refresh_abilities = [2210507998101504]
-source = "local_player"
-target = "any_npc"
 duration_secs = 6.0
-can_be_refreshed = true
-max_stacks = 1
 color = [194, 8, 29, 255]
 show_on_raid_frames = false
 
@@ -258,13 +186,9 @@ show_on_raid_frames = false
 id = "burning_purpose"
 name = "Burning Purpose"
 category = "debuff"
-effects = [3429814853697796]
+trigger = { type = "effect_applied", effects = [3429814853697796], source = "local_player", target = "any_npc" }
 refresh_abilities = [2210512293068800]
-source = "local_player"
-target = "any_npc"
 duration_secs = 6.0
-can_be_refreshed = true
-max_stacks = 1
 color = [194, 70, 8, 255]
 show_on_raid_frames = false
 
@@ -272,13 +196,9 @@ show_on_raid_frames = false
 id = "draining_scream"
 name = "Draining Scream"
 category = "debuff"
-effects = [807857578574081]
+trigger = { type = "effect_applied", effects = [807857578574081], source = "local_player", target = "any_npc" }
 refresh_abilities = [998270658674688]
-source = "local_player"
-target = "any_npc"
 duration_secs = 6.0
-can_be_refreshed = true
-max_stacks = 1
 color = [153, 27, 2, 255]
 show_on_raid_frames = false
 
@@ -286,13 +206,9 @@ show_on_raid_frames = false
 id = "burning_blade"
 name = "Burning Blade"
 category = "debuff"
-effects = [1280638988583168]
+trigger = { type = "effect_applied", effects = [1280638988583168], source = "local_player", target = "any_npc" }
 refresh_abilities = [1191698805817344]
-source = "local_player"
-target = "any_npc"
 duration_secs = 6.0
-can_be_refreshed = true
-max_stacks = 1
 color = [196, 148, 14, 255]
 show_on_raid_frames = false
 
@@ -300,12 +216,8 @@ show_on_raid_frames = false
 id = "discharge"
 name = "Discharge"
 category = "debuff"
-effects = [808235535695872]
+trigger = { type = "effect_applied", effects = [808235535695872], source = "local_player", target = "any_npc" }
 refresh_abilities = [808235535695872]
-source = "local_player"
-target = "any_npc"
 duration_secs = 18.0
-can_be_refreshed = true
-max_stacks = 1
 color = [126, 14, 196, 255]
 show_on_raid_frames = false

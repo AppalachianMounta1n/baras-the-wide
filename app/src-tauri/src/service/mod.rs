@@ -1510,9 +1510,12 @@ async fn build_raid_frame_data(shared: &Arc<SharedState>, rearranging: bool) -> 
 
     for slot in 0..max_slots {
         if let Some(player) = registry.get_player(slot) {
-            let effects = effects_by_target
+            let mut effects = effects_by_target
                 .remove(&player.entity_id)
                 .unwrap_or_default();
+
+            // Sort effects by effect_id for stable visual ordering
+            effects.sort_by_key(|e| e.effect_id);
 
             // Map discipline to role (defaults to DPS if unknown)
             let role = player
@@ -1630,9 +1633,15 @@ async fn build_effects_overlay_data(
 
     // Filter to effects marked for effects overlay and convert to entries
     // Use system time (like raid frames) so countdown ticks smoothly outside combat
-    let entries: Vec<EffectEntry> = tracker
+    // Sort by applied_at to keep bar positions stable (oldest first)
+    let mut effects: Vec<_> = tracker
         .active_effects()
         .filter(|e| e.show_on_effects_overlay && e.removed_at.is_none())
+        .collect();
+    effects.sort_by_key(|e| e.applied_at);
+
+    let entries: Vec<EffectEntry> = effects
+        .into_iter()
         .filter_map(|effect| {
             let duration = effect.duration?;
             let total = duration.as_secs_f32();

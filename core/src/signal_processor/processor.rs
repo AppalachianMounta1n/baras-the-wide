@@ -141,6 +141,7 @@ impl EventProcessor {
                 discipline_name: resolve(event.effect.discipline_name).to_string(),
                 is_dead: false,
                 death_time: None,
+                current_target_id: 0,
             });
     }
 
@@ -480,9 +481,9 @@ impl EventProcessor {
                     timestamp: event.timestamp,
                 });
                 if let Some(enc) = cache.current_encounter_mut() {
-                    // Ensure NPC is tracked before setting target (Phase 3 runs after Phase 1)
+                    // Ensure entity is tracked before setting target
                     enc.track_event_entities(event);
-                    enc.set_npc_target(event.source_entity.log_id, event.target_entity.log_id);
+                    enc.set_entity_target(event.source_entity.log_id, event.target_entity.log_id);
                 }
             }
             effect_id::TARGETCLEARED => {
@@ -491,9 +492,9 @@ impl EventProcessor {
                     timestamp: event.timestamp,
                 });
                 if let Some(enc) = cache.current_encounter_mut() {
-                    // Ensure NPC is tracked before clearing target
+                    // Ensure entity is tracked before clearing target
                     enc.track_event_entities(event);
-                    enc.clear_npc_target(event.source_entity.log_id);
+                    enc.clear_entity_target(event.source_entity.log_id);
                 }
             }
             _ => {}
