@@ -440,8 +440,10 @@ pub enum Trigger {
     AbilityCast {
         #[serde(default)]
         abilities: Vec<AbilitySelector>,
-        #[serde(default)]
+        #[serde(default = "EntityFilter::default_any")]
         source: EntityFilter,
+        #[serde(default = "EntityFilter::default_any")]
+        target: EntityFilter,
     },
 
     /// Effect/buff is applied. [TPC]
