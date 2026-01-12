@@ -234,10 +234,9 @@ pub fn App() -> Element {
     // Listen for app updates
     use_future(move || async move {
         let closure = Closure::new(move |event: JsValue| {
-            if let Ok(payload) = js_sys::Reflect::get(&event, &JsValue::from_str("payload")) {
-                if let Ok(info) = serde_wasm_bindgen::from_value::<UpdateInfo>(payload) {
+            if let Ok(payload) = js_sys::Reflect::get(&event, &JsValue::from_str("payload"))
+                && let Ok(info) = serde_wasm_bindgen::from_value::<UpdateInfo>(payload) {
                     let _ = update_available.try_write().map(|mut w| *w = Some(info));
-                }
             }
         });
         api::tauri_listen("update-available", &closure).await;
@@ -247,10 +246,9 @@ pub fn App() -> Element {
     // Listen for update failures
     use_future(move || async move {
         let closure = Closure::new(move |event: JsValue| {
-            if let Ok(payload) = js_sys::Reflect::get(&event, &JsValue::from_str("payload")) {
-                if let Some(msg) = payload.as_string() {
+            if let Ok(payload) = js_sys::Reflect::get(&event, &JsValue::from_str("payload"))
+                && let Some(msg) = payload.as_string() {
                     console::error_1(&format!("Update failed: {}", msg).into());
-                }
             }
             // Reset installing state so user can retry
             let _ = update_installing.try_write().map(|mut w| *w = false);
@@ -559,7 +557,11 @@ pub fn App() -> Element {
                 if active_tab() == "session" {
                     if let Some(ref info) = session {
                         section { class: "session-panel",
-                            h3 { "Session" }
+                        if is_live_tailing() {
+                            h3 {"Live Session"}
+                        } else {
+                            h3 { "Historical Session" }
+                        }
                             div { class: "session-grid",
                                 // Row 1: Player - Area - Session Start
                                 if let Some(ref name) = info.player_name {
