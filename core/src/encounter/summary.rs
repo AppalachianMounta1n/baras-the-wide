@@ -12,7 +12,7 @@ use super::entity_info::PlayerInfo;
 use super::metrics::PlayerMetrics;
 use crate::combat_log::EntityType;
 use crate::context::resolve;
-use crate::game_data::{BossInfo, ContentType, is_pvp_area, lookup_area_content_type, lookup_boss};
+use crate::game_data::{BossInfo, ContentType, Difficulty, is_pvp_area, lookup_boss};
 use crate::state::info::AreaInfo;
 
 /// Summary of a completed encounter with computed metrics
@@ -112,70 +112,53 @@ impl EncounterHistory {
 }
 
 /// Classify an encounter's phase type and find the primary boss (if any)
-/// Checks loaded boss definitions first, then falls back to static data
+/// Uses difficulty ID for phase classification, with training dummy override
 pub fn classify_encounter(
     encounter: &CombatEncounter,
     area: &AreaInfo,
 ) -> (PhaseType, Option<&'static BossInfo>) {
-    // guard boss condition -
-    if encounter.npcs.values().any(|v| v.is_boss) {
-        // 1. Check loaded boss definitions first (priority source of truth)
-        if let Some(def) = encounter.active_boss_definition() {
-            let phase = match def.area_type {
-                crate::dsl::AreaType::Operation => PhaseType::Raid,
-                crate::dsl::AreaType::Flashpoint => PhaseType::Flashpoint,
-                crate::dsl::AreaType::LairBoss | crate::dsl::AreaType::OpenWorld => {
-                    PhaseType::OpenWorld
-                }
-                crate::dsl::AreaType::TrainingDummy => PhaseType::DummyParse,
-            };
-            // Try to find matching static BossInfo for backwards compatibility
-            let boss_info = encounter
-                .npcs
-                .values()
-                .find_map(|npc| lookup_boss(npc.class_id));
-            return (phase, boss_info);
-        }
-
-        // 2. Fall back to static data lookup
+    // 1. Find boss info if present (sorted by first_seen_at for primary boss)
+    let boss_info = if encounter.npcs.values().any(|v| v.is_boss) {
         let mut boss_npcs: Vec<_> = encounter
             .npcs
             .values()
             .filter_map(|npc| lookup_boss(npc.class_id).map(|info| (npc, info)))
             .collect();
-
-        // Sort by first_seen_at to get the primary boss (first encountered)
         boss_npcs.sort_by_key(|(npc, _)| npc.first_seen_at);
+        boss_npcs.first().map(|(_, info)| *info)
+    } else {
+        None
+    };
 
-        if let Some((_, boss_info)) = boss_npcs.first() {
-            let phase = match boss_info.content_type {
-                ContentType::TrainingDummy => PhaseType::DummyParse,
-                ContentType::Operation => PhaseType::Raid,
-                ContentType::Flashpoint => PhaseType::Flashpoint,
-                ContentType::LairBoss | ContentType::OpenWorld => PhaseType::OpenWorld,
-            };
-            return (phase, Some(*boss_info));
+    // 2. Check for training dummy (overrides all other classification)
+    if let Some(info) = boss_info {
+        if info.content_type == ContentType::TrainingDummy {
+            return (PhaseType::DummyParse, Some(info));
+        }
+    }
+    if let Some(def) = encounter.active_boss_definition() {
+        if def.area_type == crate::dsl::AreaType::TrainingDummy {
+            return (PhaseType::DummyParse, boss_info);
         }
     }
 
-    // 3. No boss found - check PvP area
+    // 3. Check PvP area
     if is_pvp_area(area.area_id) {
-        return (PhaseType::PvP, None);
+        return (PhaseType::PvP, boss_info);
     }
 
-    // 4. Check if area name matches a known operation/flashpoint
-    if let Some(content_type) = lookup_area_content_type(&area.area_name) {
-        let phase = match content_type {
-            ContentType::TrainingDummy => PhaseType::DummyParse,
-            ContentType::Operation => PhaseType::Raid,
-            ContentType::Flashpoint => PhaseType::Flashpoint,
-            ContentType::LairBoss | ContentType::OpenWorld => PhaseType::OpenWorld,
-        };
-        return (phase, None);
-    }
+    // 4. Classify by difficulty ID
+    let phase = if let Some(difficulty) = Difficulty::from_difficulty_id(area.difficulty_id) {
+        match difficulty.group_size() {
+            8 | 16 => PhaseType::Raid,
+            4 => PhaseType::Flashpoint,
+            _ => PhaseType::OpenWorld,
+        }
+    } else {
+        PhaseType::OpenWorld
+    };
 
-    // 5. Default to OpenWorld
-    (PhaseType::OpenWorld, None)
+    (phase, boss_info)
 }
 
 /// Determine if an encounter was successful (clean exit, not a wipe)
