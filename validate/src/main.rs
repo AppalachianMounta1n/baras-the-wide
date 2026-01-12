@@ -151,8 +151,6 @@ struct AbilitySeen {
 
 #[derive(Debug, Default)]
 struct EffectSeen {
-    effect_id: i64,
-    name: String,
     apply_count: u32,
     remove_count: u32,
 }
@@ -318,8 +316,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         LagSimulator::disabled()
     };
 
-    // Track active timers for expiration detection
-    let mut prev_timer_ids: HashSet<String> = HashSet::new();
 
     let mut event_count = 0;
     let mut local_player_id: i64 = 0;
@@ -413,13 +409,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             started_timer_ids.extend(timer_manager.started_timer_ids());
         }
 
-        // Track active timer IDs for prev comparison
-        let current_timer_ids: HashSet<String> = timer_manager
-            .active_timers()
-            .iter()
-            .map(|t| t.definition_id.clone())
-            .collect();
-
         // Log new/restarted timers
         for timer in timer_manager.active_timers() {
             if started_timer_ids.contains(&timer.definition_id) {
@@ -466,7 +455,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             cli.timer_cancel(event.timestamp, cancelled_id, cancelled_id);
         }
 
-        prev_timer_ids = current_timer_ids;
 
         // Process alerts
         for alert in timer_manager.take_fired_alerts() {
@@ -887,14 +875,11 @@ fn track_event(state: &mut ValidationState, event: &CombatEvent, boss: &BossEnco
     // Track effects on players
     if event.target_entity.entity_type == EntityType::Player && event.effect.effect_id != 0 {
         let effect_id = event.effect.effect_id;
-        let effect_name = resolve(event.effect.effect_name).to_string();
 
         let entry = state
             .effects_on_players
             .entry(effect_id)
             .or_insert_with(|| EffectSeen {
-                effect_id,
-                name: effect_name,
                 apply_count: 0,
                 remove_count: 0,
             });

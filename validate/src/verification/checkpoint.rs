@@ -82,7 +82,6 @@ impl Expectations {
 /// Result of verifying a single checkpoint
 #[derive(Debug, Clone)]
 pub struct CheckpointResult {
-    pub checkpoint_idx: usize,
     pub at_secs: f32,
     pub passed: bool,
     pub failures: Vec<String>,
@@ -93,13 +92,6 @@ pub struct CheckpointResult {
 pub struct VerificationResult {
     pub checkpoints_passed: u32,
     pub checkpoints_total: u32,
-    pub results: Vec<CheckpointResult>,
-}
-
-impl VerificationResult {
-    pub fn passed(&self) -> bool {
-        self.checkpoints_passed == self.checkpoints_total
-    }
 }
 
 /// Verifies timer behavior against expected checkpoints
@@ -199,7 +191,6 @@ impl CheckpointVerifier {
         }
 
         let result = CheckpointResult {
-            checkpoint_idx: self.current_checkpoint_idx,
             at_secs: checkpoint.at_secs,
             passed: failures.is_empty(),
             failures,
@@ -219,14 +210,9 @@ impl CheckpointVerifier {
         VerificationResult {
             checkpoints_passed: passed,
             checkpoints_total: total,
-            results: self.results,
         }
     }
 
-    /// Check if all checkpoints have been processed
-    pub fn is_complete(&self) -> bool {
-        self.current_checkpoint_idx >= self.expectations.checkpoints.len()
-    }
 }
 
 #[cfg(test)]

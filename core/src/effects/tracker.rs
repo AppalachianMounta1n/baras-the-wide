@@ -458,8 +458,8 @@ impl EffectTracker {
         &mut self,
         effect_id: i64,
         effect_name: IStr,
-        action_id: i64,
-        action_name: IStr,
+        _action_id: i64,
+        _action_name: IStr,
         source_id: i64,
         source_name: IStr,
         source_entity_type: EntityType,
@@ -1013,8 +1013,8 @@ impl EffectTracker {
         &mut self,
         effect_id: i64,
         effect_name: IStr,
-        action_id: i64,
-        action_name: IStr,
+        _action_id: i64,
+        _action_name: IStr,
         target_id: i64,
         timestamp: NaiveDateTime,
         charges: u8,
@@ -1028,8 +1028,6 @@ impl EffectTracker {
             .find_matching(effect_id as u64, Some(effect_name_str))
             .into_iter()
             .collect();
-
-        let action_name_str = crate::context::resolve(action_name);
 
         for def in matching_defs {
             let key = EffectKey {

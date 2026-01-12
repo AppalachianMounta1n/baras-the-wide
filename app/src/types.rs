@@ -477,31 +477,6 @@ pub enum EffectCategory {
     Mechanic,
 }
 
-impl EffectCategory {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Hot => "HoT",
-            Self::Shield => "Shield",
-            Self::Buff => "Buff",
-            Self::Debuff => "Debuff",
-            Self::Cleansable => "Cleansable",
-            Self::Proc => "Proc",
-            Self::Mechanic => "Mechanic",
-        }
-    }
-
-    pub fn all() -> &'static [EffectCategory] {
-        &[
-            Self::Hot,
-            Self::Shield,
-            Self::Buff,
-            Self::Debuff,
-            Self::Cleansable,
-            Self::Proc,
-            Self::Mechanic,
-        ]
-    }
-}
 
 /// When to trigger an alert for this effect
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

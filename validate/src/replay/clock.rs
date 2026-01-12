@@ -12,25 +12,26 @@ use std::time::{Duration, Instant};
 #[derive(Debug)]
 pub struct VirtualClock {
     /// Combat start time (game time from log)
-    combat_start: NaiveDateTime,
+    _combat_start: NaiveDateTime,
 
     /// Current simulated game time
     current_game_time: NaiveDateTime,
 
     /// System time when replay started
-    replay_started_at: Instant,
+    _replay_started_at: Instant,
 
     /// Speed multiplier (1.0 = realtime, 0.0 = instant, 10.0 = 10x speed)
     speed_multiplier: f32,
 }
 
+#[allow(dead_code)]
 impl VirtualClock {
     /// Create a new virtual clock starting at the given game time
     pub fn new(combat_start: NaiveDateTime, speed_multiplier: f32) -> Self {
         Self {
-            combat_start,
+            _combat_start: combat_start,
             current_game_time: combat_start,
-            replay_started_at: Instant::now(),
+            _replay_started_at: Instant::now(),
             speed_multiplier,
         }
     }
@@ -62,7 +63,7 @@ impl VirtualClock {
 
     /// Get elapsed combat time in seconds
     pub fn combat_elapsed_secs(&self) -> f32 {
-        let delta = self.current_game_time - self.combat_start;
+        let delta = self.current_game_time - self._combat_start;
         delta.num_milliseconds() as f32 / 1000.0
     }
 
@@ -72,34 +73,6 @@ impl VirtualClock {
         let mins = (secs / 60.0).floor() as u32;
         let secs_remainder = secs % 60.0;
         format!("{:02}:{:05.2}", mins, secs_remainder)
-    }
-
-    /// Map a game time to an Instant for lag compensation
-    ///
-    /// This is critical for timer display accuracy. In live mode, timers use
-    /// Instant for smooth countdown display. During replay, we need to map
-    /// game timestamps to what the Instant would have been.
-    pub fn game_time_to_instant(&self, game_time: NaiveDateTime) -> Instant {
-        if self.speed_multiplier == 0.0 {
-            // Instant mode: all events happen "now"
-            return Instant::now();
-        }
-
-        let delta = game_time - self.combat_start;
-        let delta_ms = delta.num_milliseconds().max(0) as u64;
-        let scaled_ms = (delta_ms as f32 / self.speed_multiplier) as u64;
-
-        self.replay_started_at + Duration::from_millis(scaled_ms)
-    }
-
-    /// Get the current game time
-    pub fn current_game_time(&self) -> NaiveDateTime {
-        self.current_game_time
-    }
-
-    /// Get combat start time
-    pub fn combat_start(&self) -> NaiveDateTime {
-        self.combat_start
     }
 
     /// Check if we're in instant (accelerated) mode

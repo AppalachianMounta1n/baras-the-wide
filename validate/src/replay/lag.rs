@@ -41,6 +41,7 @@ impl Default for LagSimulator {
     }
 }
 
+#[allow(dead_code)]
 impl LagSimulator {
     /// Create a new lag simulator with default settings
     pub fn new() -> Self {
@@ -100,11 +101,6 @@ impl LagSimulator {
         Duration::from_millis(lag)
     }
 
-    /// Get lag in milliseconds (convenience method)
-    pub fn next_lag_ms(&mut self) -> u64 {
-        self.next_lag().as_millis() as u64
-    }
-
     /// Simple LCG PRNG for deterministic jitter
     fn next_random(&mut self) -> u64 {
         // LCG parameters from Numerical Recipes
@@ -113,16 +109,6 @@ impl LagSimulator {
             .wrapping_mul(6364136223846793005)
             .wrapping_add(1);
         self.rng_state >> 33
-    }
-
-    /// Check if lag simulation is enabled
-    pub fn is_enabled(&self) -> bool {
-        self.enabled
-    }
-
-    /// Enable or disable lag simulation
-    pub fn set_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
     }
 }
 

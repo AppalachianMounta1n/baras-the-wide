@@ -1167,7 +1167,7 @@ impl CombatService {
         let effects_handle = tokio::spawn(async move {
             // Track previous state to avoid redundant updates
             let mut last_raid_effect_count: usize = 0;
-            let mut last_effects_count: usize = 0;
+            let _last_effects_count: usize = 0;
 
             // Track previous state for new overlays to avoid redundant updates
             let mut last_effects_a_count: usize = 0;

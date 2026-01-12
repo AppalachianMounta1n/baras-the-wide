@@ -138,7 +138,7 @@ pub struct EffectsABOverlay {
     /// Last rendered state for dirty checking: (effect_id, time_string, stacks)
     last_rendered: Vec<(u64, String, u8)>,
     /// Label for this overlay instance
-    label: String,
+    _label: String,
 }
 
 impl EffectsABOverlay {
@@ -160,7 +160,7 @@ impl EffectsABOverlay {
             data: EffectsABData::default(),
             icon_cache: HashMap::new(),
             last_rendered: Vec::new(),
-            label: label.to_string(),
+            _label: label.to_string(),
         })
     }
 

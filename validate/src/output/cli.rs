@@ -4,7 +4,6 @@
 //! colored output for easy visual parsing.
 
 use std::collections::HashMap;
-use std::io::{self, Write};
 
 use baras_core::encounter::ChallengeValue;
 use chrono::NaiveDateTime;
@@ -38,7 +37,6 @@ pub struct PhaseSpan {
 #[derive(Debug, Clone)]
 pub struct BossHpState {
     pub name: String,
-    pub npc_id: i64,
     pub current_hp: i64,
     pub max_hp: i64,
 }
@@ -151,14 +149,6 @@ impl CliOutput {
     fn cyan(&self, text: &str) -> String {
         if self.use_colors {
             format!("\x1b[36m{}\x1b[0m", text)
-        } else {
-            text.to_string()
-        }
-    }
-
-    fn magenta(&self, text: &str) -> String {
-        if self.use_colors {
-            format!("\x1b[35m{}\x1b[0m", text)
         } else {
             text.to_string()
         }
@@ -372,7 +362,6 @@ impl CliOutput {
             npc_id,
             BossHpState {
                 name: name.to_string(),
-                npc_id,
                 current_hp,
                 max_hp,
             },
@@ -422,17 +411,6 @@ impl CliOutput {
             "\n{} (duration: {:.1}s at {})\n",
             label, duration_secs, time_str
         );
-    }
-
-    /// Log a verbose debug message
-    pub fn debug(&self, time: NaiveDateTime, msg: &str) {
-        if self.level < OutputLevel::Verbose {
-            return;
-        }
-
-        let time_str = self.format_time(time);
-        let label = self.dim("DBG:");
-        println!("[{}] {} {}", time_str, label, msg);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -582,11 +560,6 @@ impl CliOutput {
         } else {
             time.format("%H:%M:%S%.3f").to_string()
         }
-    }
-
-    /// Flush stdout
-    pub fn flush(&self) {
-        let _ = io::stdout().flush();
     }
 }
 
