@@ -89,18 +89,21 @@ fn format_number(n: i64) -> String {
     }
 }
 
-/// Group encounters into sections by area (based on is_phase_start flag)
+/// Group encounters into sections by area (based on is_phase_start flag or area change)
 fn group_by_area(
     encounters: &[EncounterSummary],
 ) -> Vec<(String, Option<String>, Vec<&EncounterSummary>)> {
     let mut sections: Vec<(String, Option<String>, Vec<&EncounterSummary>)> = Vec::new();
 
     for enc in encounters.iter() {
-        if enc.is_phase_start || sections.is_empty() {
-            // Start a new section
+        // Start new section if: phase start, no sections yet, or area/difficulty changed
+        let area_changed = sections
+            .last()
+            .map_or(false, |s| s.0 != enc.area_name || s.1 != enc.difficulty);
+
+        if enc.is_phase_start || sections.is_empty() || area_changed {
             sections.push((enc.area_name.clone(), enc.difficulty.clone(), vec![enc]));
         } else if let Some(section) = sections.last_mut() {
-            // Add to current section
             section.2.push(enc);
         }
     }
