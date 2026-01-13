@@ -15,7 +15,7 @@ use tauri::{AppHandle, Manager, State};
 
 use baras_core::dsl::{AudioConfig, Trigger};
 use baras_core::effects::{
-    AlertTrigger, DefinitionConfig, DisplayTarget, EffectDefinition, EFFECTS_DSL_VERSION,
+    AlertTrigger, DefinitionConfig, DisplayTarget, EFFECTS_DSL_VERSION, EffectDefinition,
 };
 use baras_types::AbilitySelector;
 
@@ -479,7 +479,8 @@ use std::sync::Mutex;
 use zip::ZipArchive;
 
 /// Lazy-loaded icon name lookup cache
-static ICON_NAME_CACHE: std::sync::OnceLock<Mutex<HashMap<u64, String>>> = std::sync::OnceLock::new();
+static ICON_NAME_CACHE: std::sync::OnceLock<Mutex<HashMap<u64, String>>> =
+    std::sync::OnceLock::new();
 
 /// Get or load the icon name mapping from CSV
 fn get_icon_name_mapping(app_handle: &AppHandle) -> Option<&Mutex<HashMap<u64, String>>> {
@@ -533,7 +534,8 @@ pub async fn get_icon_preview(app_handle: AppHandle, ability_id: u64) -> Result<
         map.get(&ability_id).cloned()
     };
 
-    let icon_name = icon_name.ok_or_else(|| format!("No icon mapping for ability {}", ability_id))?;
+    let icon_name =
+        icon_name.ok_or_else(|| format!("No icon mapping for ability {}", ability_id))?;
 
     // Get icons directory
     let icons_dir = app_handle
@@ -551,25 +553,22 @@ pub async fn get_icon_preview(app_handle: AppHandle, ability_id: u64) -> Result<
         });
 
     // Try to load from ZIP files
-    let zip_paths = [
-        icons_dir.join("icons.zip"),
-        icons_dir.join("icons2.zip"),
-    ];
+    let zip_paths = [icons_dir.join("icons.zip"), icons_dir.join("icons2.zip")];
 
     let filename = format!("{}.png", icon_name);
 
     for zip_path in &zip_paths {
         if let Ok(file) = std::fs::File::open(zip_path) {
             let reader = std::io::BufReader::new(file);
-            if let Ok(mut archive) = ZipArchive::new(reader) {
-                if let Ok(mut zip_file) = archive.by_name(&filename) {
-                    let mut png_data = Vec::new();
-                    if zip_file.read_to_end(&mut png_data).is_ok() {
-                        // Return base64 encoded PNG
-                        use base64::Engine;
-                        let base64_data = base64::engine::general_purpose::STANDARD.encode(&png_data);
-                        return Ok(format!("data:image/png;base64,{}", base64_data));
-                    }
+            if let Ok(mut archive) = ZipArchive::new(reader)
+                && let Ok(mut zip_file) = archive.by_name(&filename)
+            {
+                let mut png_data = Vec::new();
+                if zip_file.read_to_end(&mut png_data).is_ok() {
+                    // Return base64 encoded PNG
+                    use base64::Engine;
+                    let base64_data = base64::engine::general_purpose::STANDARD.encode(&png_data);
+                    return Ok(format!("data:image/png;base64,{}", base64_data));
                 }
             }
         }
