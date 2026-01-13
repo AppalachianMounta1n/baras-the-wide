@@ -688,3 +688,46 @@ name = "Apex Vanguard"
 ids = [4282872668094464, 4350020186800128]
 is_boss = true
 is_kill_target = true
+
+[[boss.entities]]
+name = "Power Transformer"
+ids = [4297557161279488]
+is_boss = true
+show_on_hp_overlay = false
+is_kill_target = false
+
+[[boss.phases]]
+id = "apex_main"
+name = "Apex"
+trigger = { type = "any_of", conditions = [
+  { type = "combat_start" },
+  { type = "phase_ended", phase_id = "apex_transformer" },
+  { type = "phase_ended", phase_id = "apex_voltinator" },
+] }
+
+[[boss.phases]]
+id = "apex_transformer"
+name = "Transformer"
+trigger = { type = "npc_appears", selector = ["Power Transformer"] }
+end_trigger = { type = "boss_hp_below", hp_percent = 10.0, selector = [
+  "Power Transformer",
+] }
+
+[[boss.phases]]
+id = "apex_voltinator"
+name = "Voltinator"
+trigger = { type = "ability_cast", abilities = [
+  4310755595780096,
+], source = { selector = [
+  "Apex Vanguard",
+] } }
+end_trigger = { type = "effect_removed", effects = [
+  4310755595780426,
+], target = { selector = [
+  "Apex Vanguard",
+] } }
+
+[[boss.phases]]
+id = "apex_burn"
+name = "Burn"
+trigger = { type = "ability_cast", abilities = [4329997049266176] }
