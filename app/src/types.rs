@@ -458,7 +458,6 @@ impl DisplayTarget {
             Self::EffectsB,
             Self::Cooldowns,
             Self::DotTracker,
-            Self::EffectsOverlay,
         ]
     }
 }
