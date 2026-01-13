@@ -692,7 +692,7 @@ is_kill_target = true
 [[boss.entities]]
 name = "Power Transformer"
 ids = [4297557161279488]
-is_boss = true
+is_boss = false
 show_on_hp_overlay = false
 is_kill_target = false
 
@@ -731,3 +731,76 @@ end_trigger = { type = "effect_removed", effects = [
 id = "apex_burn"
 name = "Burn"
 trigger = { type = "ability_cast", abilities = [4329997049266176] }
+
+[[boss.challenges]]
+id = "apex_volt_dmg"
+name = "Voltinator Damage"
+metric = "damage"
+phase = "apex_voltinator"
+
+
+[[boss.timer]]
+id = "apex_photo_hp"
+name = "Photogenesis HP"
+trigger = { type = "boss_hp_below", hp_percent = 94.0, selector = [
+  "Apex Vanguard",
+] }
+is_alert = true
+alert_text = "Photogensis HP threshold"
+color = [53, 211, 214, 255]
+difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "apex_contagion_cs"
+# orbs_id = "6986620c-dc44-4021-bf15-4c1c9c22ae57"
+name = "Contagion CS"
+display_text = "Contagion"
+trigger = { type = "combat_start" }
+duration_secs = 30.0
+color = [100, 150, 68, 255]
+difficulties = ["story", "veteran", "master"]
+
+[[boss.timer]]
+id = "apex_contagion"
+name = "Contagion"
+display_text = "Contagion"
+trigger = { type = "ability_cast", abilities = [4306117031100416] }
+duration_secs = 63.0
+color = [102, 150, 63, 255]
+difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "apex_photogenesis"
+name = "Photogenesis"
+trigger = { type = "boss_hp_below", hp_percent = 94.0, selector = [
+  "Apex Vangaurd",
+] }
+duration_secs = 10.0
+color = [53, 211, 214, 255]
+difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "apex_vanguard_red_venom_1st"
+name = "Red Venom"
+trigger = { type = "ability_cast", abilities = [4297819154284544] }
+duration_secs = 60.0
+color = [227, 85, 22, 255]
+difficulties = ["story", "veteran", "master"]
+
+[[boss.timer]]
+id = "apex_vanguard_mass_target_1st"
+name = "Mass Target 1st"
+display_text = "Mass Target"
+trigger = { type = "timer_expires", timer_id = "apex_vanguard_red_venom_1st" }
+duration_secs = 60.0
+color = [126, 94, 60, 255]
+difficulties = ["story", "veteran", "master"]
+
+[[boss.timer]]
+id = "apex_vanguard_voltinator_1st"
+name = "Voltinator 1st"
+trigger = { type = "timer_expires", timer_id = "apex_vanguard_mass_target_1st" }
+duration_secs = 60.0
+color = [34, 62, 217, 255]
+difficulties = ["story", "veteran", "master"]
+#
