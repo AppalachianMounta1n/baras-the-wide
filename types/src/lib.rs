@@ -1314,6 +1314,9 @@ pub struct DotTrackerConfig {
     /// Show header title above overlay
     #[serde(default)]
     pub show_header: bool,
+    /// Show countdown timers on icons
+    #[serde(default = "default_true")]
+    pub show_countdown: bool,
 }
 
 fn default_max_targets() -> u8 {
@@ -1336,6 +1339,7 @@ impl Default for DotTrackerConfig {
             show_effect_names: false,
             show_source_name: false,
             show_header: false,
+            show_countdown: true,
         }
     }
 }

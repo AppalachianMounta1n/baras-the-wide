@@ -44,7 +44,6 @@ trigger = { type = "effect_applied", effects = [
 refresh_abilities = [985226842996736]
 duration_secs = 180.0
 color = [255, 126, 66, 255]
-is_affected_by_alacrity = true
 display_target = "raid_frames"
 
 [[effect]]

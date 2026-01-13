@@ -631,6 +631,7 @@ pub fn create_dot_tracker_overlay(
         show_effect_names: dot_config.show_effect_names,
         show_source_name: dot_config.show_source_name,
         show_header: dot_config.show_header,
+        show_countdown: dot_config.show_countdown,
     };
 
     let factory = move || {

@@ -100,6 +100,8 @@ pub struct DotTrackerConfig {
     pub show_source_name: bool,
     /// Show header title above overlay
     pub show_header: bool,
+    /// Show countdown timers on icons
+    pub show_countdown: bool,
 }
 
 impl Default for DotTrackerConfig {
@@ -111,6 +113,7 @@ impl Default for DotTrackerConfig {
             show_effect_names: false,
             show_source_name: false,
             show_header: false,
+            show_countdown: true,
         }
     }
 }
@@ -367,29 +370,33 @@ impl DotTrackerOverlay {
                     colors::white(),
                 );
 
-                // Countdown text centered
-                let time_text = dot.format_time();
+                // Font size for countdown/stack text
                 let time_font_size = font_size * 0.85;
-                let text_width = self.frame.measure_text(&time_text, time_font_size).0;
-                let text_x = icon_x + (icon_size - text_width) / 2.0;
-                let text_y = y + icon_size / 2.0 + time_font_size / 3.0;
 
-                // Shadow
-                self.frame.draw_text(
-                    &time_text,
-                    text_x + 1.0,
-                    text_y + 1.0,
-                    time_font_size,
-                    colors::text_shadow(),
-                );
-                // Text
-                let time_color = if dot.remaining_secs <= 3.0 {
-                    colors::effect_debuff()
-                } else {
-                    colors::white()
-                };
-                self.frame
-                    .draw_text(&time_text, text_x, text_y, time_font_size, time_color);
+                // Countdown text centered (if enabled)
+                if self.config.show_countdown {
+                    let time_text = dot.format_time();
+                    let text_width = self.frame.measure_text(&time_text, time_font_size).0;
+                    let text_x = icon_x + (icon_size - text_width) / 2.0;
+                    let text_y = y + icon_size / 2.0 + time_font_size / 3.0;
+
+                    // Shadow
+                    self.frame.draw_text(
+                        &time_text,
+                        text_x + 1.0,
+                        text_y + 1.0,
+                        time_font_size,
+                        colors::text_shadow(),
+                    );
+                    // Text
+                    let time_color = if dot.remaining_secs <= 3.0 {
+                        colors::effect_debuff()
+                    } else {
+                        colors::white()
+                    };
+                    self.frame
+                        .draw_text(&time_text, text_x, text_y, time_font_size, time_color);
+                }
 
                 // Stack count - prominent display when stacks exist
                 if dot.stacks >= 1 {

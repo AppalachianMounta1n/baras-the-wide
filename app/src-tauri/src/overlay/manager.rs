@@ -341,6 +341,7 @@ impl OverlayManager {
                     show_effect_names: cfg.show_effect_names,
                     show_source_name: cfg.show_source_name,
                     show_header: cfg.show_header,
+                    show_countdown: cfg.show_countdown,
                 };
                 OverlayConfigUpdate::DotTracker(dot_config, settings.dot_tracker_opacity)
             }
