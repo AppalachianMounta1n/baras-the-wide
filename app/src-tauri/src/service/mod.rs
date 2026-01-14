@@ -25,7 +25,7 @@ use baras_core::game_data::{Discipline, Role};
 use baras_core::timers::FiredAlert;
 use baras_core::{
     ActiveEffect, BossEncounterDefinition, DefinitionConfig, DefinitionSet, DisplayTarget,
-    EntityType, GameSignal, PlayerMetrics, Reader, SignalHandler, EFFECTS_DSL_VERSION,
+    EFFECTS_DSL_VERSION, EntityType, GameSignal, PlayerMetrics, Reader, SignalHandler,
 };
 use baras_overlay::{
     BossHealthData, ChallengeData, ChallengeEntry, Color, CooldownData, CooldownEntry, DotEntry,
@@ -507,7 +507,9 @@ impl CombatService {
 
     /// Clean up old user effects directory structure (pre-delta architecture)
     fn cleanup_old_effects_dir() {
-        let Some(old_dir) = dirs::config_dir().map(|p| p.join("baras").join("definitions").join("effects")) else {
+        let Some(old_dir) =
+            dirs::config_dir().map(|p| p.join("baras").join("definitions").join("effects"))
+        else {
             return;
         };
 
@@ -571,7 +573,11 @@ impl CombatService {
             })
             .collect();
 
-        eprintln!("[EFFECTS] Loading {} bundled files from {:?}", files.len(), dir);
+        eprintln!(
+            "[EFFECTS] Loading {} bundled files from {:?}",
+            files.len(),
+            dir
+        );
 
         for path in files {
             if let Ok(contents) = std::fs::read_to_string(&path)
@@ -579,7 +585,11 @@ impl CombatService {
             {
                 let count = config.effects.len();
                 set.add_definitions(config.effects, false);
-                eprintln!("[EFFECTS]   {:?}: {} effects", path.file_name().unwrap_or_default(), count);
+                eprintln!(
+                    "[EFFECTS]   {:?}: {} effects",
+                    path.file_name().unwrap_or_default(),
+                    count
+                );
             }
         }
     }
@@ -609,7 +619,11 @@ impl CombatService {
         }
 
         if !config.effects.is_empty() {
-            eprintln!("[EFFECTS] Loading {} user overrides from {:?}", config.effects.len(), path);
+            eprintln!(
+                "[EFFECTS] Loading {} user overrides from {:?}",
+                config.effects.len(),
+                path
+            );
             set.add_definitions(config.effects, true); // Overwrite bundled
         }
     }
@@ -1181,11 +1195,8 @@ impl CombatService {
                 let raid_active = shared.raid_overlay_active.load(Ordering::Relaxed);
                 let boss_active = shared.boss_health_overlay_active.load(Ordering::Relaxed);
                 let timer_active = shared.timer_overlay_active.load(Ordering::Relaxed);
-                let effects_a_active =
-                    shared.effects_a_overlay_active.load(Ordering::Relaxed);
-                let effects_b_active = shared
-                    .effects_b_overlay_active
-                    .load(Ordering::Relaxed);
+                let effects_a_active = shared.effects_a_overlay_active.load(Ordering::Relaxed);
+                let effects_b_active = shared.effects_b_overlay_active.load(Ordering::Relaxed);
                 let cooldowns_active = shared.cooldowns_overlay_active.load(Ordering::Relaxed);
                 let dot_tracker_active = shared.dot_tracker_overlay_active.load(Ordering::Relaxed);
                 let in_combat = shared.in_combat.load(Ordering::Relaxed);
@@ -1244,9 +1255,10 @@ impl CombatService {
                         }
                         last_effects_a_count = count;
                     } else if last_effects_a_count > 0 {
-                        let _ = overlay_tx.try_send(OverlayUpdate::EffectsAUpdated(
-                            EffectsABData { effects: vec![] },
-                        ));
+                        let _ =
+                            overlay_tx.try_send(OverlayUpdate::EffectsAUpdated(EffectsABData {
+                                effects: vec![],
+                            }));
                         last_effects_a_count = 0;
                     }
                 }
@@ -1256,14 +1268,14 @@ impl CombatService {
                     if let Some(data) = build_effects_b_data(&shared, icon_cache.as_ref()).await {
                         let count = data.effects.len();
                         if count > 0 || last_effects_b_count > 0 {
-                            let _ =
-                                overlay_tx.try_send(OverlayUpdate::EffectsBUpdated(data));
+                            let _ = overlay_tx.try_send(OverlayUpdate::EffectsBUpdated(data));
                         }
                         last_effects_b_count = count;
                     } else if last_effects_b_count > 0 {
-                        let _ = overlay_tx.try_send(OverlayUpdate::EffectsBUpdated(
-                            EffectsABData { effects: vec![] },
-                        ));
+                        let _ =
+                            overlay_tx.try_send(OverlayUpdate::EffectsBUpdated(EffectsABData {
+                                effects: vec![],
+                            }));
                         last_effects_b_count = 0;
                     }
                 }
@@ -1320,7 +1332,8 @@ impl CombatService {
                     }
                     // Send text alerts to overlay
                     if !effect_audio.text_alerts.is_empty() {
-                        let _ = overlay_tx.try_send(OverlayUpdate::AlertsFired(effect_audio.text_alerts));
+                        let _ = overlay_tx
+                            .try_send(OverlayUpdate::AlertsFired(effect_audio.text_alerts));
                     }
                 }
 
@@ -1847,16 +1860,28 @@ async fn process_effect_audio(shared: &std::sync::Arc<SharedState>) -> EffectAud
     // Get session (same pattern as build_effects_overlay_data)
     let session_guard = shared.session.read().await;
     let Some(session_arc) = session_guard.as_ref() else {
-        return EffectAudioResult { countdowns, alerts, text_alerts };
+        return EffectAudioResult {
+            countdowns,
+            alerts,
+            text_alerts,
+        };
     };
     let session = session_arc.read().await;
 
     // Get effect tracker (Live mode only)
     let Some(effect_tracker) = session.effect_tracker() else {
-        return EffectAudioResult { countdowns, alerts, text_alerts };
+        return EffectAudioResult {
+            countdowns,
+            alerts,
+            text_alerts,
+        };
     };
     let Ok(mut tracker) = effect_tracker.lock() else {
-        return EffectAudioResult { countdowns, alerts, text_alerts };
+        return EffectAudioResult {
+            countdowns,
+            alerts,
+            text_alerts,
+        };
     };
 
     for effect in tracker.active_effects_mut() {
@@ -1907,7 +1932,11 @@ async fn process_effect_audio(shared: &std::sync::Arc<SharedState>) -> EffectAud
         }
     }
 
-    EffectAudioResult { countdowns, alerts, text_alerts }
+    EffectAudioResult {
+        countdowns,
+        alerts,
+        text_alerts,
+    }
 }
 
 /// Convert an ActiveEffect (core) to RaidEffect (overlay)
@@ -1975,9 +2004,9 @@ async fn build_effects_a_data(
 
             // Load icon from cache
             let icon = icon_cache.and_then(|cache| {
-                cache.get_icon(effect.icon_ability_id).map(|data| {
-                    StdArc::new((data.width, data.height, data.rgba))
-                })
+                cache
+                    .get_icon(effect.icon_ability_id)
+                    .map(|data| StdArc::new((data.width, data.height, data.rgba)))
             });
 
             Some(EffectABEntry {
@@ -2033,9 +2062,9 @@ async fn build_effects_b_data(
 
             // Load icon from cache
             let icon = icon_cache.and_then(|cache| {
-                cache.get_icon(effect.icon_ability_id).map(|data| {
-                    StdArc::new((data.width, data.height, data.rgba))
-                })
+                cache
+                    .get_icon(effect.icon_ability_id)
+                    .map(|data| StdArc::new((data.width, data.height, data.rgba)))
             });
 
             Some(EffectABEntry {
@@ -2111,9 +2140,9 @@ async fn build_cooldowns_data(
 
             // Load icon from cache
             let icon = icon_cache.and_then(|cache| {
-                cache.get_icon(effect.icon_ability_id).map(|data| {
-                    StdArc::new((data.width, data.height, data.rgba))
-                })
+                cache
+                    .get_icon(effect.icon_ability_id)
+                    .map(|data| StdArc::new((data.width, data.height, data.rgba)))
             });
 
             Some(CooldownEntry {
@@ -2180,9 +2209,9 @@ async fn build_dot_tracker_data(
 
                     // Load icon from cache
                     let icon = icon_cache.and_then(|cache| {
-                        cache.get_icon(effect.icon_ability_id).map(|data| {
-                            StdArc::new((data.width, data.height, data.rgba))
-                        })
+                        cache
+                            .get_icon(effect.icon_ability_id)
+                            .map(|data| StdArc::new((data.width, data.height, data.rgba)))
                     });
 
                     Some(DotEntry {

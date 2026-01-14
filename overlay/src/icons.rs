@@ -43,7 +43,10 @@ impl IconCache {
     /// * `max_cache_size` - Maximum number of icons to cache
     pub fn new(csv_path: &Path, zip_path: &Path, max_cache_size: usize) -> Result<Self, String> {
         let ability_to_icon = load_icon_csv(csv_path)?;
-        eprintln!("[ICONS] Loaded {} ability->icon mappings from CSV", ability_to_icon.len());
+        eprintln!(
+            "[ICONS] Loaded {} ability->icon mappings from CSV",
+            ability_to_icon.len()
+        );
 
         // Build list of ZIP paths to check
         let mut zip_paths = vec![zip_path.to_string_lossy().to_string()];
@@ -81,10 +84,7 @@ impl IconCache {
         };
         match self.get_icon_by_name(icon_name) {
             Some(data) => Some(data),
-            None => {
-                eprintln!("[ICONS] Failed to load '{}' for ability_id={}", icon_name, ability_id);
-                None
-            }
+            None => None,
         }
     }
 
@@ -154,8 +154,8 @@ impl IconCache {
 
 /// Load icon CSV mapping
 fn load_icon_csv(path: &Path) -> Result<HashMap<u64, String>, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read icons.csv: {}", e))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("Failed to read icons.csv: {}", e))?;
 
     let mut map = HashMap::new();
 
@@ -230,7 +230,11 @@ fn decode_png(data: &[u8]) -> Option<IconData> {
         }
     };
 
-    Some(IconData { rgba, width, height })
+    Some(IconData {
+        rgba,
+        width,
+        height,
+    })
 }
 
 #[cfg(test)]
