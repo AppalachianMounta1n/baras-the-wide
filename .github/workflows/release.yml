@@ -7,11 +7,6 @@ on:
         description: "Release version (e.g., 2025.12.24)"
         required: true
         type: string
-      release_notes:
-        description: "Release notes"
-        required: false
-        type: string
-        default: "Bug fixes and improvements"
 
 env:
   CARGO_TERM_COLOR: always
@@ -68,6 +63,16 @@ jobs:
           mkdir -p app/src-tauri/binaries
           cp target/release/baras-parse-worker app/src-tauri/binaries/baras-parse-worker-x86_64-unknown-linux-gnu
 
+      - name: Read changelog
+        id: changelog
+        run: |
+          # Read changelog, skip the "# What's New" header
+          BODY=$(tail -n +3 app/src-tauri/CHANGELOG.md)
+          # Handle multiline for GitHub Actions
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Build and release Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -80,7 +85,7 @@ jobs:
           tauriScript: cargo tauri
           tagName: v${{ inputs.version }}
           releaseName: "BARAS v${{ inputs.version }}"
-          releaseBody: ${{ inputs.release_notes }}
+          releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: false
           prerelease: false
 
@@ -112,6 +117,17 @@ jobs:
           mkdir -p app/src-tauri/binaries
           cp target/release/baras-parse-worker.exe app/src-tauri/binaries/baras-parse-worker-x86_64-pc-windows-msvc.exe
 
+      - name: Read changelog
+        id: changelog
+        shell: bash
+        run: |
+          # Read changelog, skip the "# What's New" header
+          BODY=$(tail -n +3 app/src-tauri/CHANGELOG.md)
+          # Handle multiline for GitHub Actions
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Build and release Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -123,7 +139,7 @@ jobs:
           tauriScript: cargo tauri
           tagName: v${{ inputs.version }}
           releaseName: "BARAS v${{ inputs.version }}"
-          releaseBody: ${{ inputs.release_notes }}
+          releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: false
           prerelease: false
 
@@ -138,10 +154,12 @@ jobs:
       - name: Generate latest.json
         env:
           VERSION: ${{ inputs.version }}
-          NOTES: ${{ inputs.release_notes }}
         run: |
           # Wait for release assets to be available
           sleep 10
+
+          # Read changelog for notes (first non-empty content line as summary)
+          NOTES=$(sed -n '/^## /,/^## /p' app/src-tauri/CHANGELOG.md | head -1 | sed 's/^## //')
 
           # Download signatures
           LINUX_SIG=$(curl -sL "https://github.com/baras-app/baras/releases/download/v${VERSION}/BARAS_${VERSION}_amd64.AppImage.sig")
