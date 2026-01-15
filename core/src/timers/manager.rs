@@ -731,6 +731,8 @@ impl SignalHandler for TimerManager {
     ) {
         // ─── Context-setting signals: always process (bypass recency filter) ───
         // These establish context for future timer matching, not trigger timers directly.
+        // IMPORTANT: Boss/combat context must be set even if definitions aren't loaded yet,
+        // otherwise a race between definition loading and combat start will break timers.
         match signal {
             GameSignal::PlayerInitialized { entity_id, .. } => {
                 self.local_player_id = Some(*entity_id);
@@ -738,6 +740,44 @@ impl SignalHandler for TimerManager {
             }
             // AreaEntered: Context is now read from CombatEncounter directly
             GameSignal::AreaEntered { .. } => return,
+
+            // BossEncounterDetected: Set boss context even if definitions not yet loaded.
+            // This fixes a race where definitions load after combat starts (e.g., after watcher restart).
+            GameSignal::BossEncounterDetected {
+                entity_id,
+                boss_npc_class_ids,
+                timestamp,
+                ..
+            } => {
+                // Track boss entity ID for source/target "boss" filter
+                self.boss_entity_ids.insert(*entity_id);
+
+                // Store boss NPC class IDs (for tracking additional boss entities in multi-boss fights)
+                self.boss_npc_class_ids.clear();
+                for &class_id in boss_npc_class_ids {
+                    self.boss_npc_class_ids.insert(class_id);
+                }
+
+                // Set combat state
+                let combat_start = encounter
+                    .and_then(|e| e.enter_combat_time)
+                    .unwrap_or(*timestamp);
+                self.in_combat = true;
+                self.combat_start_time = Some(combat_start);
+
+                // Start combat-start timers only if definitions are loaded
+                if !self.definitions.is_empty() {
+                    signal_handlers::handle_combat_start(self, encounter, combat_start);
+                }
+                return;
+            }
+
+            // CombatEnded: Clear combat state even if definitions not loaded
+            GameSignal::CombatEnded { .. } => {
+                signal_handlers::clear_combat_timers(self);
+                return;
+            }
+
             _ => {}
         }
 
@@ -862,9 +902,7 @@ impl SignalHandler for TimerManager {
                 signal_handlers::handle_combat_start(self, encounter, *timestamp);
             }
 
-            GameSignal::CombatEnded { .. } => {
-                signal_handlers::clear_combat_timers(self);
-            }
+            // CombatEnded handled in early context-setting section above
 
             GameSignal::EntityDeath {
                 npc_id,
@@ -972,31 +1010,7 @@ impl SignalHandler for TimerManager {
             }
 
             // ─── Boss Encounter Signals (from EventProcessor) ─────────────────────
-            GameSignal::BossEncounterDetected {
-                entity_id,
-                boss_npc_class_ids,
-                timestamp,
-                ..
-            } => {
-                // Boss name is now read from CombatEncounter.active_boss directly
-
-                // Track boss entity ID for source/target "boss" filter
-                self.boss_entity_ids.insert(*entity_id);
-
-                // Store boss NPC class IDs from signal (for tracking additional boss entities
-                // in multi-boss fights like Zorn & Toth)
-                self.boss_npc_class_ids.clear();
-                for &class_id in boss_npc_class_ids {
-                    self.boss_npc_class_ids.insert(class_id);
-                }
-
-                // Start combat-start timers using actual combat start time (not boss detection time)
-                // This ensures timer remaining duration is calculated from when combat began
-                let combat_start = encounter
-                    .and_then(|e| e.enter_combat_time)
-                    .unwrap_or(*timestamp);
-                signal_handlers::handle_combat_start(self, encounter, combat_start);
-            }
+            // BossEncounterDetected handled in early context-setting section above
 
             GameSignal::BossHpChanged {
                 npc_id,

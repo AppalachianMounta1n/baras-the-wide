@@ -1043,11 +1043,21 @@ impl CombatService {
                             cache.player_initialized = true;
 
                             // Import area info
+                            eprintln!(
+                                "[PARSE DEBUG] Importing area from subprocess: area_id={}, area_name='{}', difficulty_id={}",
+                                parse_result.area.area_id,
+                                parse_result.area.area_name,
+                                parse_result.area.difficulty_id
+                            );
                             cache.current_area.area_name = parse_result.area.area_name.clone();
                             cache.current_area.area_id = parse_result.area.area_id;
                             cache.current_area.difficulty_id = parse_result.area.difficulty_id;
                             cache.current_area.difficulty_name =
                                 parse_result.area.difficulty_name.clone();
+
+                            // Create fresh encounter with correct area context
+                            // (the initial encounter was created before we had area info from subprocess)
+                            cache.push_new_encounter();
 
                             // Import player disciplines from subprocess
                             for disc in &parse_result.player_disciplines {
