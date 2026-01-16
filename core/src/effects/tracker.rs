@@ -66,17 +66,6 @@ impl DefinitionSet {
     ) -> Vec<String> {
         let mut duplicates = Vec::new();
         for def in definitions {
-            // Warn about effects that will never match anything
-            if !def.matches_effect(0, None)
-                && !def.is_ability_cast_trigger()
-                && def.refresh_abilities.is_empty()
-            {
-                eprintln!(
-                    "[EFFECT WARNING] Effect '{}' has no effect selectors or abilities - it may never match anything!",
-                    def.id
-                );
-            }
-
             if self.effects.contains_key(&def.id) {
                 duplicates.push(def.id.clone());
                 if !overwrite {
@@ -363,9 +352,9 @@ impl EffectTracker {
 
     /// Get effects destined for Effects B overlay
     pub fn effects_b(&self) -> impl Iterator<Item = &ActiveEffect> {
-        self.active_effects.values().filter(|e| {
-            e.display_target == DisplayTarget::EffectsB && e.removed_at.is_none()
-        })
+        self.active_effects
+            .values()
+            .filter(|e| e.display_target == DisplayTarget::EffectsB && e.removed_at.is_none())
     }
 
     /// Get effects destined for cooldown tracker
@@ -474,7 +463,8 @@ impl EffectTracker {
         // Garbage collect only effects that have finished fading out.
         // Don't use is_active() here - that would remove expiring effects before
         // they can be refreshed by a reapplication in this same signal batch.
-        self.active_effects.retain(|_, effect| !effect.should_remove());
+        self.active_effects
+            .retain(|_, effect| !effect.should_remove());
 
         // Skip effect tracking when processing historical data (initial file load)
         if !self.live_mode {
@@ -644,12 +634,7 @@ impl EffectTracker {
             .definitions
             .enabled()
             .filter(|def| def.can_refresh_with(action_id as u64, Some(action_name_str)))
-            .map(|def| {
-                (
-                    def.id.clone(),
-                    self.effective_duration(def),
-                )
-            })
+            .map(|def| (def.id.clone(), self.effective_duration(def)))
             .collect();
 
         for (def_id, duration) in refreshable_def_ids {
@@ -760,12 +745,7 @@ impl EffectTracker {
             .definitions
             .enabled()
             .filter(|def| def.can_refresh_with(collecting.ability_id as u64, None))
-            .map(|def| {
-                (
-                    def.id.clone(),
-                    self.effective_duration(def),
-                )
-            })
+            .map(|def| (def.id.clone(), self.effective_duration(def)))
             .collect();
 
         // Refresh effects on all collected targets
@@ -830,7 +810,8 @@ impl EffectTracker {
         let is_from_local = local_player_id == Some(source_id);
 
         let entities = get_entities(encounter);
-        let current_target_id = local_player_id.and_then(|id| self.current_targets.get(&id).copied());
+        let current_target_id =
+            local_player_id.and_then(|id| self.current_targets.get(&id).copied());
         for def in matching_defs {
             // Check source filter from the trigger
             let source_filter = def.source_filter();
