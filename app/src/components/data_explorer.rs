@@ -721,12 +721,13 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
                     let _ = timeline_state.try_write().map(|mut w| *w = LoadState::Loaded);
                 }
                 None => {
+                    // None can mean: no encounters directory, file not found, or other backend issues
+                    // These are often normal states (no log loaded yet), so just reset to Idle
+                    // rather than showing an error
                     if *load_generation.peek() != generation {
                         return;
                     }
-                    let _ = timeline_state
-                        .try_write()
-                        .map(|mut w| *w = LoadState::Error("Failed to load encounter".into()));
+                    let _ = timeline_state.try_write().map(|mut w| *w = LoadState::Idle);
                 }
             }
         });
@@ -779,20 +780,18 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
                 full_duration
             };
 
-            // Load raid overview - single attempt with proper error handling (no retry loop)
-            match api::query_raid_overview(idx, tr_opt.as_ref(), duration).await {
-                Some(data) => {
-                    let _ = overview_data.try_write().map(|mut w| *w = data);
-                    let _ = last_overview_fetch.try_write().map(|mut w| *w = Some((idx, tr)));
+            // Load raid overview - single attempt
+            // None typically means no data available (no encounters dir, etc.) - not an error
+            if let Some(data) = api::query_raid_overview(idx, tr_opt.as_ref(), duration).await {
+                let _ = overview_data.try_write().map(|mut w| *w = data);
+                let _ = last_overview_fetch.try_write().map(|mut w| *w = Some((idx, tr)));
+            } else {
+                // No data available - just mark as loaded with empty data
+                let _ = last_overview_fetch.try_write().map(|mut w| *w = Some((idx, tr)));
+                if is_overview {
+                    let _ = content_state.try_write().map(|mut w| *w = LoadState::Loaded);
                 }
-                None => {
-                    if is_overview {
-                        let _ = content_state
-                            .try_write()
-                            .map(|mut w| *w = LoadState::Error("Failed to load overview".into()));
-                    }
-                    return;
-                }
+                return;
             }
 
             // Load player deaths (only needed for Overview tab)
@@ -835,13 +834,13 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
                 Some(tr)
             };
 
-            // Load entity breakdown - single attempt with proper error handling
+            // Load entity breakdown - single attempt
+            // None typically means no data available (no encounters dir, etc.) - show empty state
             let entity_data = match api::query_entity_breakdown(tab, idx, tr_opt.as_ref()).await {
                 Some(data) => data,
                 None => {
-                    let _ = content_state
-                        .try_write()
-                        .map(|mut w| *w = LoadState::Error("Failed to load entities".into()));
+                    // No data available - just mark as loaded with empty data
+                    let _ = content_state.try_write().map(|mut w| *w = LoadState::Loaded);
                     return;
                 }
             };
