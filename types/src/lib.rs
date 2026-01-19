@@ -150,6 +150,10 @@ pub struct RaidOverviewRow {
     /// Absorbed damage per second (shields that protected this player)
     pub aps: f64,
 
+    // Shielding given (shields this player cast)
+    pub shielding_given_total: f64,
+    pub sps: f64,
+
     // Healing done
     pub healing_total: f64,
     pub hps: f64,
@@ -429,11 +433,12 @@ impl EntityMatcher {
 /// - `[P]` = Phase only
 /// - `[C]` = Counter only
 /// - `[TPC]` = All systems
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Trigger {
     // ─── Combat State [TPC] ────────────────────────────────────────────────
     /// Combat starts. [TPC]
+    #[default]
     CombatStart,
 
     /// Combat ends. [C only]
@@ -609,11 +614,6 @@ impl Trigger {
     }
 }
 
-impl Default for Trigger {
-    fn default() -> Self {
-        Self::CombatStart
-    }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Default Color Constants

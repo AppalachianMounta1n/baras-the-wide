@@ -9,7 +9,7 @@ use baras_core::EncounterSummary;
 use baras_core::PlayerMetrics;
 use baras_core::context::{AppConfig, AppConfigExt, OverlayAppearanceConfig};
 
-use crate::overlay::{MetricType, OverlayType, SharedOverlayState};
+use crate::overlay::{MetricType, OverlayCommand, OverlayType, SharedOverlayState};
 use crate::service::{LogFileInfo, ServiceHandle, SessionInfo};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -205,16 +205,37 @@ pub async fn save_profile(
 
     config.save_profile(name).map_err(|e| e.to_string())?;
     *handle.shared.config.write().await = config.clone();
-    config.save();
+    config.save().map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn load_profile(name: String, handle: State<'_, ServiceHandle>) -> Result<(), String> {
+pub async fn load_profile(
+    name: String,
+    handle: State<'_, ServiceHandle>,
+    overlay_state: State<'_, SharedOverlayState>,
+) -> Result<(), String> {
     let mut config = handle.config().await;
     config.load_profile(&name).map_err(|e| e.to_string())?;
     *handle.shared.config.write().await = config.clone();
-    config.save();
+    config.save().map_err(|e| e.to_string())?;
+
+    // Reset move mode on profile switch
+    let txs: Vec<_> = {
+        if let Ok(mut state) = overlay_state.lock() {
+            state.move_mode = false;
+            state.rearrange_mode = false;
+            state.all_txs().into_iter().cloned().collect()
+        } else {
+            vec![]
+        }
+    };
+
+    // Broadcast move mode reset to all overlays
+    for tx in txs {
+        let _ = tx.send(OverlayCommand::SetMoveMode(false)).await;
+    }
+
     Ok(())
 }
 
@@ -223,7 +244,7 @@ pub async fn delete_profile(name: String, handle: State<'_, ServiceHandle>) -> R
     let mut config = handle.config().await;
     config.delete_profile(&name).map_err(|e| e.to_string())?;
     *handle.shared.config.write().await = config.clone();
-    config.save();
+    config.save().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -238,7 +259,7 @@ pub async fn rename_profile(
         .rename_profile(&old_name, new_name)
         .map_err(|e| e.to_string())?;
     *handle.shared.config.write().await = config.clone();
-    config.save();
+    config.save().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -291,7 +312,7 @@ pub async fn mark_changelog_viewed(
     let mut config = handle.config().await;
     config.last_viewed_changelog_version = Some(current_version);
     *handle.shared.config.write().await = config.clone();
-    config.save();
+    config.save().map_err(|e| e.to_string())?;
     Ok(())
 }
 

@@ -4,9 +4,11 @@
 //! personal stats, and raid frame settings.
 
 use dioxus::prelude::*;
+use gloo_timers::future::TimeoutFuture;
 use std::collections::HashMap;
 
 use crate::api;
+use crate::components::{use_toast, ToastSeverity};
 use crate::types::{
     AlertsOverlayConfig, BossHealthConfig, ChallengeLayout, CooldownTrackerConfig,
     DotTrackerConfig, EffectsAConfig, EffectsBConfig, MAX_PROFILES, MetricType,
@@ -34,9 +36,13 @@ pub fn SettingsPanel(
     let mut has_changes = use_signal(|| false);
     let mut save_status = use_signal(String::new);
 
+    // Debounce counter for live preview - each request gets an ID
+    let mut preview_request_id: Signal<u32> = use_signal(|| 0);
+
     // Profile UI state
     let mut new_profile_name = use_signal(String::new);
     let mut profile_status = use_signal(String::new);
+    let mut toast = use_toast();
 
     let current_settings = draft_settings();
     let tab = selected_tab();
@@ -100,23 +106,36 @@ pub fn SettingsPanel(
                 config.overlay_settings.positions = existing_positions;
                 config.overlay_settings.enabled = existing_enabled;
 
-                if api::update_config(&config).await {
+                if let Err(err) = api::update_config(&config).await {
+                    save_status.set(format!("Failed to save: {}", err));
+                } else {
                     api::refresh_overlay_settings().await;
                     settings.set(new_settings);
                     has_changes.set(false);
                     save_status.set("Settings saved!".to_string());
-                } else {
-                    save_status.set("Failed to save".to_string());
                 }
             }
         }
     };
 
-    // Update draft settings helper
+    // Update draft settings helper with debounced live preview
     let mut update_draft = move |new_settings: OverlaySettings| {
-        draft_settings.set(new_settings);
+        draft_settings.set(new_settings.clone());
         has_changes.set(true);
         save_status.set(String::new());
+
+        // Increment request ID to cancel any pending preview
+        let request_id = preview_request_id() + 1;
+        preview_request_id.set(request_id);
+
+        // Schedule a debounced preview (300ms delay)
+        spawn(async move {
+            TimeoutFuture::new(300).await;
+            // Only execute if this is still the latest request
+            if preview_request_id() == request_id {
+                api::preview_overlay_settings(&new_settings).await;
+            }
+        });
     };
 
     rsx! {
@@ -128,7 +147,18 @@ pub fn SettingsPanel(
                 h3 { "Overlay Settings" }
                 button {
                     class: "btn btn-close",
-                    onclick: move |_| on_close.call(()),
+                    onclick: move |_| {
+                        // Cancel any pending preview by incrementing the ID
+                        preview_request_id.set(preview_request_id() + 1);
+                        let needs_revert = has_changes();
+                        async move {
+                            // Restore original settings if there were changes
+                            if needs_revert {
+                                api::refresh_overlay_settings().await;
+                            }
+                            on_close.call(());
+                        }
+                    },
                     onmousedown: move |e| e.stop_propagation(),
                     "X"
                 }
@@ -168,7 +198,9 @@ pub fn SettingsPanel(
                                                         move |_| {
                                                             let pname = pname.clone();
                                                             spawn(async move {
-                                                                if api::load_profile(&pname).await {
+                                                                if let Err(err) = api::load_profile(&pname).await {
+                                                                    toast.show(format!("Failed to load profile: {}", err), ToastSeverity::Normal);
+                                                                } else {
                                                                     active_profile.set(Some(pname.clone()));
                                                                     profile_status.set(format!("Loaded '{}'", pname));
                                                                     if let Some(config) = api::get_config().await {
@@ -201,7 +233,9 @@ pub fn SettingsPanel(
                                                         move |_| {
                                                             let pname = pname.clone();
                                                             spawn(async move {
-                                                                if api::save_profile(&pname).await {
+                                                                if let Err(err) = api::save_profile(&pname).await {
+                                                                    toast.show(format!("Failed to save profile: {}", err), ToastSeverity::Normal);
+                                                                } else {
                                                                     active_profile.set(Some(pname.clone()));
                                                                     profile_status.set(format!("Saved '{}'", pname));
                                                                 }
@@ -218,7 +252,9 @@ pub fn SettingsPanel(
                                                         move |_| {
                                                             let pname = pname.clone();
                                                             spawn(async move {
-                                                                if api::delete_profile(&pname).await {
+                                                                if let Err(err) = api::delete_profile(&pname).await {
+                                                                    toast.show(format!("Failed to delete profile: {}", err), ToastSeverity::Normal);
+                                                                } else {
                                                                     profile_names.set(api::get_profile_names().await);
                                                                     active_profile.set(api::get_active_profile().await);
                                                                     profile_status.set(format!("Deleted '{}'", pname));
@@ -253,7 +289,9 @@ pub fn SettingsPanel(
                                 let name = new_profile_name().trim().to_string();
                                 if name.is_empty() { return; }
                                 spawn(async move {
-                                    if api::save_profile(&name).await {
+                                    if let Err(err) = api::save_profile(&name).await {
+                                        toast.show(format!("Failed to create profile: {}", err), ToastSeverity::Normal);
+                                    } else {
                                         profile_names.set(api::get_profile_names().await);
                                         active_profile.set(Some(name.clone()));
                                         new_profile_name.set(String::new());
@@ -273,6 +311,11 @@ pub fn SettingsPanel(
                     }
                 }
             }
+
+            // ─────────────────────────────────────────────────────────────────
+            // Scrollable content wrapper
+            // ─────────────────────────────────────────────────────────────────
+            div { class: "settings-content",
 
             // ─────────────────────────────────────────────────────────────────
             // Tabs for overlay types
@@ -1361,12 +1404,12 @@ pub fn SettingsPanel(
                                 input {
                                     r#type: "range",
                                     min: "8",
-                                    max: "24",
+                                    max: "36",
                                     value: "{current_settings.raid_overlay.effect_size as i32}",
                                     oninput: move |e| {
                                         if let Ok(val) = e.value().parse::<f32>() {
                                             let mut new_settings = draft_settings();
-                                            new_settings.raid_overlay.effect_size = val.clamp(8.0, 24.0);
+                                            new_settings.raid_overlay.effect_size = val.clamp(8.0, 36.0);
                                             update_draft(new_settings);
                                         }
                                     }
@@ -1728,15 +1771,17 @@ pub fn SettingsPanel(
                 }
             }
 
+            } // End settings-content
+
             // ─────────────────────────────────────────────────────────────────
             // Save button
             // ─────────────────────────────────────────────────────────────────
             div { class: "settings-footer",
                 button {
-                    class: if has_changes() { "btn btn-save" } else { "btn btn-save btn-disabled" },
+                    class: if has_changes() { "btn btn-save btn-unsaved" } else { "btn btn-save" },
                     disabled: !has_changes(),
                     onclick: save_to_backend,
-                    "Save Settings"
+                    if has_changes() { "Save Changes *" } else { "Save" }
                 }
                 if !save_status().is_empty() {
                     span { class: "save-status", "{save_status()}" }

@@ -3,6 +3,13 @@
 //! Helper functions used across the frontend.
 
 use crate::types::Color;
+use wasm_bindgen::JsValue;
+
+/// Set a property on a JS object. Silently ignores failures.
+/// Use this instead of js_sys::Reflect::set().unwrap() to prevent panics.
+pub fn js_set(obj: &JsValue, key: &str, value: &JsValue) {
+    let _ = js_sys::Reflect::set(obj, &JsValue::from_str(key), value);
+}
 
 /// Parse a hex color string (e.g., "#ff0000") to RGBA bytes
 pub fn parse_hex_color(hex: &str) -> Option<Color> {

@@ -10,6 +10,7 @@ use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::api;
 use crate::components::class_icons::{get_class_icon, get_role_icon};
+use crate::components::{use_toast, ToastSeverity};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Data Types (mirrors backend)
@@ -57,6 +58,8 @@ pub struct EncounterSummary {
     pub display_name: String,
     pub encounter_type: String,
     pub start_time: Option<String>,
+    #[serde(default)]
+    pub end_time: Option<String>,
     pub duration_seconds: i64,
     pub success: bool,
     pub area_name: String,
@@ -79,11 +82,12 @@ fn format_duration(secs: i64) -> String {
     format!("{}:{:02}", mins, secs)
 }
 
+/// Format number with 2 decimal places
 fn format_number(n: i64) -> String {
     if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
+        format!("{:.2}M", n as f64 / 1_000_000.0)
     } else if n >= 1_000 {
-        format!("{:.1}K", n as f64 / 1_000.0)
+        format!("{:.2}K", n as f64 / 1_000.0)
     } else {
         n.to_string()
     }
@@ -200,10 +204,13 @@ pub fn HistoryPanel(props: HistoryPanelProps) -> Element {
                             onchange: move |e| {
                                 let checked = e.checked();
                                 show_only_bosses.set(checked);
+                                let mut toast = use_toast();
                                 spawn(async move {
                                     if let Some(mut cfg) = api::get_config().await {
                                         cfg.show_only_bosses = checked;
-                                        api::update_config(&cfg).await;
+                                        if let Err(err) = api::update_config(&cfg).await {
+                                            toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                        }
                                     }
                                 });
                             }
@@ -439,6 +446,12 @@ fn EncounterDetail(encounter: EncounterSummary) -> Element {
                 span { class: "detail-item",
                     i { class: "fa-solid fa-stopwatch" }
                     " {format_duration(encounter.duration_seconds)}"
+                }
+                if let Some(end_time) = &encounter.end_time {
+                    span { class: "detail-item",
+                        i { class: "fa-solid fa-flag-checkered" }
+                        " {end_time}"
+                    }
                 }
                 if !npc_list.is_empty() {
                     span { class: "detail-item npc-list",

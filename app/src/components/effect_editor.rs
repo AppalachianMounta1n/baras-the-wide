@@ -11,6 +11,7 @@ use super::encounter_editor::InlineNameCreator;
 use super::encounter_editor::triggers::{
     AbilitySelectorEditor, EffectSelectorEditor, EntityFilterDropdown,
 };
+use super::{use_toast, ToastSeverity};
 use crate::api;
 use crate::types::{
     AbilitySelector, AlertTrigger, AudioConfig, DisplayTarget, EffectListItem, EffectSelector,
@@ -226,74 +227,6 @@ impl EffectTriggerType {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Player Stats Bar
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Inline bar for alacrity and latency settings
-#[component]
-fn PlayerStatsBar() -> Element {
-    let mut alacrity = use_signal(|| 0.0f32);
-    let mut latency = use_signal(|| 0u16);
-    let mut loaded = use_signal(|| false);
-
-    // Load from config on mount
-    use_effect(move || {
-        if !loaded() {
-            spawn(async move {
-                if let Some(config) = api::get_config().await {
-                    alacrity.set(config.alacrity_percent);
-                    latency.set(config.latency_ms);
-                    loaded.set(true);
-                }
-            });
-        }
-    });
-
-    let save_config = move || {
-        let new_alacrity = alacrity();
-        let new_latency = latency();
-        spawn(async move {
-            if let Some(mut config) = api::get_config().await {
-                config.alacrity_percent = new_alacrity;
-                config.latency_ms = new_latency;
-                api::update_config(&config).await;
-            }
-        });
-    };
-
-    rsx! {
-        div { class: "player-stats-bar",
-            div { class: "stat-input",
-                label { "Alacrity %" }
-                input {
-                    r#type: "text",
-                    value: "{alacrity():.1}",
-                    onchange: move |e| {
-                        if let Ok(val) = e.value().parse::<f32>() {
-                            alacrity.set(val.clamp(0.0, 30.0));
-                            save_config();
-                        }
-                    }
-                }
-            }
-            div { class: "stat-input",
-                label { "Latency (ms)" }
-                input {
-                    r#type: "text",
-                    value: "{latency()}",
-                    onchange: move |e| {
-                        if let Ok(val) = e.value().parse::<u16>() {
-                            latency.set(val.clamp(0, 500));
-                            save_config();
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Main Panel
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -384,17 +317,20 @@ pub fn EffectEditorPanel() -> Element {
 
     let on_duplicate = move |effect: EffectListItem| {
         spawn(async move {
-            if let Some(new_effect) = api::duplicate_effect_definition(&effect.id).await {
-                let new_id = new_effect.id.clone();
-                let mut current = effects();
-                current.push(new_effect);
-                effects.set(current);
-                expanded_effect.set(Some(new_id));
-                save_status.set("Duplicated".to_string());
-                status_is_error.set(false);
-            } else {
-                save_status.set("Failed to duplicate".to_string());
-                status_is_error.set(true);
+            match api::duplicate_effect_definition(&effect.id).await {
+                Ok(new_effect) => {
+                    let new_id = new_effect.id.clone();
+                    let mut current = effects();
+                    current.push(new_effect);
+                    effects.set(current);
+                    expanded_effect.set(Some(new_id));
+                    save_status.set("Duplicated".to_string());
+                    status_is_error.set(false);
+                }
+                Err(e) => {
+                    save_status.set(e);
+                    status_is_error.set(true);
+                }
             }
         });
     };
@@ -474,9 +410,6 @@ pub fn EffectEditorPanel() -> Element {
                 }
             }
 
-            // Player stats for duration calculations
-            PlayerStatsBar {}
-
             // Search bar
             div { class: "effect-search-bar",
                 input {
@@ -492,12 +425,16 @@ pub fn EffectEditorPanel() -> Element {
             if loading() {
                 div { class: "effect-loading", "Loading effects..." }
             } else if filtered_effects().is_empty() && draft_effect().is_none() {
-                div { class: "effect-empty",
-                    if effects().is_empty() {
-                        "No effect definitions found"
-                    } else {
-                        "No effects match your search"
+                if effects().is_empty() {
+                    div { class: "empty-state-guidance",
+                        div { class: "empty-state-icon",
+                            i { class: "fa-solid fa-sparkles" }
+                        }
+                        p { "No effects defined yet" }
+                        p { class: "hint", "Click \"+ New Effect\" above to create your first effect" }
                     }
+                } else {
+                    div { class: "effect-empty", "No effects match your search" }
                 }
             } else {
                 div { class: "effect-list",
@@ -731,79 +668,109 @@ fn EffectEditForm(
                 div { class: "effect-edit-grid",
                     // ═══ LEFT COLUMN: Main Effect Settings ═══════════════════════════
                     div { class: "effect-edit-left",
-                        // Effect ID (read-only) - hidden for drafts
-                        if !is_draft {
-                            div { class: "form-row-hz",
-                                label { "Effect ID" }
-                                code { class: "effect-id-display", "{effect.id}" }
+                        // ─── Identity Card ───────────────────────────────────────────
+                        div { class: "form-card",
+                            div { class: "form-card-header",
+                                i { class: "fa-solid fa-tag" }
+                                span { "Identity" }
                             }
-                        }
-
-                        // Name
-                        div { class: "form-row-hz",
-                            label { "Name" }
-                            input {
-                                r#type: "text",
-                                class: "input-inline",
-                                style: "width: 200px;",
-                                value: "{draft().name}",
-                                oninput: move |e| {
-                                    let mut d = draft();
-                                    d.name = e.value();
-                                    draft.set(d);
+                            div { class: "form-card-content",
+                                // Effect ID (read-only) - hidden for drafts
+                                if !is_draft {
+                                    div { class: "form-row-hz",
+                                        label { "Effect ID" }
+                                        code { class: "effect-id-display", "{effect.id}" }
+                                    }
                                 }
-                            }
-                        }
 
-                        // Display Text
-                        div { class: "form-row-hz",
-                            label { "Display Text" }
-                            input {
-                                r#type: "text",
-                                class: "input-inline",
-                                style: "width: 200px;",
-                                placeholder: "{draft().name}",
-                                value: "{draft().display_text.clone().unwrap_or_default()}",
-                                oninput: move |e| {
-                                    let mut d = draft();
-                                    d.display_text = if e.value().is_empty() { None } else { Some(e.value()) };
-                                    draft.set(d);
+                                // Name
+                                div { class: "form-row-hz",
+                                    label { "Name" }
+                                    input {
+                                        r#type: "text",
+                                        class: "input-inline",
+                                        style: "width: 200px;",
+                                        value: "{draft().name}",
+                                        oninput: move |e| {
+                                            let mut d = draft();
+                                            d.name = e.value();
+                                            draft.set(d);
+                                        }
+                                    }
                                 }
-                            }
-                        }
 
-                        // Display Target (prominent position - determines which overlay shows this effect)
-                        div { class: "form-row-hz",
-                            label { "Display Target" }
-                            select {
-                                class: "select-inline",
-                                value: "{draft().display_target.label()}",
-                                onchange: move |e| {
-                                    let mut d = draft();
-                                    d.display_target = match e.value().as_str() {
-                                        "None" => DisplayTarget::None,
-                                        "Raid Frames" => DisplayTarget::RaidFrames,
-                                        "Effects A" => DisplayTarget::EffectsA,
-                                        "Effects B" => DisplayTarget::EffectsB,
-                                        "Cooldowns" => DisplayTarget::Cooldowns,
-                                        "DOT Tracker" => DisplayTarget::DotTracker,
-                                        "Effects Overlay" => DisplayTarget::EffectsOverlay,
-                                        _ => d.display_target,
-                                    };
-                                    draft.set(d);
-                                },
-                                for target in DisplayTarget::all() {
-                                    option {
-                                        value: "{target.label()}",
-                                        "{target.label()}"
+                                // Display Text
+                                div { class: "form-row-hz",
+                                    label { "Display Text" }
+                                    input {
+                                        r#type: "text",
+                                        class: "input-inline",
+                                        style: "width: 200px;",
+                                        placeholder: "{draft().name}",
+                                        value: "{draft().display_text.clone().unwrap_or_default()}",
+                                        oninput: move |e| {
+                                            let mut d = draft();
+                                            d.display_text = if e.value().is_empty() { None } else { Some(e.value()) };
+                                            draft.set(d);
+                                        }
+                                    }
+                                }
+
+                                // Display Target (prominent position - determines which overlay shows this effect)
+                                div { class: "form-row-hz",
+                                    label { class: "flex items-center",
+                                        "Display Target"
+                                        span {
+                                            class: "help-icon",
+                                            title: "Sets which overlay displays this effect when triggered",
+                                            "?"
+                                        }
+                                    }
+                                    select {
+                                        class: "select-inline",
+                                        value: "{draft().display_target.label()}",
+                                        onchange: move |e| {
+                                            let mut d = draft();
+                                            d.display_target = match e.value().as_str() {
+                                                "None" => DisplayTarget::None,
+                                                "Raid Frames" => DisplayTarget::RaidFrames,
+                                                "Effects A" => DisplayTarget::EffectsA,
+                                                "Effects B" => DisplayTarget::EffectsB,
+                                                "Cooldowns" => DisplayTarget::Cooldowns,
+                                                "DOT Tracker" => DisplayTarget::DotTracker,
+                                                "Effects Overlay" => DisplayTarget::EffectsOverlay,
+                                                _ => d.display_target,
+                                            };
+                                            draft.set(d);
+                                        },
+                                        for target in DisplayTarget::all() {
+                                            option {
+                                                value: "{target.label()}",
+                                                "{target.label()}"
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
 
+                        // ─── Trigger Card ────────────────────────────────────────────
+                        div { class: "form-card",
+                            div { class: "form-card-header",
+                                i { class: "fa-solid fa-bolt" }
+                                span { "Trigger" }
+                            }
+                            div { class: "form-card-content",
                         // Trigger Type and When
                         div { class: "form-row-hz",
-                            label { "Trigger" }
+                            label { class: "flex items-center",
+                                "Trigger"
+                                span {
+                                    class: "help-icon",
+                                    title: "How this effect activates: Effect-based tracks game buffs/debuffs, Ability-based tracks when abilities are cast",
+                                    "?"
+                                }
+                            }
                             select {
                                 class: "select-inline",
                                 value: "{trigger_type().label()}",
@@ -859,7 +826,14 @@ fn EffectEditForm(
 
                         // Source and Target filters
                         div { class: "form-row-hz",
-                            label { "Source" }
+                            label { class: "flex items-center",
+                                "Source"
+                                span {
+                                    class: "help-icon",
+                                    title: "Who must cast/apply for this effect to trigger (e.g., Local Player = you, Any = anyone)",
+                                    "?"
+                                }
+                            }
                             EntityFilterDropdown {
                                 label: "",
                                 value: get_trigger_filters(&draft().trigger).0.clone(),
@@ -870,7 +844,14 @@ fn EffectEditForm(
                                     draft.set(d);
                                 }
                             }
-                            label { "Target" }
+                            label { class: "flex items-center",
+                                "Target"
+                                span {
+                                    class: "help-icon",
+                                    title: "Who must receive this effect for it to trigger (e.g., Any = track on anyone, Local Player = only on you)",
+                                    "?"
+                                }
+                            }
                             EntityFilterDropdown {
                                 label: "",
                                 value: get_trigger_filters(&draft().trigger).1.clone(),
@@ -881,44 +862,6 @@ fn EffectEditForm(
                                     draft.set(d);
                                 }
                             }
-                        }
-
-                        // Duration and Show at
-                        div { class: "form-row-hz",
-                            label { "Duration" }
-                            input {
-                                r#type: "number",
-                                class: "input-inline",
-                                style: "width: 70px;",
-                                step: "any",
-                                min: "0",
-                                value: "{draft().duration_secs.unwrap_or(0.0)}",
-                                oninput: move |e| {
-                                    let mut d = draft();
-                                    d.duration_secs = e.value().parse::<f32>().ok().filter(|&v| v > 0.0);
-                                    draft.set(d);
-                                }
-                            }
-                            span { class: "text-muted", "sec" }
-                            label { "Show at" }
-                            input {
-                                r#type: "number",
-                                class: "input-inline",
-                                style: "width: 50px;",
-                                step: "any",
-                                min: "0",
-                                max: "{draft().duration_secs.unwrap_or(999.0)}",
-                                value: "{draft().show_at_secs}",
-                                oninput: move |e| {
-                                    if let Ok(val) = e.value().parse::<f32>() {
-                                        let mut d = draft();
-                                        let max_val = d.duration_secs.unwrap_or(f32::MAX);
-                                        d.show_at_secs = val.min(max_val).max(0.0);
-                                        draft.set(d);
-                                    }
-                                }
-                            }
-                            span { class: "text-sm text-secondary", "sec remaining" }
                         }
 
                         // Effects or Trigger Abilities (based on trigger type)
@@ -954,6 +897,69 @@ fn EffectEditForm(
                                     let mut d = draft();
                                     d.refresh_abilities = ids;
                                     draft.set(d);
+                                }
+                            }
+                        }
+                            }
+                        }
+
+                        // ─── Timing Card ─────────────────────────────────────────────
+                        div { class: "form-card",
+                            div { class: "form-card-header",
+                                i { class: "fa-solid fa-clock" }
+                                span { "Timing" }
+                            }
+                            div { class: "form-card-content",
+                                // Duration and Show at
+                                div { class: "form-row-hz",
+                                    label { class: "flex items-center",
+                                        "Duration"
+                                        span {
+                                            class: "help-icon",
+                                            title: "How long the effect displays (seconds). Set to 0 for effects that track via game events",
+                                            "?"
+                                        }
+                                    }
+                                    input {
+                                        r#type: "number",
+                                        class: "input-inline",
+                                        style: "width: 70px;",
+                                        step: "any",
+                                        min: "0",
+                                        value: "{draft().duration_secs.unwrap_or(0.0)}",
+                                        oninput: move |e| {
+                                            let mut d = draft();
+                                            d.duration_secs = e.value().parse::<f32>().ok().filter(|&v| v > 0.0);
+                                            draft.set(d);
+                                        }
+                                    }
+                                    span { class: "text-muted", "sec" }
+                                    label { class: "flex items-center",
+                                        "Show at"
+                                        span {
+                                            class: "help-icon",
+                                            title: "Only display the effect when this many seconds remain",
+                                            "?"
+                                        }
+                                    }
+                                    input {
+                                        r#type: "number",
+                                        class: "input-inline",
+                                        style: "width: 50px;",
+                                        step: "any",
+                                        min: "0",
+                                        max: "{draft().duration_secs.unwrap_or(999.0)}",
+                                        value: "{draft().show_at_secs}",
+                                        oninput: move |e| {
+                                            if let Ok(val) = e.value().parse::<f32>() {
+                                                let mut d = draft();
+                                                let max_val = d.duration_secs.unwrap_or(f32::MAX);
+                                                d.show_at_secs = val.min(max_val).max(0.0);
+                                                draft.set(d);
+                                            }
+                                        }
+                                    }
+                                    span { class: "text-sm text-secondary", "sec remaining" }
                                 }
                             }
                         }
@@ -1091,11 +1097,12 @@ fn EffectEditForm(
 
                         // Hide for Cooldowns - they always ignore effect removed events
                         if draft().display_target != DisplayTarget::Cooldowns {
-                            label { class: "flex items-center gap-xs text-sm",
+                            label {
+                                class: "flex items-center gap-xs text-sm",
+                                title: "Use the duration timer instead of tracking when the game removes the effect",
                                 input {
                                     r#type: "checkbox",
                                     checked: draft().ignore_effect_removed,
-                                    title: "Ignore game EffectRemoved - only expire via duration timer",
                                     onchange: move |e| {
                                         let mut d = draft();
                                         d.ignore_effect_removed = e.checked();
@@ -1106,7 +1113,9 @@ fn EffectEditForm(
                             }
                         }
 
-                        label { class: "flex items-center gap-xs text-sm",
+                        label {
+                            class: "flex items-center gap-xs text-sm",
+                            title: "Reset timer when effect stacks change",
                             input {
                                 r#type: "checkbox",
                                 checked: draft().is_refreshed_on_modify,
@@ -1119,7 +1128,9 @@ fn EffectEditForm(
                             "Refresh Duration When Charges Modified"
                         }
 
-                        label { class: "flex items-center gap-xs text-sm",
+                        label {
+                            class: "flex items-center gap-xs text-sm",
+                            title: "Keep showing effect after player dies",
                             input {
                                 r#type: "checkbox",
                                 checked: draft().persist_past_death,
@@ -1132,7 +1143,9 @@ fn EffectEditForm(
                             "Persist Past Death"
                         }
 
-                        label { class: "flex items-center gap-xs text-sm",
+                        label {
+                            class: "flex items-center gap-xs text-sm",
+                            title: "Continue tracking this effect between combat encounters",
                             input {
                                 r#type: "checkbox",
                                 checked: draft().track_outside_combat,
@@ -1161,7 +1174,14 @@ fn EffectEditForm(
                         }
 
                         div { class: "form-row-hz",
-                            label { "Alert On" }
+                            label { class: "flex items-center",
+                                "Alert On"
+                                span {
+                                    class: "help-icon",
+                                    title: "When to show alert text: on effect start, on effect end, or never",
+                                    "?"
+                                }
+                            }
                             select {
                                 class: "select-inline",
                                 value: "{draft().alert_on.label()}",

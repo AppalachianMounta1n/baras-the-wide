@@ -388,11 +388,9 @@ impl OverlayManager {
         // Sync move mode
         Self::sync_move_mode(&tx, current_move_mode).await;
 
-        // Send initial data if tailing
-        if service.is_tailing().await {
-            let combat_data = service.current_combat_data().await;
-            Self::send_initial_data(kind, &tx, combat_data.as_ref()).await;
-        }
+        // Send initial data from cache if available (regardless of tailing state)
+        let combat_data = service.current_combat_data().await;
+        Self::send_initial_data(kind, &tx, combat_data.as_ref()).await;
 
         // Save position if needed
         if needs_monitor_save {
@@ -456,12 +454,8 @@ impl OverlayManager {
 
         let enabled_keys = config.overlay_settings.enabled_types();
 
-        // Get combat data once for all overlays
-        let combat_data = if service.is_tailing().await {
-            service.current_combat_data().await
-        } else {
-            None
-        };
+        // Get combat data once for all overlays (always try, regardless of tailing state)
+        let combat_data = service.current_combat_data().await;
 
         let mut shown_metric_types = Vec::new();
         let mut needs_monitor_save = Vec::new();
@@ -601,12 +595,8 @@ impl OverlayManager {
 
         let enabled_keys = config.overlay_settings.enabled_types();
 
-        // Get combat data once for all overlays
-        let combat_data = if service.is_tailing().await {
-            service.current_combat_data().await
-        } else {
-            None
-        };
+        // Get combat data once for all overlays (always try, regardless of tailing state)
+        let combat_data = service.current_combat_data().await;
 
         for key in &enabled_keys {
             let kind = match key.as_str() {
@@ -739,6 +729,7 @@ impl OverlayManager {
     ) -> Result<bool, String> {
         let config = service.config().await;
         let settings = &config.overlay_settings;
+        let globally_visible = settings.overlays_visible;
 
         // Handle each overlay type
         for overlay_type in Self::all_overlay_types() {
@@ -756,8 +747,8 @@ impl OverlayManager {
                 {
                     let _ = handle.tx.try_send(OverlayCommand::Shutdown);
                 }
-            } else if !running && enabled {
-                // Start if not running but enabled
+            } else if !running && enabled && globally_visible {
+                // Start if not running but enabled (only if global visibility is on)
                 if let Ok(result) = Self::spawn(overlay_type, settings)
                     && let Ok(mut s) = state.lock()
                 {
@@ -779,11 +770,21 @@ impl OverlayManager {
             was_running
         };
 
-        if (raid_was_running || raid_enabled)
+        // Only respawn raid if global visibility is on
+        let raid_respawned = if globally_visible
+            && (raid_was_running || raid_enabled)
             && let Ok(result) = Self::spawn(OverlayType::Raid, settings)
             && let Ok(mut s) = state.lock()
         {
             s.insert(result.handle);
+            true
+        } else {
+            false
+        };
+
+        // Send current raid frame data to the newly spawned overlay
+        if raid_respawned {
+            service.refresh_raid_frames().await;
         }
 
         // Update config for all running overlays

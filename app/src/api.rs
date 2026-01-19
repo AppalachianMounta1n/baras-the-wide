@@ -8,6 +8,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 use crate::types::{AppConfig, OverlayStatus, OverlayType, SessionInfo};
+use crate::utils::js_set;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Raw Tauri Bindings
@@ -15,9 +16,6 @@ use crate::types::{AppConfig, OverlayStatus, OverlayType, SessionInfo};
 
 #[wasm_bindgen]
 extern "C" {
-    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"])]
-    async fn invoke(cmd: &str, args: JsValue) -> JsValue;
-
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "event"], js_name = "listen")]
     pub async fn tauri_listen(event: &str, handler: &Closure<dyn FnMut(JsValue)>) -> JsValue;
 
@@ -39,23 +37,25 @@ extern "C" {
 fn build_args<T: Serialize + ?Sized>(key: &str, value: &T) -> JsValue {
     let args = serde_wasm_bindgen::to_value(value).unwrap_or(JsValue::NULL);
     let obj = js_sys::Object::new();
-    js_sys::Reflect::set(&obj, &JsValue::from_str(key), &args).unwrap();
+    js_set(&obj, key, &args);
     obj.into()
 }
 
-/// Deserialize a JsValue into a type, returning None on failure
+/// Deserialize a JsValue into a type, returning None on failure (no console logging)
 fn from_js<T: serde::de::DeserializeOwned>(value: JsValue) -> Option<T> {
-    match serde_wasm_bindgen::from_value(value) {
-        Ok(v) => Some(v),
-        Err(e) => {
-            web_sys::console::error_1(&format!("[API] Deserialization error: {:?}", e).into());
-            None
-        }
-    }
+    serde_wasm_bindgen::from_value(value).ok()
 }
 
-/// Invoke a Tauri command that may return an error, catching the rejection
-/// Returns Ok(JsValue) on success, Err(String) on failure
+/// Invoke a Tauri command, catching any errors silently.
+/// Returns JsValue on success, JsValue::NULL on failure.
+/// Use this for read operations where errors can be safely ignored.
+async fn invoke(cmd: &str, args: JsValue) -> JsValue {
+    try_invoke(cmd, args).await.unwrap_or(JsValue::NULL)
+}
+
+/// Invoke a Tauri command that may return an error, catching the rejection.
+/// Returns Ok(JsValue) on success, Err(String) on failure.
+/// Use this for mutations or when you need to handle/display errors.
 async fn try_invoke(cmd: &str, args: JsValue) -> Result<JsValue, String> {
     use js_sys::Promise;
     use wasm_bindgen_futures::JsFuture;
@@ -93,9 +93,9 @@ pub async fn get_config() -> Option<AppConfig> {
 }
 
 /// Update the application configuration
-pub async fn update_config(config: &AppConfig) -> bool {
-    let _result = invoke("update_config", build_args("config", config)).await;
-    true
+pub async fn update_config(config: &AppConfig) -> Result<(), String> {
+    try_invoke("update_config", build_args("config", config)).await?;
+    Ok(())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -180,6 +180,12 @@ pub async fn refresh_overlay_settings() -> bool {
     result.as_bool().unwrap_or(false)
 }
 
+/// Preview overlay settings without persisting (for live preview)
+pub async fn preview_overlay_settings(settings: &crate::types::OverlaySettings) -> bool {
+    let result = invoke("preview_overlay_settings", build_args("settings", settings)).await;
+    result.as_bool().unwrap_or(false)
+}
+
 /// Clear all players from raid registry
 pub async fn clear_raid_registry() {
     let _ = invoke("clear_raid_registry", JsValue::NULL).await;
@@ -241,21 +247,11 @@ pub async fn get_log_files() -> JsValue {
 /// Clean up log files. Returns (empty_deleted, old_deleted).
 pub async fn cleanup_logs(delete_empty: bool, retention_days: Option<u32>) -> (u32, u32) {
     let args = js_sys::Object::new();
-    js_sys::Reflect::set(
-        &args,
-        &JsValue::from_str("deleteEmpty"),
-        &JsValue::from_bool(delete_empty),
-    )
-    .unwrap();
+    js_set(&args, "deleteEmpty", &JsValue::from_bool(delete_empty));
     if let Some(days) = retention_days {
-        js_sys::Reflect::set(
-            &args,
-            &JsValue::from_str("retentionDays"),
-            &JsValue::from_f64(days as f64),
-        )
-        .unwrap();
+        js_set(&args, "retentionDays", &JsValue::from_f64(days as f64));
     } else {
-        js_sys::Reflect::set(&args, &JsValue::from_str("retentionDays"), &JsValue::NULL).unwrap();
+        js_set(&args, "retentionDays", &JsValue::NULL);
     }
     let result = invoke("cleanup_logs", args.into()).await;
     from_js(result).unwrap_or((0, 0))
@@ -271,15 +267,15 @@ pub async fn refresh_file_sizes() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Open a historical log file (pauses live tailing)
-pub async fn open_historical_file(path: &str) -> bool {
-    let _result = invoke("open_historical_file", build_args("path", &path)).await;
-    true
+pub async fn open_historical_file(path: &str) -> Result<(), String> {
+    try_invoke("open_historical_file", build_args("path", &path)).await?;
+    Ok(())
 }
 
 /// Resume live tailing mode
-pub async fn resume_live_tailing() -> bool {
-    let _result = invoke("resume_live_tailing", JsValue::NULL).await;
-    true
+pub async fn resume_live_tailing() -> Result<(), String> {
+    try_invoke("resume_live_tailing", JsValue::NULL).await?;
+    Ok(())
 }
 
 /// Check if in live tailing mode
@@ -305,21 +301,21 @@ pub async fn get_active_profile() -> Option<String> {
 }
 
 /// Save current settings to a profile
-pub async fn save_profile(name: &str) -> bool {
-    let _result = invoke("save_profile", build_args("name", &name)).await;
-    true
+pub async fn save_profile(name: &str) -> Result<(), String> {
+    try_invoke("save_profile", build_args("name", &name)).await?;
+    Ok(())
 }
 
 /// Load a profile by name
-pub async fn load_profile(name: &str) -> bool {
-    let _result = invoke("load_profile", build_args("name", &name)).await;
-    true
+pub async fn load_profile(name: &str) -> Result<(), String> {
+    try_invoke("load_profile", build_args("name", &name)).await?;
+    Ok(())
 }
 
 /// Delete a profile by name
-pub async fn delete_profile(name: &str) -> bool {
-    let _result = invoke("delete_profile", build_args("name", &name)).await;
-    true
+pub async fn delete_profile(name: &str) -> Result<(), String> {
+    try_invoke("delete_profile", build_args("name", &name)).await?;
+    Ok(())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -329,13 +325,8 @@ pub async fn delete_profile(name: &str) -> bool {
 /// Open a directory picker dialog
 pub async fn pick_directory(title: &str) -> Option<String> {
     let options = js_sys::Object::new();
-    js_sys::Reflect::set(&options, &JsValue::from_str("directory"), &JsValue::TRUE).unwrap();
-    js_sys::Reflect::set(
-        &options,
-        &JsValue::from_str("title"),
-        &JsValue::from_str(title),
-    )
-    .unwrap();
+    js_set(&options, "directory", &JsValue::TRUE);
+    js_set(&options, "title", &JsValue::from_str(title));
 
     let result = open_dialog(options.into()).await;
     result.as_string()
@@ -381,20 +372,10 @@ pub async fn create_encounter_item(
     item: &EncounterItem,
 ) -> Result<EncounterItem, String> {
     let obj = js_sys::Object::new();
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("bossId"),
-        &JsValue::from_str(boss_id),
-    )
-    .unwrap();
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("filePath"),
-        &JsValue::from_str(file_path),
-    )
-    .unwrap();
+    js_set(&obj, "bossId", &JsValue::from_str(boss_id));
+    js_set(&obj, "filePath", &JsValue::from_str(file_path));
     let item_js = serde_wasm_bindgen::to_value(item).unwrap_or(JsValue::NULL);
-    js_sys::Reflect::set(&obj, &JsValue::from_str("item"), &item_js).unwrap();
+    js_set(&obj, "item", &item_js);
 
     let result = try_invoke("create_encounter_item", obj.into()).await?;
     from_js(result).ok_or_else(|| "Failed to deserialize created item".to_string())
@@ -408,29 +389,14 @@ pub async fn update_encounter_item(
     original_id: Option<&str>,
 ) -> Result<EncounterItem, String> {
     let obj = js_sys::Object::new();
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("bossId"),
-        &JsValue::from_str(boss_id),
-    )
-    .unwrap();
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("filePath"),
-        &JsValue::from_str(file_path),
-    )
-    .unwrap();
+    js_set(&obj, "bossId", &JsValue::from_str(boss_id));
+    js_set(&obj, "filePath", &JsValue::from_str(file_path));
     let item_js = serde_wasm_bindgen::to_value(item).unwrap_or(JsValue::NULL);
-    js_sys::Reflect::set(&obj, &JsValue::from_str("item"), &item_js).unwrap();
+    js_set(&obj, "item", &item_js);
     if let Some(orig) = original_id {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("originalId"),
-            &JsValue::from_str(orig),
-        )
-        .unwrap();
+        js_set(&obj, "originalId", &JsValue::from_str(orig));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("originalId"), &JsValue::NULL).unwrap();
+        js_set(&obj, "originalId", &JsValue::NULL);
     }
 
     let result = try_invoke("update_encounter_item", obj.into()).await?;
@@ -445,30 +411,10 @@ pub async fn delete_encounter_item(
     file_path: &str,
 ) -> Result<(), String> {
     let obj = js_sys::Object::new();
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("itemType"),
-        &JsValue::from_str(item_type),
-    )
-    .unwrap();
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("itemId"),
-        &JsValue::from_str(item_id),
-    )
-    .unwrap();
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("bossId"),
-        &JsValue::from_str(boss_id),
-    )
-    .unwrap();
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("filePath"),
-        &JsValue::from_str(file_path),
-    )
-    .unwrap();
+    js_set(&obj, "itemType", &JsValue::from_str(item_type));
+    js_set(&obj, "itemId", &JsValue::from_str(item_id));
+    js_set(&obj, "bossId", &JsValue::from_str(boss_id));
+    js_set(&obj, "filePath", &JsValue::from_str(file_path));
 
     try_invoke("delete_encounter_item", obj.into()).await?;
     Ok(())
@@ -485,29 +431,14 @@ pub async fn duplicate_encounter_timer(
     timer_id: &str,
     boss_id: &str,
     file_path: &str,
-) -> Option<BossTimerDefinition> {
+) -> Result<BossTimerDefinition, String> {
     let obj = js_sys::Object::new();
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("timerId"),
-        &JsValue::from_str(timer_id),
-    )
-    .unwrap();
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("bossId"),
-        &JsValue::from_str(boss_id),
-    )
-    .unwrap();
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("filePath"),
-        &JsValue::from_str(file_path),
-    )
-    .unwrap();
+    js_set(&obj, "timerId", &JsValue::from_str(timer_id));
+    js_set(&obj, "bossId", &JsValue::from_str(boss_id));
+    js_set(&obj, "filePath", &JsValue::from_str(file_path));
 
-    let result = invoke("duplicate_encounter_timer", obj.into()).await;
-    from_js(result)
+    let result = try_invoke("duplicate_encounter_timer", obj.into()).await?;
+    from_js(result).ok_or_else(|| "Failed to parse timer response".to_string())
 }
 
 /// Get area index for lazy-loading timer editor
@@ -519,17 +450,17 @@ pub async fn get_area_index() -> Option<Vec<AreaListItem>> {
 use crate::types::{BossEditItem, NewAreaRequest};
 
 /// Create a new boss in an area file
-pub async fn create_boss(boss: &BossEditItem) -> Option<BossEditItem> {
+pub async fn create_boss(boss: &BossEditItem) -> Result<BossEditItem, String> {
     let args = build_args("boss", boss);
-    let result = invoke("create_boss", args).await;
-    from_js(result)
+    let result = try_invoke("create_boss", args).await?;
+    from_js(result).ok_or_else(|| "Failed to parse boss response".to_string())
 }
 
 /// Create a new area file
-pub async fn create_area(area: &NewAreaRequest) -> Option<String> {
+pub async fn create_area(area: &NewAreaRequest) -> Result<String, String> {
     let args = build_args("area", area);
-    let result = invoke("create_area", args).await;
-    from_js(result)
+    let result = try_invoke("create_area", args).await?;
+    from_js(result).ok_or_else(|| "Failed to parse area response".to_string())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -561,10 +492,10 @@ pub async fn delete_effect_definition(effect_id: &str) -> Result<(), String> {
 }
 
 /// Duplicate an effect
-pub async fn duplicate_effect_definition(effect_id: &str) -> Option<EffectListItem> {
+pub async fn duplicate_effect_definition(effect_id: &str) -> Result<EffectListItem, String> {
     let args = build_args("effectId", effect_id);
-    let result = invoke("duplicate_effect_definition", args).await;
-    from_js(result)
+    let result = try_invoke("duplicate_effect_definition", args).await?;
+    from_js(result).ok_or_else(|| "Failed to parse effect response".to_string())
 }
 
 /// Create a new effect
@@ -597,9 +528,9 @@ pub struct ParselyUploadResponse {
 }
 
 /// Upload a log file to Parsely.io
-pub async fn upload_to_parsely(path: &str) -> Option<ParselyUploadResponse> {
-    let result = invoke("upload_to_parsely", build_args("path", &path)).await;
-    from_js(result)
+pub async fn upload_to_parsely(path: &str) -> Result<ParselyUploadResponse, String> {
+    let result = try_invoke("upload_to_parsely", build_args("path", &path)).await?;
+    from_js(result).ok_or_else(|| "Failed to parse upload response".to_string())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -618,12 +549,8 @@ pub async fn pick_audio_file() -> Option<String> {
 
 /// Install available update (downloads, installs, restarts app)
 pub async fn install_update() -> Result<(), String> {
-    let result = invoke("install_update", JsValue::NULL).await;
-    if let Some(err) = result.as_string() {
-        Err(err)
-    } else {
-        Ok(())
-    }
+    try_invoke("install_update", JsValue::NULL).await?;
+    Ok(())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -653,54 +580,39 @@ pub async fn query_breakdown(
 ) -> Option<Vec<AbilityBreakdown>> {
     let obj = js_sys::Object::new();
     let tab_js = serde_wasm_bindgen::to_value(&tab).unwrap_or(JsValue::NULL);
-    js_sys::Reflect::set(&obj, &JsValue::from_str("tab"), &tab_js).unwrap();
+    js_set(&obj, "tab", &tab_js);
     if let Some(idx) = encounter_idx {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("encounterIdx"),
-            &JsValue::from_f64(idx as f64),
-        )
-        .unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::NULL).unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
     if let Some(name) = entity_name {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("entityName"),
-            &JsValue::from_str(name),
-        )
-        .unwrap();
+        js_set(&obj, "entityName", &JsValue::from_str(name));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("entityName"), &JsValue::NULL).unwrap();
+        js_set(&obj, "entityName", &JsValue::NULL);
     }
     if let Some(tr) = time_range {
         let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &tr_js).unwrap();
+        js_set(&obj, "timeRange", &tr_js);
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &JsValue::NULL).unwrap();
+        js_set(&obj, "timeRange", &JsValue::NULL);
     }
     if let Some(types) = entity_types {
         let types_js = serde_wasm_bindgen::to_value(types).unwrap_or(JsValue::NULL);
-        js_sys::Reflect::set(&obj, &JsValue::from_str("entityTypes"), &types_js).unwrap();
+        js_set(&obj, "entityTypes", &types_js);
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("entityTypes"), &JsValue::NULL).unwrap();
+        js_set(&obj, "entityTypes", &JsValue::NULL);
     }
     if let Some(mode) = breakdown_mode {
         let mode_js = serde_wasm_bindgen::to_value(mode).unwrap_or(JsValue::NULL);
-        js_sys::Reflect::set(&obj, &JsValue::from_str("breakdownMode"), &mode_js).unwrap();
+        js_set(&obj, "breakdownMode", &mode_js);
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("breakdownMode"), &JsValue::NULL).unwrap();
+        js_set(&obj, "breakdownMode", &JsValue::NULL);
     }
     if let Some(dur) = duration_secs {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("durationSecs"),
-            &JsValue::from_f64(dur as f64),
-        )
-        .unwrap();
+        js_set(&obj, "durationSecs", &JsValue::from_f64(dur as f64));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("durationSecs"), &JsValue::NULL).unwrap();
+        js_set(&obj, "durationSecs", &JsValue::NULL);
     }
     let result = invoke("query_breakdown", obj.into()).await;
     from_js(result)
@@ -714,22 +626,17 @@ pub async fn query_entity_breakdown(
 ) -> Option<Vec<EntityBreakdown>> {
     let obj = js_sys::Object::new();
     let tab_js = serde_wasm_bindgen::to_value(&tab).unwrap_or(JsValue::NULL);
-    js_sys::Reflect::set(&obj, &JsValue::from_str("tab"), &tab_js).unwrap();
+    js_set(&obj, "tab", &tab_js);
     if let Some(idx) = encounter_idx {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("encounterIdx"),
-            &JsValue::from_f64(idx as f64),
-        )
-        .unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::NULL).unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
     if let Some(tr) = time_range {
         let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &tr_js).unwrap();
+        js_set(&obj, "timeRange", &tr_js);
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &JsValue::NULL).unwrap();
+        js_set(&obj, "timeRange", &JsValue::NULL);
     }
     let result = invoke("query_entity_breakdown", obj.into()).await;
     from_js(result)
@@ -743,30 +650,20 @@ pub async fn query_raid_overview(
 ) -> Option<Vec<RaidOverviewRow>> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("encounterIdx"),
-            &JsValue::from_f64(idx as f64),
-        )
-        .unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::NULL).unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
     if let Some(tr) = time_range {
         let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &tr_js).unwrap();
+        js_set(&obj, "timeRange", &tr_js);
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &JsValue::NULL).unwrap();
+        js_set(&obj, "timeRange", &JsValue::NULL);
     }
     if let Some(dur) = duration_secs {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("durationSecs"),
-            &JsValue::from_f64(dur as f64),
-        )
-        .unwrap();
+        js_set(&obj, "durationSecs", &JsValue::from_f64(dur as f64));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("durationSecs"), &JsValue::NULL).unwrap();
+        js_set(&obj, "durationSecs", &JsValue::NULL);
     }
     let result = invoke("query_raid_overview", obj.into()).await;
     from_js(result)
@@ -781,36 +678,21 @@ pub async fn query_dps_over_time(
 ) -> Option<Vec<TimeSeriesPoint>> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("encounterIdx"),
-            &JsValue::from_f64(idx as f64),
-        )
-        .unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::NULL).unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("bucketMs"),
-        &JsValue::from_f64(bucket_ms as f64),
-    )
-    .unwrap();
+    js_set(&obj, "bucketMs", &JsValue::from_f64(bucket_ms as f64));
     if let Some(name) = source_name {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("sourceName"),
-            &JsValue::from_str(name),
-        )
-        .unwrap();
+        js_set(&obj, "sourceName", &JsValue::from_str(name));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("sourceName"), &JsValue::NULL).unwrap();
+        js_set(&obj, "sourceName", &JsValue::NULL);
     }
     if let Some(tr) = time_range {
         let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &tr_js).unwrap();
+        js_set(&obj, "timeRange", &tr_js);
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &JsValue::NULL).unwrap();
+        js_set(&obj, "timeRange", &JsValue::NULL);
     }
     let result = invoke("query_dps_over_time", obj.into()).await;
     from_js(result)
@@ -820,14 +702,9 @@ pub async fn query_dps_over_time(
 pub async fn query_encounter_timeline(encounter_idx: Option<u32>) -> Option<EncounterTimeline> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("encounterIdx"),
-            &JsValue::from_f64(idx as f64),
-        )
-        .unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::NULL).unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
     let result = invoke("query_encounter_timeline", obj.into()).await;
     from_js(result)
@@ -842,36 +719,21 @@ pub async fn query_hps_over_time(
 ) -> Option<Vec<TimeSeriesPoint>> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("encounterIdx"),
-            &JsValue::from_f64(idx as f64),
-        )
-        .unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::NULL).unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("bucketMs"),
-        &JsValue::from_f64(bucket_ms as f64),
-    )
-    .unwrap();
+    js_set(&obj, "bucketMs", &JsValue::from_f64(bucket_ms as f64));
     if let Some(name) = source_name {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("sourceName"),
-            &JsValue::from_str(name),
-        )
-        .unwrap();
+        js_set(&obj, "sourceName", &JsValue::from_str(name));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("sourceName"), &JsValue::NULL).unwrap();
+        js_set(&obj, "sourceName", &JsValue::NULL);
     }
     if let Some(tr) = time_range {
         let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &tr_js).unwrap();
+        js_set(&obj, "timeRange", &tr_js);
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &JsValue::NULL).unwrap();
+        js_set(&obj, "timeRange", &JsValue::NULL);
     }
     let result = invoke("query_hps_over_time", obj.into()).await;
     from_js(result)
@@ -886,36 +748,21 @@ pub async fn query_dtps_over_time(
 ) -> Option<Vec<TimeSeriesPoint>> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("encounterIdx"),
-            &JsValue::from_f64(idx as f64),
-        )
-        .unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::NULL).unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("bucketMs"),
-        &JsValue::from_f64(bucket_ms as f64),
-    )
-    .unwrap();
+    js_set(&obj, "bucketMs", &JsValue::from_f64(bucket_ms as f64));
     if let Some(name) = target_name {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("targetName"),
-            &JsValue::from_str(name),
-        )
-        .unwrap();
+        js_set(&obj, "targetName", &JsValue::from_str(name));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("targetName"), &JsValue::NULL).unwrap();
+        js_set(&obj, "targetName", &JsValue::NULL);
     }
     if let Some(tr) = time_range {
         let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &tr_js).unwrap();
+        js_set(&obj, "timeRange", &tr_js);
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &JsValue::NULL).unwrap();
+        js_set(&obj, "timeRange", &JsValue::NULL);
     }
     let result = invoke("query_dtps_over_time", obj.into()).await;
     from_js(result)
@@ -930,37 +777,22 @@ pub async fn query_effect_uptime(
 ) -> Option<Vec<EffectChartData>> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("encounterIdx"),
-            &JsValue::from_f64(idx as f64),
-        )
-        .unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::NULL).unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
     if let Some(name) = target_name {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("targetName"),
-            &JsValue::from_str(name),
-        )
-        .unwrap();
+        js_set(&obj, "targetName", &JsValue::from_str(name));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("targetName"), &JsValue::NULL).unwrap();
+        js_set(&obj, "targetName", &JsValue::NULL);
     }
     if let Some(tr) = time_range {
         let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &tr_js).unwrap();
+        js_set(&obj, "timeRange", &tr_js);
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &JsValue::NULL).unwrap();
+        js_set(&obj, "timeRange", &JsValue::NULL);
     }
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("durationSecs"),
-        &JsValue::from_f64(duration_secs as f64),
-    )
-    .unwrap();
+    js_set(&obj, "durationSecs", &JsValue::from_f64(duration_secs as f64));
     let result = invoke("query_effect_uptime", obj.into()).await;
     from_js(result)
 }
@@ -975,43 +807,23 @@ pub async fn query_effect_windows(
 ) -> Option<Vec<EffectWindow>> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("encounterIdx"),
-            &JsValue::from_f64(idx as f64),
-        )
-        .unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::NULL).unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("effectId"),
-        &JsValue::from_f64(effect_id as f64),
-    )
-    .unwrap();
+    js_set(&obj, "effectId", &JsValue::from_f64(effect_id as f64));
     if let Some(name) = target_name {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("targetName"),
-            &JsValue::from_str(name),
-        )
-        .unwrap();
+        js_set(&obj, "targetName", &JsValue::from_str(name));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("targetName"), &JsValue::NULL).unwrap();
+        js_set(&obj, "targetName", &JsValue::NULL);
     }
     if let Some(tr) = time_range {
         let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &tr_js).unwrap();
+        js_set(&obj, "timeRange", &tr_js);
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &JsValue::NULL).unwrap();
+        js_set(&obj, "timeRange", &JsValue::NULL);
     }
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("durationSecs"),
-        &JsValue::from_f64(duration_secs as f64),
-    )
-    .unwrap();
+    js_set(&obj, "durationSecs", &JsValue::from_f64(duration_secs as f64));
     let result = invoke("query_effect_windows", obj.into()).await;
     from_js(result)
 }
@@ -1028,62 +840,32 @@ pub async fn query_combat_log(
 ) -> Option<Vec<CombatLogRow>> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("encounterIdx"),
-            &JsValue::from_f64(idx as f64),
-        )
-        .unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::NULL).unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("offset"),
-        &JsValue::from_f64(offset as f64),
-    )
-    .unwrap();
-    js_sys::Reflect::set(
-        &obj,
-        &JsValue::from_str("limit"),
-        &JsValue::from_f64(limit as f64),
-    )
-    .unwrap();
+    js_set(&obj, "offset", &JsValue::from_f64(offset as f64));
+    js_set(&obj, "limit", &JsValue::from_f64(limit as f64));
     if let Some(s) = source_filter {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("sourceFilter"),
-            &JsValue::from_str(s),
-        )
-        .unwrap();
+        js_set(&obj, "sourceFilter", &JsValue::from_str(s));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("sourceFilter"), &JsValue::NULL).unwrap();
+        js_set(&obj, "sourceFilter", &JsValue::NULL);
     }
     if let Some(t) = target_filter {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("targetFilter"),
-            &JsValue::from_str(t),
-        )
-        .unwrap();
+        js_set(&obj, "targetFilter", &JsValue::from_str(t));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("targetFilter"), &JsValue::NULL).unwrap();
+        js_set(&obj, "targetFilter", &JsValue::NULL);
     }
     if let Some(s) = search_filter {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("searchFilter"),
-            &JsValue::from_str(s),
-        )
-        .unwrap();
+        js_set(&obj, "searchFilter", &JsValue::from_str(s));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("searchFilter"), &JsValue::NULL).unwrap();
+        js_set(&obj, "searchFilter", &JsValue::NULL);
     }
     if let Some(tr) = time_range {
         let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &tr_js).unwrap();
+        js_set(&obj, "timeRange", &tr_js);
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &JsValue::NULL).unwrap();
+        js_set(&obj, "timeRange", &JsValue::NULL);
     }
     let result = invoke("query_combat_log", obj.into()).await;
     from_js(result)
@@ -1099,50 +881,30 @@ pub async fn query_combat_log_count(
 ) -> Option<u64> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("encounterIdx"),
-            &JsValue::from_f64(idx as f64),
-        )
-        .unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::NULL).unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
     if let Some(s) = source_filter {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("sourceFilter"),
-            &JsValue::from_str(s),
-        )
-        .unwrap();
+        js_set(&obj, "sourceFilter", &JsValue::from_str(s));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("sourceFilter"), &JsValue::NULL).unwrap();
+        js_set(&obj, "sourceFilter", &JsValue::NULL);
     }
     if let Some(t) = target_filter {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("targetFilter"),
-            &JsValue::from_str(t),
-        )
-        .unwrap();
+        js_set(&obj, "targetFilter", &JsValue::from_str(t));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("targetFilter"), &JsValue::NULL).unwrap();
+        js_set(&obj, "targetFilter", &JsValue::NULL);
     }
     if let Some(s) = search_filter {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("searchFilter"),
-            &JsValue::from_str(s),
-        )
-        .unwrap();
+        js_set(&obj, "searchFilter", &JsValue::from_str(s));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("searchFilter"), &JsValue::NULL).unwrap();
+        js_set(&obj, "searchFilter", &JsValue::NULL);
     }
     if let Some(tr) = time_range {
         let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &tr_js).unwrap();
+        js_set(&obj, "timeRange", &tr_js);
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("timeRange"), &JsValue::NULL).unwrap();
+        js_set(&obj, "timeRange", &JsValue::NULL);
     }
     let result = invoke("query_combat_log_count", obj.into()).await;
     from_js(result)
@@ -1152,14 +914,9 @@ pub async fn query_combat_log_count(
 pub async fn query_source_names(encounter_idx: Option<u32>) -> Option<Vec<String>> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("encounterIdx"),
-            &JsValue::from_f64(idx as f64),
-        )
-        .unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::NULL).unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
     let result = invoke("query_source_names", obj.into()).await;
     from_js(result)
@@ -1169,14 +926,9 @@ pub async fn query_source_names(encounter_idx: Option<u32>) -> Option<Vec<String
 pub async fn query_target_names(encounter_idx: Option<u32>) -> Option<Vec<String>> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("encounterIdx"),
-            &JsValue::from_f64(idx as f64),
-        )
-        .unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::NULL).unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
     let result = invoke("query_target_names", obj.into()).await;
     from_js(result)
@@ -1186,14 +938,9 @@ pub async fn query_target_names(encounter_idx: Option<u32>) -> Option<Vec<String
 pub async fn query_player_deaths(encounter_idx: Option<u32>) -> Option<Vec<PlayerDeath>> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
-        js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("encounterIdx"),
-            &JsValue::from_f64(idx as f64),
-        )
-        .unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
     } else {
-        js_sys::Reflect::set(&obj, &JsValue::from_str("encounterIdx"), &JsValue::NULL).unwrap();
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
     let result = invoke("query_player_deaths", obj.into()).await;
     from_js(result)

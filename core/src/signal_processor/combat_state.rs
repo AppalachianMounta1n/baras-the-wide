@@ -20,11 +20,7 @@ use super::GameSignal;
 pub const COMBAT_TIMEOUT_SECONDS: i64 = 60;
 
 /// Advance the combat state machine and emit CombatStarted/CombatEnded signals.
-pub fn advance_combat_state(
-    event: &CombatEvent,
-    cache: &mut SessionCache,
-    post_combat_threshold_ms: i64,
-) -> Vec<GameSignal> {
+pub fn advance_combat_state(event: &CombatEvent, cache: &mut SessionCache) -> Vec<GameSignal> {
     // Track effect applications/removals for shield absorption
     track_encounter_effects(event, cache);
 
@@ -42,14 +38,7 @@ pub fn advance_combat_state(
         EncounterState::InCombat => {
             handle_in_combat(event, cache, effect_id, effect_type_id, timestamp)
         }
-        EncounterState::PostCombat { exit_time } => handle_post_combat(
-            event,
-            cache,
-            effect_id,
-            timestamp,
-            exit_time,
-            post_combat_threshold_ms,
-        ),
+        EncounterState::PostCombat { .. } => handle_post_combat(event, cache, effect_id, timestamp),
     }
 }
 
@@ -92,8 +81,8 @@ fn handle_not_started(
                 encounter_id: enc.id,
             });
         }
-    } else {
-        // Buffer non-damage events for the upcoming encounter
+    } else if effect_id != effect_id::DAMAGE {
+        // Buffer non-damage events for the upcoming encounter (skip pre-combat damage)
         if let Some(enc) = cache.current_encounter_mut() {
             enc.accumulate_data(event);
         }
@@ -120,7 +109,6 @@ fn handle_in_combat(
             let encounter_id = enc.id;
             // End combat at last_activity_time
             if let Some(enc) = cache.current_encounter_mut() {
-                enc.flush_pending_absorptions();
                 enc.exit_combat_time = Some(last_activity);
                 enc.state = EncounterState::PostCombat {
                     exit_time: last_activity,
@@ -136,7 +124,7 @@ fn handle_in_combat(
 
             cache.push_new_encounter();
             // Re-process this event in the new encounter's state machine
-            signals.extend(advance_combat_state(event, cache, 0));
+            signals.extend(advance_combat_state(event, cache));
             return signals;
         }
     }
@@ -145,6 +133,13 @@ fn handle_in_combat(
         .current_encounter()
         .map(|e| e.all_players_dead)
         .unwrap_or(false);
+
+    // Check if local player received the post-death revive immortality buff
+    // This means they clicked revive and are now out of combat with a grace period
+    let local_player_revived = effect_type_id == effect_type_id::APPLYEFFECT
+        && effect_id == effect_id::RECENTLY_REVIVED
+        && cache.player_initialized
+        && event.source_entity.log_id == cache.player.id;
 
     // Check if all kill targets are dead (boss encounter victory condition)
     // We check all NPC INSTANCES that match kill target class_ids
@@ -183,7 +178,6 @@ fn handle_in_combat(
         // Unexpected EnterCombat while in combat - terminate and restart
         let encounter_id = cache.current_encounter().map(|e| e.id).unwrap_or(0);
         if let Some(enc) = cache.current_encounter_mut() {
-            enc.flush_pending_absorptions();
             enc.exit_combat_time = Some(timestamp);
             enc.state = EncounterState::PostCombat {
                 exit_time: timestamp,
@@ -198,11 +192,14 @@ fn handle_in_combat(
         });
 
         cache.push_new_encounter();
-        signals.extend(advance_combat_state(event, cache, 0));
-    } else if effect_id == effect_id::EXITCOMBAT || all_players_dead || all_kill_targets_dead {
+        signals.extend(advance_combat_state(event, cache));
+    } else if effect_id == effect_id::EXITCOMBAT
+        || all_players_dead
+        || all_kill_targets_dead
+        || local_player_revived
+    {
         let encounter_id = cache.current_encounter().map(|e| e.id).unwrap_or(0);
         if let Some(enc) = cache.current_encounter_mut() {
-            enc.flush_pending_absorptions();
             enc.exit_combat_time = Some(timestamp);
             enc.state = EncounterState::PostCombat {
                 exit_time: timestamp,
@@ -220,7 +217,6 @@ fn handle_in_combat(
     } else if effect_type_id == effect_type_id::AREAENTERED {
         let encounter_id = cache.current_encounter().map(|e| e.id).unwrap_or(0);
         if let Some(enc) = cache.current_encounter_mut() {
-            enc.flush_pending_absorptions();
             enc.exit_combat_time = Some(timestamp);
             enc.state = EncounterState::PostCombat {
                 exit_time: timestamp,
@@ -254,8 +250,6 @@ fn handle_post_combat(
     cache: &mut SessionCache,
     effect_id: i64,
     timestamp: NaiveDateTime,
-    exit_time: NaiveDateTime,
-    post_combat_threshold_ms: i64,
 ) -> Vec<GameSignal> {
     let mut signals = Vec::new();
 
@@ -273,19 +267,8 @@ fn handle_post_combat(
             encounter_id: new_encounter_id,
         });
     } else if effect_id == effect_id::DAMAGE {
-        let elapsed = timestamp
-            .signed_duration_since(exit_time)
-            .num_milliseconds();
-        if elapsed <= post_combat_threshold_ms {
-            // Trailing damage - assign to ending encounter
-            if let Some(enc) = cache.current_encounter_mut() {
-                enc.track_event_entities(event);
-                enc.accumulate_data(event);
-            }
-        } else {
-            // Beyond grace period - discard and start fresh
-            cache.push_new_encounter();
-        }
+        // Discard post-combat damage - start fresh encounter
+        cache.push_new_encounter();
     } else {
         // Non-damage event - goes to next encounter
         cache.push_new_encounter();
@@ -295,4 +278,54 @@ fn handle_post_combat(
     }
 
     signals
+}
+
+/// Tick the combat state machine using wall-clock time.
+///
+/// This provides a fallback timeout when the event stream stops (e.g., player dies
+/// and revives but no new combat events arrive). Called periodically from the tail loop.
+///
+/// Returns CombatEnded signal if combat times out due to inactivity.
+/// Only affects InCombat state - other states are no-ops.
+pub fn tick_combat_state(cache: &mut SessionCache) -> Vec<GameSignal> {
+    let current_state = cache
+        .current_encounter()
+        .map(|e| e.state.clone())
+        .unwrap_or_default();
+
+    // Only tick during active combat
+    if !matches!(current_state, EncounterState::InCombat) {
+        return Vec::new();
+    }
+
+    // Check wall-clock timeout
+    let now = chrono::Local::now().naive_local();
+
+    if let Some(enc) = cache.current_encounter()
+        && let Some(last_activity) = enc.last_combat_activity_time
+    {
+        let elapsed = now.signed_duration_since(last_activity).num_seconds();
+        if elapsed >= COMBAT_TIMEOUT_SECONDS {
+            let encounter_id = enc.id;
+
+            // End combat at last_activity_time (same as event-driven timeout)
+            if let Some(enc) = cache.current_encounter_mut() {
+                enc.exit_combat_time = Some(last_activity);
+                enc.state = EncounterState::PostCombat {
+                    exit_time: last_activity,
+                };
+                let duration = enc.duration_seconds().unwrap_or(0) as f32;
+                enc.challenge_tracker.finalize(last_activity, duration);
+            }
+
+            cache.push_new_encounter();
+
+            return vec![GameSignal::CombatEnded {
+                timestamp: last_activity,
+                encounter_id,
+            }];
+        }
+    }
+
+    Vec::new()
 }

@@ -1,12 +1,21 @@
-//! Global hotkey registration (Windows/macOS only)
+//! Global hotkey registration
 //!
 //! Registers global keyboard shortcuts for overlay visibility, move mode, and rearrange mode.
-//! Not supported on Linux due to Wayland security model restrictions.
-
-#![cfg(not(target_os = "linux"))]
+//! Supported on Windows, macOS, and Linux (X11 only - Wayland does not support global hotkeys
+//! due to its security model).
 
 use crate::overlay::{OverlayCommand, OverlayManager, OverlayType, SharedOverlayState};
 use crate::service::ServiceHandle;
+use tracing::{error, info, warn};
+
+/// Check if running on Wayland (Linux only)
+#[cfg(target_os = "linux")]
+fn is_wayland() -> bool {
+    std::env::var("WAYLAND_DISPLAY").is_ok()
+        || std::env::var("XDG_SESSION_TYPE")
+            .map(|v| v == "wayland")
+            .unwrap_or(false)
+}
 
 /// Register global hotkeys from config
 pub fn spawn_register_hotkeys(
@@ -15,6 +24,13 @@ pub fn spawn_register_hotkeys(
     service_handle: ServiceHandle,
 ) {
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+
+    // Skip on Wayland - global hotkeys not supported due to security model
+    #[cfg(target_os = "linux")]
+    if is_wayland() {
+        warn!("Global hotkeys disabled on Wayland (not supported)");
+        return;
+    }
 
     tauri::async_runtime::spawn(async move {
         // Small delay to ensure everything is initialized
@@ -42,12 +58,12 @@ pub fn spawn_register_hotkeys(
                         }
                     })
                 {
-                    eprintln!("[HOTKEY] Failed to register visibility hotkey: {}", e);
+                    error!(error = %e, hotkey = %key_str, "Failed to register visibility hotkey");
                 } else {
-                    eprintln!("[HOTKEY] Registered visibility hotkey: {}", key_str);
+                    info!(hotkey = %key_str, "Registered visibility hotkey");
                 }
             } else {
-                eprintln!("[HOTKEY] Invalid visibility hotkey format: {}", key_str);
+                warn!(hotkey = %key_str, "Invalid visibility hotkey format");
             }
         }
 
@@ -68,12 +84,12 @@ pub fn spawn_register_hotkeys(
                         }
                     })
                 {
-                    eprintln!("[HOTKEY] Failed to register move mode hotkey: {}", e);
+                    error!(error = %e, hotkey = %key_str, "Failed to register move mode hotkey");
                 } else {
-                    eprintln!("[HOTKEY] Registered move mode hotkey: {}", key_str);
+                    info!(hotkey = %key_str, "Registered move mode hotkey");
                 }
             } else {
-                eprintln!("[HOTKEY] Invalid move mode hotkey format: {}", key_str);
+                warn!(hotkey = %key_str, "Invalid move mode hotkey format");
             }
         }
 
@@ -94,12 +110,12 @@ pub fn spawn_register_hotkeys(
                         }
                     })
                 {
-                    eprintln!("[HOTKEY] Failed to register rearrange mode hotkey: {}", e);
+                    error!(error = %e, hotkey = %key_str, "Failed to register rearrange mode hotkey");
                 } else {
-                    eprintln!("[HOTKEY] Registered rearrange mode hotkey: {}", key_str);
+                    info!(hotkey = %key_str, "Registered rearrange mode hotkey");
                 }
             } else {
-                eprintln!("[HOTKEY] Invalid rearrange mode hotkey format: {}", key_str);
+                warn!(hotkey = %key_str, "Invalid rearrange mode hotkey format");
             }
         }
     });

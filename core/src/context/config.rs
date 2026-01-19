@@ -3,6 +3,8 @@
 //! This module re-exports shared types from baras-types and provides
 //! platform-specific Default implementation and persistence for AppConfig.
 
+use super::error::ConfigError;
+
 // Re-export all shared types
 pub use baras_types::{
     AlertsOverlayConfig, AppConfig, BossHealthConfig, ChallengeColumns, ChallengeLayout,
@@ -46,7 +48,7 @@ fn default_log_directory() -> String {
 pub trait AppConfigExt {
     fn load() -> Self;
     fn load_with_defaults() -> Self;
-    fn save(self);
+    fn save(self) -> Result<(), ConfigError>;
     fn save_profile(&mut self, name: String) -> Result<(), &'static str>;
     fn load_profile(&mut self, name: &str) -> Result<(), &'static str>;
     fn delete_profile(&mut self, name: &str) -> Result<(), &'static str>;
@@ -65,14 +67,20 @@ impl AppConfigExt for AppConfig {
         AppConfig::with_log_directory(default_log_directory())
     }
 
-    fn save(self) {
-        confy::store("baras", "config", self).expect("Failed to save configuration");
+    fn save(self) -> Result<(), ConfigError> {
+        confy::store("baras", "config", self).map_err(ConfigError::Save)?;
+        tracing::debug!("Configuration saved successfully");
+        Ok(())
     }
 
     fn save_profile(&mut self, name: String) -> Result<(), &'static str> {
+        // Clone settings but reset visibility to default (visibility is independent of profiles)
+        let mut settings_to_save = self.overlay_settings.clone();
+        settings_to_save.overlays_visible = true;
+
         // Check if profile already exists (update case)
         if let Some(profile) = self.profiles.iter_mut().find(|p| p.name == name) {
-            profile.settings = self.overlay_settings.clone();
+            profile.settings = settings_to_save;
             self.active_profile_name = Some(name);
             return Ok(());
         }
@@ -82,10 +90,7 @@ impl AppConfigExt for AppConfig {
             return Err("Maximum number of profiles reached (12)");
         }
 
-        self.profiles.push(OverlayProfile::new(
-            name.clone(),
-            self.overlay_settings.clone(),
-        ));
+        self.profiles.push(OverlayProfile::new(name.clone(), settings_to_save));
         self.active_profile_name = Some(name);
         Ok(())
     }
@@ -96,7 +101,12 @@ impl AppConfigExt for AppConfig {
             .iter()
             .find(|p| p.name == name)
             .ok_or("Profile not found")?;
+
+        // Preserve visibility state - it's independent of profiles
+        let was_visible = self.overlay_settings.overlays_visible;
         self.overlay_settings = profile.settings.clone();
+        self.overlay_settings.overlays_visible = was_visible;
+
         self.active_profile_name = Some(name.to_string());
         Ok(())
     }

@@ -9,14 +9,9 @@ use crate::state::cache::SessionCache;
 
 use super::{challenge, combat_state, counter, phase};
 
-const POST_COMBAT_THRESHOLD_MS: i64 = 5000;
-
 /// Processes combat events, routes them to encounters, and emits signals.
 /// This is the state machine that manages combat lifecycle.
-pub struct EventProcessor {
-    /// Grace period for trailing damage after combat ends
-    post_combat_threshold_ms: i64,
-}
+pub struct EventProcessor;
 
 impl Default for EventProcessor {
     fn default() -> Self {
@@ -26,9 +21,7 @@ impl Default for EventProcessor {
 
 impl EventProcessor {
     pub fn new() -> Self {
-        Self {
-            post_combat_threshold_ms: POST_COMBAT_THRESHOLD_MS,
-        }
+        Self
     }
 
     /// Process an incoming event.
@@ -104,11 +97,7 @@ impl EventProcessor {
         // PHASE 3: Combat State Machine
         // ═══════════════════════════════════════════════════════════════════════
 
-        signals.extend(combat_state::advance_combat_state(
-            &event,
-            cache,
-            self.post_combat_threshold_ms,
-        ));
+        signals.extend(combat_state::advance_combat_state(&event, cache));
 
         (signals, event)
     }
@@ -352,7 +341,10 @@ impl EventProcessor {
             // Try to detect boss encounter from this NPC
             if let Some(idx) = cache.detect_boss_encounter(entity.class_id) {
                 // Get the encounter mutably and extract data from definition
-                let enc = cache.current_encounter_mut().unwrap();
+                let Some(enc) = cache.current_encounter_mut() else {
+                    tracing::error!("BUG: encounter missing after detect_boss_encounter in handle_boss_detection");
+                    continue;
+                };
                 let def = &enc.boss_definitions()[idx];
                 let challenges = def.challenges.clone();
                 let counters = def.counters.clone();
@@ -432,7 +424,10 @@ impl EventProcessor {
             }
 
             // Check if this NPC is part of the active boss encounter
-            let enc = cache.current_encounter().unwrap();
+            let Some(enc) = cache.current_encounter() else {
+                tracing::error!("BUG: encounter missing in handle_boss_hp_and_phases loop");
+                continue;
+            };
             let def = &enc.boss_definitions()[def_idx];
             if !def.matches_npc_id(entity.class_id) {
                 continue;
@@ -444,7 +439,10 @@ impl EventProcessor {
             }
 
             // Update boss state and check if HP changed
-            let enc = cache.current_encounter_mut().unwrap();
+            let Some(enc) = cache.current_encounter_mut() else {
+                tracing::error!("BUG: encounter missing in handle_boss_hp_and_phases loop (mut)");
+                continue;
+            };
             if let Some((old_hp, new_hp)) = enc.update_entity_hp(entity.log_id, current_hp, max_hp)
             {
                 signals.push(GameSignal::BossHpChanged {

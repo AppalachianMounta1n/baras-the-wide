@@ -8,6 +8,8 @@
 //! - Providing clean historical mode support (phases work without Timer/Effect managers)
 //! - Centralizing all combat state in one place
 
+use std::sync::Arc;
+
 use arrow::array::ArrowNativeTypeOp;
 use chrono::NaiveDateTime;
 use hashbrown::{HashMap, HashSet};
@@ -22,7 +24,6 @@ use super::challenge::ChallengeTracker;
 use super::effect_instance::EffectInstance;
 use super::entity_info::{NpcInfo, PlayerInfo};
 use super::metrics::MetricAccumulator;
-use super::shielding::PendingAbsorption;
 use super::{EncounterState, OverlayHealthEntry};
 use crate::dsl::ChallengeContext;
 
@@ -67,8 +68,8 @@ pub struct CombatEncounter {
     pub area_name: Option<String>,
 
     // ─── Boss Definitions (loaded on area enter) ────────────────────────────
-    /// Boss definitions for current area
-    boss_definitions: Vec<BossEncounterDefinition>,
+    /// Boss definitions for current area (Arc for zero-copy sharing)
+    boss_definitions: Arc<Vec<BossEncounterDefinition>>,
     /// Index into boss_definitions for active boss (if detected)
     active_boss_idx: Option<usize>,
 
@@ -109,8 +110,6 @@ pub struct CombatEncounter {
     // ─── Effect Instances (for shield attribution) ──────────────────────────
     /// Active effects by target ID
     pub effects: HashMap<i64, Vec<EffectInstance>>,
-    /// Pending shield absorptions waiting for resolution
-    pub pending_absorptions: HashMap<i64, Vec<PendingAbsorption>>,
 
     // ─── Metrics ────────────────────────────────────────────────────────────
     /// Accumulated damage/healing/etc. data by entity ID
@@ -130,7 +129,7 @@ impl CombatEncounter {
             area_name: None,
 
             // Boss definitions
-            boss_definitions: Vec::new(),
+            boss_definitions: Arc::new(Vec::new()),
             active_boss_idx: None,
 
             // Boss state
@@ -155,7 +154,6 @@ impl CombatEncounter {
 
             // Effects
             effects: HashMap::new(),
-            pending_absorptions: HashMap::new(),
 
             // Metrics
             accumulated_data: HashMap::new(),
@@ -174,8 +172,8 @@ impl CombatEncounter {
     // Boss Definitions
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// Load boss definitions for the current area
-    pub fn load_boss_definitions(&mut self, definitions: Vec<BossEncounterDefinition>) {
+    /// Load boss definitions for the current area (takes Arc for zero-copy sharing)
+    pub fn load_boss_definitions(&mut self, definitions: Arc<Vec<BossEncounterDefinition>>) {
         self.boss_definitions = definitions;
         self.active_boss_idx = None;
     }
@@ -183,6 +181,11 @@ impl CombatEncounter {
     /// Get the currently loaded boss definitions
     pub fn boss_definitions(&self) -> &[BossEncounterDefinition] {
         &self.boss_definitions
+    }
+
+    /// Get the Arc to boss definitions (for cheap cloning in hot paths)
+    pub fn boss_definitions_arc(&self) -> Arc<Vec<BossEncounterDefinition>> {
+        Arc::clone(&self.boss_definitions)
     }
 
     /// Get the active boss definition (if a boss is detected)
@@ -425,8 +428,13 @@ impl CombatEncounter {
         (old_time, self.combat_time_secs)
     }
 
-    /// Get combat duration in seconds
+    /// Get combat duration in seconds (truncated)
     pub fn duration_seconds(&self) -> Option<i64> {
+        Some(self.duration_ms()? / 1000)
+    }
+
+    /// Get combat duration in milliseconds
+    pub fn duration_ms(&self) -> Option<i64> {
         use chrono::TimeDelta;
 
         let enter = self.enter_combat_time?;
@@ -441,7 +449,7 @@ impl CombatEncounter {
             duration = duration.checked_add(&TimeDelta::days(1))?;
         }
 
-        Some(duration.num_seconds())
+        Some(duration.num_milliseconds())
     }
 
     /// Build a ChallengeContext snapshot
@@ -637,7 +645,6 @@ impl CombatEncounter {
                 applied_at: event.timestamp,
                 is_shield,
                 removed_at: None,
-                has_absorbed: false,
             });
     }
 
@@ -647,22 +654,14 @@ impl CombatEncounter {
             return;
         };
 
-        let mut removed_shield: Option<EffectInstance> = None;
         for effect_instance in effects.iter_mut().rev() {
             if effect_instance.effect_id == event.effect.effect_id
                 && effect_instance.source_id == event.source_entity.log_id
                 && effect_instance.removed_at.is_none()
             {
                 effect_instance.removed_at = Some(event.timestamp);
-                if effect_instance.is_shield {
-                    removed_shield = Some(effect_instance.clone());
-                }
                 break;
             }
-        }
-
-        if let Some(shield) = removed_shield {
-            self.resolve_pending_absorptions(target_id, &shield);
         }
     }
 
@@ -768,8 +767,8 @@ impl CombatEncounter {
     ) -> Option<Vec<super::metrics::EntityMetrics>> {
         use super::metrics::EntityMetrics;
 
-        let duration = self.duration_seconds()?;
-        if duration <= 0 {
+        let duration_ms = self.duration_ms()?;
+        if duration_ms <= 0 {
             return None;
         }
 
@@ -832,30 +831,30 @@ impl CombatEncounter {
                     total_damage: acc.damage_dealt,
                     total_damage_boss: acc.damge_dealt_boss,
                     total_damage_effective: acc.damage_dealt_effective,
-                    dps: (acc.damage_dealt / duration) as i32,
-                    edps: (acc.damage_dealt_effective / duration) as i32,
-                    bossdps: (acc.damge_dealt_boss / duration) as i32,
+                    dps: (acc.damage_dealt * 1000 / duration_ms) as i32,
+                    edps: (acc.damage_dealt_effective * 1000 / duration_ms) as i32,
+                    bossdps: (acc.damge_dealt_boss * 1000 / duration_ms) as i32,
                     damage_crit_pct,
                     total_healing: acc.healing_done,
                     total_healing_effective: acc.healing_effective,
-                    hps: (acc.healing_done / duration) as i32,
-                    ehps: ((acc.healing_effective + acc.shielding_given) / duration) as i32,
+                    hps: (acc.healing_done * 1000 / duration_ms) as i32,
+                    ehps: ((acc.healing_effective + acc.shielding_given) * 1000 / duration_ms) as i32,
                     heal_crit_pct,
                     effective_heal_pct,
-                    abs: (acc.shielding_given / duration) as i32,
+                    abs: (acc.shielding_given * 1000 / duration_ms) as i32,
                     total_shielding: acc.shielding_given,
                     total_damage_taken: acc.damage_received,
                     total_damage_taken_effective: acc.damage_received_effective,
-                    dtps: (acc.damage_received / duration) as i32,
-                    edtps: (acc.damage_received_effective / duration) as i32,
-                    htps: (acc.healing_received / duration) as i32,
-                    ehtps: (acc.healing_received_effective / duration) as i32,
+                    dtps: (acc.damage_received * 1000 / duration_ms) as i32,
+                    edtps: (acc.damage_received_effective * 1000 / duration_ms) as i32,
+                    htps: (acc.healing_received * 1000 / duration_ms) as i32,
+                    ehtps: (acc.healing_received_effective * 1000 / duration_ms) as i32,
                     defense_pct,
                     shield_pct,
                     total_shield_absorbed: acc.shield_roll_absorbed,
                     taunt_count: acc.taunt_count,
-                    apm: (acc.actions as f32 / duration as f32) * 60.0,
-                    tps: (acc.threat_generated / duration as f64) as i32,
+                    apm: (acc.actions as f32 * 60000.0 / duration_ms as f32),
+                    tps: (acc.threat_generated * 1000.0 / duration_ms as f64) as i32,
                     total_threat: acc.threat_generated as i64,
                 })
             })

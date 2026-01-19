@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use chrono::NaiveDateTime;
 use tokio::sync::RwLock;
+use tracing;
 
 use crate::combat_log::{CombatEvent, Reader};
 use crate::context::{AppConfig, parse_log_filename};
@@ -152,10 +153,7 @@ impl ParsingSession {
                 if let Some(loader) = &self.definition_loader {
                     if let Some(bosses) = loader(area_id) {
                         self.load_boss_definitions(bosses);
-                        eprintln!(
-                            "[PARSER] Sync loaded boss definitions for area_id={}",
-                            area_id
-                        );
+                        tracing::info!(area_id, "Sync loaded boss definitions for area");
                     }
                     self.loaded_area_id = area_id;
                 }
@@ -170,8 +168,25 @@ impl ParsingSession {
             // Write event to parquet buffer AFTER processing
             // (so metadata captures the updated phase state)
             if let Some(writer) = &mut self.encounter_writer {
-                let metadata =
+                let mut metadata =
                     EventMetadata::from_cache(cache, self.encounter_idx, event.timestamp);
+
+                // Capture shield context for damage events with absorption
+                // Exclude natural shield rolls (tank passive procs) - these aren't from player shields
+                let is_natural_shield = event.details.defense_type_id
+                    == crate::game_data::defense_type::SHIELD
+                    && event.details.dmg_effective == event.details.dmg_amount;
+
+                if event.details.dmg_absorbed > 0 && !is_natural_shield {
+                    if let Some(enc) = cache.current_encounter() {
+                        let shields =
+                            enc.get_shield_context(event.target_entity.log_id, event.timestamp);
+                        if !shields.is_empty() {
+                            metadata.active_shields = Some(shields);
+                        }
+                    }
+                }
+
                 writer.push_event(&event, &metadata);
             }
 
@@ -211,15 +226,16 @@ impl ParsingSession {
         let path = dir.join(&filename);
 
         if let Err(e) = writer.write_to_file(&path) {
-            eprintln!(
-                "[PARQUET] Failed to write encounter {}: {}",
-                self.encounter_idx, e
+            tracing::error!(
+                encounter_idx = self.encounter_idx,
+                error = %e,
+                "Failed to write encounter parquet"
             );
         } else {
-            eprintln!(
-                "[PARQUET] Wrote encounter {} ({} events)",
-                self.encounter_idx,
-                writer.len()
+            tracing::info!(
+                encounter_idx = self.encounter_idx,
+                event_count = writer.len(),
+                "Wrote encounter parquet"
             );
         }
 
@@ -285,10 +301,13 @@ impl ParsingSession {
     /// Process counter triggers from timer events (expires and starts).
     /// Must be called after dispatch_signals when timer manager may have timer events.
     fn process_timer_counter_triggers(&mut self, timestamp: chrono::NaiveDateTime) {
-        // Get timer IDs from timer manager
+        // Get timer IDs from timer manager (clone to release lock before further processing)
         let (expired_ids, started_ids) = if let Some(timer_mgr) = &self.timer_manager {
             if let Ok(timer_mgr) = timer_mgr.lock() {
-                (timer_mgr.expired_timer_ids(), timer_mgr.started_timer_ids())
+                (
+                    timer_mgr.expired_timer_ids().to_vec(),
+                    timer_mgr.started_timer_ids().to_vec(),
+                )
             } else {
                 return;
             }
@@ -321,19 +340,32 @@ impl ParsingSession {
         self.timer_manager.as_ref().map(Arc::clone)
     }
 
-    /// Tick the effect tracker and timer manager to update expiration state.
+    /// Tick the combat state, effect tracker, and timer manager.
     ///
-    /// Call this periodically (e.g., at overlay refresh rate ~10fps) to ensure
-    /// duration-expired effects and timers are updated. No-op in Historical mode.
-    pub fn tick(&self) {
+    /// Call this periodically (e.g., from the tail loop during idle) to ensure:
+    /// - Combat timeout is checked even when no events arrive
+    /// - Duration-expired effects and timers are updated
+    ///
+    /// No-op in Historical mode for effects/timers.
+    pub fn tick(&mut self) {
+        // Tick combat state for wall-clock timeout (fallback when event stream stops)
+        if let Some(cache) = &mut self.session_cache {
+            let signals = crate::signal_processor::tick_combat_state(cache);
+            if !signals.is_empty() {
+                self.dispatch_signals(&signals);
+            }
+        }
+
+        // Tick effect tracker
         if let Some(tracker) = &self.effect_tracker {
             if let Ok(mut tracker) = tracker.lock() {
                 tracker.tick();
             }
         }
+
+        // Tick timer manager
         if let Some(timer_mgr) = &self.timer_manager {
             if let Ok(mut timer_mgr) = timer_mgr.lock() {
-                // Get encounter from cache for timer restart context
                 let encounter = self
                     .session_cache
                     .as_ref()

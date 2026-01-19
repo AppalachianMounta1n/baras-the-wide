@@ -34,6 +34,7 @@ use baras_overlay::{
 };
 
 use crate::audio::{AudioEvent, AudioSender, AudioService};
+use tracing::{debug, error, info, warn};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Parse Worker IPC
@@ -84,7 +85,11 @@ struct ParseWorkerOutput {
 }
 
 /// Fallback to streaming parse if subprocess fails.
-async fn fallback_streaming_parse(reader: &Reader, session: &Arc<RwLock<ParsingSession>>) {
+async fn fallback_streaming_parse(
+    reader: &Reader,
+    session: &Arc<RwLock<ParsingSession>>,
+    encounters_dir: PathBuf,
+) {
     let timer = std::time::Instant::now();
     let mut session_guard = session.write().await;
     let session_date = session_guard.game_session_date.unwrap_or_default();
@@ -94,13 +99,18 @@ async fn fallback_streaming_parse(reader: &Reader, session: &Arc<RwLock<ParsingS
 
     if let Ok((end_pos, event_count)) = result {
         session_guard.current_byte = Some(end_pos);
+
+        // Enable live parquet writing so Data Explorer can query encounters
+        // Start from encounter 0 since fallback doesn't write parquet files
+        session_guard.enable_live_parquet(encounters_dir, 0);
+
         session_guard.finalize_session();
         session_guard.sync_timer_context();
 
-        eprintln!(
-            "[PARSE] Fallback streaming: {} events in {:.0}ms",
+        info!(
             event_count,
-            timer.elapsed().as_millis()
+            elapsed_ms = timer.elapsed().as_millis() as u64,
+            "Fallback streaming parse completed"
         );
     }
 }
@@ -117,6 +127,8 @@ pub enum ServiceCommand {
     StartWatcher,
     Shutdown,
     FileDetected(PathBuf),
+    /// File was modified - re-check character data for files missing it
+    FileModified(PathBuf),
     FileRemoved(PathBuf),
     DirectoryChanged,
     /// Reload timer/boss definitions from disk and update active session
@@ -354,10 +366,10 @@ impl CombatService {
             .unwrap_or_else(|| {
                 // Dev fallback: relative to project root
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .parent()
-                    .unwrap()
-                    .parent()
-                    .unwrap()
+                    .ancestors()
+                    .nth(2)
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from("."))
                     .join("core/definitions/sounds")
             });
         let audio_settings = Arc::new(tokio::sync::RwLock::new(
@@ -456,7 +468,7 @@ impl CombatService {
     fn init_icon_cache(app_handle: &AppHandle) -> Option<Arc<baras_overlay::icons::IconCache>> {
         use baras_overlay::icons::IconCache;
 
-        eprintln!("[ICONS] Initializing icon cache...");
+        debug!("Initializing icon cache");
 
         // Try bundled resources first, fall back to dev path
         let icons_dir = app_handle
@@ -467,35 +479,35 @@ impl CombatService {
             .unwrap_or_else(|| {
                 // Dev fallback: relative to project root
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .parent()
-                    .unwrap()
-                    .parent()
-                    .unwrap()
+                    .ancestors()
+                    .nth(2)
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from("."))
                     .join("icons")
             });
 
-        eprintln!("[ICONS] Looking for icons at {:?}", icons_dir);
+        debug!(path = ?icons_dir, "Looking for icons");
 
         let csv_path = icons_dir.join("icons.csv");
         let zip_path = icons_dir.join("icons.zip");
 
         if !csv_path.exists() || !zip_path.exists() {
-            eprintln!(
-                "[ICONS] Icon files not found at {:?} (csv={}, zip={})",
-                icons_dir,
-                csv_path.exists(),
-                zip_path.exists()
+            debug!(
+                path = ?icons_dir,
+                csv_exists = csv_path.exists(),
+                zip_exists = zip_path.exists(),
+                "Icon files not found"
             );
             return None;
         }
 
         match IconCache::new(&csv_path, &zip_path, 200) {
             Ok(cache) => {
-                eprintln!("[ICONS] Loaded icon cache from {:?}", icons_dir);
+                info!(path = ?icons_dir, "Loaded icon cache");
                 Some(Arc::new(cache))
             }
             Err(e) => {
-                eprintln!("[ICONS] Failed to load icon cache: {}", e);
+                error!(error = %e, "Failed to load icon cache");
                 None
             }
         }
@@ -515,9 +527,9 @@ impl CombatService {
         };
 
         if old_dir.is_dir() {
-            eprintln!("[EFFECTS] Removing old effects directory: {:?}", old_dir);
+            debug!(path = ?old_dir, "Removing old effects directory");
             if let Err(e) = std::fs::remove_dir_all(&old_dir) {
-                eprintln!("[EFFECTS] Failed to remove old effects directory: {}", e);
+                error!(error = %e, path = ?old_dir, "Failed to remove old effects directory");
             }
         }
     }
@@ -561,7 +573,7 @@ impl CombatService {
     /// Load bundled effect definitions from a directory
     fn load_bundled_definitions(set: &mut DefinitionSet, dir: &std::path::Path) {
         let Ok(entries) = std::fs::read_dir(dir) else {
-            eprintln!("[EFFECTS] Failed to read bundled dir: {:?}", dir);
+            debug!(path = ?dir, "Failed to read bundled effects directory");
             return;
         };
 
@@ -574,11 +586,7 @@ impl CombatService {
             })
             .collect();
 
-        eprintln!(
-            "[EFFECTS] Loading {} bundled files from {:?}",
-            files.len(),
-            dir
-        );
+        debug!(count = files.len(), path = ?dir, "Loading bundled effect files");
 
         for path in files {
             if let Ok(contents) = std::fs::read_to_string(&path)
@@ -586,10 +594,10 @@ impl CombatService {
             {
                 let count = config.effects.len();
                 set.add_definitions(config.effects, false);
-                eprintln!(
-                    "[EFFECTS]   {:?}: {} effects",
-                    path.file_name().unwrap_or_default(),
-                    count
+                debug!(
+                    file = ?path.file_name().unwrap_or_default(),
+                    count,
+                    "Loaded effect definitions"
                 );
             }
         }
@@ -598,12 +606,12 @@ impl CombatService {
     /// Load user effect overrides from single config file
     fn load_user_effects(set: &mut DefinitionSet, path: &std::path::Path) {
         let Ok(contents) = std::fs::read_to_string(path) else {
-            eprintln!("[EFFECTS] Failed to read user effects file: {:?}", path);
+            error!(path = ?path, "Failed to read user effects file");
             return;
         };
 
         let Ok(config) = toml::from_str::<DefinitionConfig>(&contents) else {
-            eprintln!("[EFFECTS] Failed to parse user effects file: {:?}", path);
+            error!(path = ?path, "Failed to parse user effects file");
             // Delete invalid file
             let _ = std::fs::remove_file(path);
             return;
@@ -611,20 +619,18 @@ impl CombatService {
 
         // Version check - delete file if version mismatch
         if config.version != EFFECTS_DSL_VERSION {
-            eprintln!(
-                "[EFFECTS] User effects version mismatch (file={}, expected={}), deleting: {:?}",
-                config.version, EFFECTS_DSL_VERSION, path
+            warn!(
+                file_version = config.version,
+                expected_version = EFFECTS_DSL_VERSION,
+                path = ?path,
+                "User effects version mismatch, deleting file"
             );
             let _ = std::fs::remove_file(path);
             return;
         }
 
         if !config.effects.is_empty() {
-            eprintln!(
-                "[EFFECTS] Loading {} user overrides from {:?}",
-                config.effects.len(),
-                path
-            );
+            debug!(count = config.effects.len(), path = ?path, "Loading user effect overrides");
             set.add_definitions(config.effects, true); // Overwrite bundled
         }
     }
@@ -657,6 +663,9 @@ impl CombatService {
                 }
                 ServiceCommand::FileDetected(path) => {
                     self.file_detected(path).await;
+                }
+                ServiceCommand::FileModified(path) => {
+                    self.file_modified(path).await;
                 }
                 ServiceCommand::FileRemoved(path) => {
                     self.file_removed(path).await;
@@ -773,6 +782,26 @@ impl CombatService {
         }
     }
 
+    /// Handle file modification - re-check character data for files that were missing it
+    async fn file_modified(&mut self, path: PathBuf) {
+        let updated = {
+            let mut index = self.shared.directory_index.write().await;
+            // Check if this specific file needs character re-extraction
+            if index.is_missing_character(&path) {
+                // Re-run character extraction since file may now have content
+                index.refresh_missing_characters()
+            } else {
+                0
+            }
+        };
+
+        if updated > 0 {
+            debug!(updated, "Re-read character names from modified files");
+            // Notify frontend that file list changed (display names may have updated)
+            let _ = self.app_handle.emit("log-files-changed", ());
+        }
+    }
+
     async fn file_removed(&mut self, path: PathBuf) {
         let was_active = {
             let session_guard = self.shared.session.read().await;
@@ -864,7 +893,7 @@ impl CombatService {
 
         // Clear old parquet data from previous session
         if let Err(e) = baras_core::storage::clear_data_dir() {
-            eprintln!("[TAILING] Failed to clear data directory: {}", e);
+            warn!(error = %e, "Failed to clear data directory");
         }
 
         // Clear all overlay data when switching files
@@ -890,7 +919,7 @@ impl CombatService {
                 if let Ok(mut mgr) = timer_mgr.lock()
                     && let Err(e) = mgr.load_preferences(&prefs_path)
                 {
-                    eprintln!("Warning: Failed to load timer preferences: {}", e);
+                    warn!(error = %e, "Failed to load timer preferences");
                 }
             }
         }
@@ -994,7 +1023,7 @@ impl CombatService {
             })
             .unwrap_or_else(|| PathBuf::from("baras-parse-worker"));
 
-        eprintln!("[PARSE] Using worker: {:?}", worker_path);
+        debug!(worker_path = ?worker_path, "Using parse worker");
 
         let mut cmd = std::process::Command::new(&worker_path);
         cmd.arg(&path).arg(&session_id).arg(&encounters_dir);
@@ -1002,7 +1031,7 @@ impl CombatService {
         // Pass definitions directory if available
         if let Some(ref def_dir) = definitions_dir {
             cmd.arg(def_dir);
-            eprintln!("[PARSE] Using definitions: {:?}", def_dir);
+            debug!(definitions_path = ?def_dir, "Using definitions directory");
         }
 
         let output = cmd.output();
@@ -1043,17 +1072,22 @@ impl CombatService {
                             cache.player_initialized = true;
 
                             // Import area info
-                            eprintln!(
-                                "[PARSE DEBUG] Importing area from subprocess: area_id={}, area_name='{}', difficulty_id={}",
-                                parse_result.area.area_id,
-                                parse_result.area.area_name,
-                                parse_result.area.difficulty_id
+                            debug!(
+                                area_id = parse_result.area.area_id,
+                                area_name = %parse_result.area.area_name,
+                                difficulty_id = parse_result.area.difficulty_id,
+                                "Importing area from subprocess"
                             );
                             cache.current_area.area_name = parse_result.area.area_name.clone();
                             cache.current_area.area_id = parse_result.area.area_id;
                             cache.current_area.difficulty_id = parse_result.area.difficulty_id;
                             cache.current_area.difficulty_name =
                                 parse_result.area.difficulty_name.clone();
+
+                            // Sync next_encounter_id to continue from where subprocess left off
+                            // (fixes off-by-one bug where live encounters would have IDs that
+                            // collide with subprocess parquet files)
+                            cache.set_next_encounter_id(parse_result.encounter_count as u64);
 
                             // Create fresh encounter with correct area context
                             // (the initial encounter was created before we had area info from subprocess)
@@ -1089,11 +1123,11 @@ impl CombatService {
                         session_guard.sync_timer_context();
                         drop(session_guard);
 
-                        eprintln!(
-                            "[PARSE] Subprocess parsed {} events ({} encounters) in {}ms",
-                            parse_result.event_count,
-                            parse_result.encounter_count,
-                            parse_result.elapsed_ms
+                        info!(
+                            event_count = parse_result.event_count,
+                            encounter_count = parse_result.encounter_count,
+                            elapsed_ms = parse_result.elapsed_ms,
+                            "Subprocess parse completed"
                         );
 
                         // Trigger boss definition loading for initial area (if known)
@@ -1105,27 +1139,27 @@ impl CombatService {
                         let _ = self.app_handle.emit("session-updated", "FileLoaded");
                     }
                     Err(e) => {
-                        eprintln!("[PARSE] Subprocess output parse failed: {}", e);
-                        fallback_streaming_parse(&reader, &session).await;
+                        error!(error = %e, "Subprocess output parse failed");
+                        fallback_streaming_parse(&reader, &session, encounters_dir.clone()).await;
                     }
                 }
             }
             Ok(output) => {
-                eprintln!(
-                    "[PARSE] Subprocess failed: {}",
-                    String::from_utf8_lossy(&output.stderr)
+                error!(
+                    stderr = %String::from_utf8_lossy(&output.stderr),
+                    "Subprocess failed"
                 );
                 // Fallback to streaming parse in main process
-                fallback_streaming_parse(&reader, &session).await;
+                fallback_streaming_parse(&reader, &session, encounters_dir.clone()).await;
             }
             Err(e) => {
-                eprintln!("[PARSE] Failed to spawn subprocess: {}", e);
+                error!(error = %e, "Failed to spawn subprocess");
                 // Fallback to streaming parse in main process
-                fallback_streaming_parse(&reader, &session).await;
+                fallback_streaming_parse(&reader, &session, encounters_dir.clone()).await;
             }
         }
 
-        eprintln!("[PARSE] Total time: {:.0}ms", timer.elapsed().as_millis());
+        info!(elapsed_ms = timer.elapsed().as_millis() as u64, "Parse completed");
 
         // Trigger initial metrics send after file processing
         let _ = trigger_tx.try_send(MetricsTrigger::InitialLoad);
@@ -1515,155 +1549,179 @@ async fn calculate_combat_data(shared: &Arc<SharedState>) -> Option<CombatData> 
         };
     let player_entity_id = player_info.id;
 
-    // Get encounter info
-    let encounter = cache.last_combat_encounter()?;
-    let encounter_count = cache
-        .encounters()
-        .filter(|e| e.state != EncounterState::NotStarted)
-        .map(|e| e.id + 1)
-        .max()
-        .unwrap_or(0) as usize;
-    let encounter_time_secs = encounter.duration_seconds().unwrap_or(0) as u64;
+    // Try live encounter first, fall back to historical summary for initial hydration
+    if let Some(encounter) = cache.last_combat_encounter() {
+        // Live encounter path - full data including challenges and phase info
+        let encounter_count = cache
+            .encounters()
+            .filter(|e| e.state != EncounterState::NotStarted)
+            .map(|e| e.id + 1)
+            .max()
+            .unwrap_or(0) as usize;
+        let encounter_time_secs = encounter.duration_seconds().unwrap_or(0) as u64;
 
-    // Classify the encounter to get phase type and boss info
-    let (encounter_type, boss_info) = classify_encounter(encounter, &cache.current_area);
+        // Classify the encounter to get phase type and boss info
+        let (encounter_type, boss_info) = classify_encounter(encounter, &cache.current_area);
 
-    // Generate encounter name - if there's a boss use that, otherwise use phase type
-    let encounter_name = if let Some(boss) = boss_info {
-        Some(boss.boss.to_string())
-    } else {
-        // Use phase type for trash/non-boss encounters
-        Some(format!("{:?}", encounter_type))
-    };
+        // Generate encounter name - if there's a boss use that, otherwise use phase type
+        let encounter_name = if let Some(boss) = boss_info {
+            Some(boss.boss.to_string())
+        } else {
+            // Use phase type for trash/non-boss encounters
+            Some(format!("{:?}", encounter_type))
+        };
 
-    // Get difficulty from area info, fallback to phase type name for non-instanced content
-    let difficulty = if !cache.current_area.difficulty_name.is_empty() {
-        Some(cache.current_area.difficulty_name.clone())
-    } else {
-        Some(format!("{:?}", encounter_type))
-    };
+        // Get difficulty from area info, fallback to phase type name for non-instanced content
+        let difficulty = if !cache.current_area.difficulty_name.is_empty() {
+            Some(cache.current_area.difficulty_name.clone())
+        } else {
+            Some(format!("{:?}", encounter_type))
+        };
 
-    // Calculate metrics for all players (use session-level discipline registry)
-    let entity_metrics = encounter.calculate_entity_metrics(&cache.player_disciplines)?;
-    let metrics: Vec<PlayerMetrics> = entity_metrics
-        .into_iter()
-        .filter(|m| m.entity_type != EntityType::Npc)
-        .map(|m| m.to_player_metrics())
-        .collect();
-
-    // Build challenge data from encounter's tracker (persists with encounter, not boss state)
-    let challenges = if encounter.challenge_tracker.is_active() {
-        let boss_name = encounter.active_boss_idx().and_then(|idx| {
-            encounter
-                .boss_definitions()
-                .get(idx)
-                .map(|def| def.name.clone())
-        });
-        let overall_duration = encounter.combat_time_secs.max(1.0);
-        let current_time = chrono::Local::now().naive_local();
-
-        let entries: Vec<ChallengeEntry> = encounter
-            .challenge_tracker
-            .snapshot_live(current_time)
+        // Calculate metrics for all players (use session-level discipline registry)
+        let entity_metrics = encounter.calculate_entity_metrics(&cache.player_disciplines)?;
+        let metrics: Vec<PlayerMetrics> = entity_metrics
             .into_iter()
-            .map(|val| {
-                // Use the challenge's own duration (phase-scoped or total)
-                let challenge_duration = val.duration_secs.max(1.0);
-
-                // Build per-player breakdown, sorted by value descending
-                let mut by_player: Vec<PlayerContribution> = val
-                    .by_player
-                    .iter()
-                    .filter_map(|(&entity_id, &value)| {
-                        // Resolve player name from encounter
-                        let name = encounter
-                            .players
-                            .get(&entity_id)
-                            .map(|p| resolve(p.name).to_string())
-                            .unwrap_or_else(|| format!("Player {}", entity_id));
-
-                        let percent = if val.value > 0 {
-                            (value as f32 / val.value as f32) * 100.0
-                        } else {
-                            0.0
-                        };
-
-                        Some(PlayerContribution {
-                            entity_id,
-                            name,
-                            value,
-                            percent,
-                            per_second: if value > 0 {
-                                Some(value as f32 / challenge_duration)
-                            } else {
-                                None
-                            },
-                        })
-                    })
-                    .collect();
-
-                // Sort by value descending (top contributors first)
-                by_player.sort_by(|a, b| b.value.cmp(&a.value));
-
-                ChallengeEntry {
-                    name: val.name,
-                    value: val.value,
-                    event_count: val.event_count,
-                    per_second: if val.value > 0 {
-                        Some(val.value as f32 / challenge_duration)
-                    } else {
-                        None
-                    },
-                    by_player,
-                    duration_secs: challenge_duration,
-                    // Display settings from challenge definition
-                    enabled: val.enabled,
-                    color: val.color.map(|c| Color::from_rgba8(c[0], c[1], c[2], c[3])),
-                    columns: val.columns,
-                }
-            })
+            .filter(|m| m.entity_type != EntityType::Npc)
+            .map(|m| m.to_player_metrics())
             .collect();
 
-        Some(ChallengeData {
-            entries,
-            boss_name,
-            duration_secs: overall_duration,
-            phase_durations: encounter.challenge_tracker.phase_durations().clone(),
+        // Build challenge data from encounter's tracker (persists with encounter, not boss state)
+        let challenges = if encounter.challenge_tracker.is_active() {
+            let boss_name = encounter.active_boss_idx().and_then(|idx| {
+                encounter
+                    .boss_definitions()
+                    .get(idx)
+                    .map(|def| def.name.clone())
+            });
+            let overall_duration = encounter.combat_time_secs.max(1.0);
+            let current_time = chrono::Local::now().naive_local();
+
+            let entries: Vec<ChallengeEntry> = encounter
+                .challenge_tracker
+                .snapshot_live(current_time)
+                .into_iter()
+                .map(|val| {
+                    // Use the challenge's own duration (phase-scoped or total)
+                    let challenge_duration = val.duration_secs.max(1.0);
+
+                    // Build per-player breakdown, sorted by value descending
+                    let mut by_player: Vec<PlayerContribution> = val
+                        .by_player
+                        .iter()
+                        .filter_map(|(&entity_id, &value)| {
+                            // Resolve player name from encounter
+                            let name = encounter
+                                .players
+                                .get(&entity_id)
+                                .map(|p| resolve(p.name).to_string())
+                                .unwrap_or_else(|| format!("Player {}", entity_id));
+
+                            let percent = if val.value > 0 {
+                                (value as f32 / val.value as f32) * 100.0
+                            } else {
+                                0.0
+                            };
+
+                            Some(PlayerContribution {
+                                entity_id,
+                                name,
+                                value,
+                                percent,
+                                per_second: if value > 0 {
+                                    Some(value as f32 / challenge_duration)
+                                } else {
+                                    None
+                                },
+                            })
+                        })
+                        .collect();
+
+                    // Sort by value descending (top contributors first)
+                    by_player.sort_by(|a, b| b.value.cmp(&a.value));
+
+                    ChallengeEntry {
+                        name: val.name,
+                        value: val.value,
+                        event_count: val.event_count,
+                        per_second: if val.value > 0 {
+                            Some(val.value as f32 / challenge_duration)
+                        } else {
+                            None
+                        },
+                        by_player,
+                        duration_secs: challenge_duration,
+                        // Display settings from challenge definition
+                        enabled: val.enabled,
+                        color: val.color.map(|c| Color::from_rgba8(c[0], c[1], c[2], c[3])),
+                        columns: val.columns,
+                    }
+                })
+                .collect();
+
+            Some(ChallengeData {
+                entries,
+                boss_name,
+                duration_secs: overall_duration,
+                phase_durations: encounter.challenge_tracker.phase_durations().clone(),
+            })
+        } else {
+            None
+        };
+
+        // Get phase info from encounter's boss state
+        // Look up the phase display name from the boss definition
+        let current_phase = encounter.current_phase.as_ref().and_then(|phase_id| {
+            encounter.active_boss_definition().and_then(|def| {
+                def.phases
+                    .iter()
+                    .find(|p| &p.id == phase_id)
+                    .map(|p| p.name.clone())
+            })
+        });
+        let phase_time_secs = encounter
+            .phase_started_at
+            .map(|start| {
+                let now = chrono::Local::now().naive_local();
+                (now - start).num_milliseconds() as f32 / 1000.0
+            })
+            .unwrap_or(0.0);
+
+        Some(CombatData {
+            metrics,
+            player_entity_id,
+            encounter_time_secs,
+            encounter_count,
+            class_discipline,
+            encounter_name,
+            difficulty,
+            challenges,
+            current_phase,
+            phase_time_secs,
+        })
+    } else if let Some(summary) = cache.encounter_history.summaries().last() {
+        // Fallback to historical summary for initial hydration when no live encounter exists
+        let encounter_count = cache.encounter_history.summaries().len();
+        let encounter_time_secs = summary.duration_seconds.max(0) as u64;
+        let encounter_name = Some(summary.display_name.clone());
+        let difficulty = summary.difficulty.clone();
+        let metrics = summary.player_metrics.clone();
+
+        Some(CombatData {
+            metrics,
+            player_entity_id,
+            encounter_time_secs,
+            encounter_count,
+            class_discipline,
+            encounter_name,
+            difficulty,
+            challenges: None,
+            current_phase: None,
+            phase_time_secs: 0.0,
         })
     } else {
         None
-    };
-
-    // Get phase info from encounter's boss state
-    // Look up the phase display name from the boss definition
-    let current_phase = encounter.current_phase.as_ref().and_then(|phase_id| {
-        encounter.active_boss_definition().and_then(|def| {
-            def.phases
-                .iter()
-                .find(|p| &p.id == phase_id)
-                .map(|p| p.name.clone())
-        })
-    });
-    let phase_time_secs = encounter
-        .phase_started_at
-        .map(|start| {
-            let now = chrono::Local::now().naive_local();
-            (now - start).num_milliseconds() as f32 / 1000.0
-        })
-        .unwrap_or(0.0);
-
-    Some(CombatData {
-        metrics,
-        player_entity_id,
-        encounter_time_secs,
-        encounter_count,
-        class_discipline,
-        encounter_name,
-        difficulty,
-        challenges,
-        current_phase,
-        phase_time_secs,
-    })
+    }
 }
 
 /// Build raid frame data from the effect tracker and registry
@@ -2343,6 +2401,10 @@ pub struct SessionInfo {
     pub area_name: Option<String>,
     pub in_combat: bool,
     pub encounter_count: usize,
-    /// Session start time extracted from log filename (formatted as HH:MM)
+    /// Session start time extracted from log filename (formatted as "Jan 18, 3:45 PM")
     pub session_start: Option<String>,
+    /// Session end time for historical sessions (formatted as "Jan 18, 3:45 PM")
+    pub session_end: Option<String>,
+    /// Duration formatted as short form (e.g., "47m" or "1h 23m")
+    pub duration_formatted: Option<String>,
 }

@@ -7,12 +7,12 @@
 //! - `service/` - Combat service (background log processing)
 //! - `overlay/` - Overlay management (OverlayManager, spawn, state)
 //! - `router` - Routes service updates to overlay threads
-//! - `hotkeys` - Global hotkey registration (Windows/macOS only)
+//! - `hotkeys` - Global hotkey registration (not supported on Wayland)
 
 mod audio;
 mod commands;
-#[cfg(not(target_os = "linux"))]
 mod hotkeys;
+mod logging;
 pub mod overlay;
 mod router;
 pub mod service;
@@ -50,10 +50,28 @@ fn spawn_auto_show_overlays(overlay_state: SharedOverlayState, service_handle: S
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize logging FIRST - guard must outlive app for buffered log flushing
+    let _logging_guard = logging::init();
+
     // Create shared overlay state
     let overlay_state = Arc::new(Mutex::new(OverlayState::default()));
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    // Single instance plugin - must be registered FIRST to catch duplicate launches early
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // Focus existing window when second instance attempts to launch
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
@@ -70,7 +88,7 @@ pub fn run() {
 
                 // Clear old parquet data from previous sessions
                 if let Err(e) = baras_core::storage::clear_data_dir() {
-                    eprintln!("[STARTUP] Failed to clear data directory: {}", e);
+                    tracing::error!(error = %e, "Failed to clear data directory");
                 }
 
                 // Create and spawn the combat service (includes audio service)
@@ -92,8 +110,7 @@ pub fn run() {
                 // Auto-show enabled overlays on startup
                 spawn_auto_show_overlays(overlay_state.clone(), handle.clone());
 
-                // Register global hotkeys (not supported on Linux/Wayland)
-                #[cfg(not(target_os = "linux"))]
+                // Register global hotkeys (not supported on Wayland)
                 hotkeys::spawn_register_hotkeys(
                     app.handle().clone(),
                     overlay_state.clone(),
@@ -145,6 +162,7 @@ pub fn run() {
             commands::toggle_raid_rearrange,
             commands::get_overlay_status,
             commands::refresh_overlay_settings,
+            commands::preview_overlay_settings,
             commands::clear_raid_registry,
             commands::swap_raid_slots,
             commands::remove_raid_slot,

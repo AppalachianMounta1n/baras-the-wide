@@ -20,6 +20,7 @@ use baras_core::effects::{
 use baras_types::AbilitySelector;
 
 use crate::service::ServiceHandle;
+use tracing::warn;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types for Frontend
@@ -245,9 +246,10 @@ fn load_all_effects(app_handle: &AppHandle) -> Vec<(EffectDefinition, bool)> {
             } else {
                 // Version mismatch - delete user file
                 if let Some(path) = get_user_effects_path() {
-                    eprintln!(
-                        "[EFFECTS] User effects version mismatch (file={}, expected={}), deleting",
-                        version, EFFECTS_DSL_VERSION
+                    warn!(
+                        file_version = version,
+                        expected_version = EFFECTS_DSL_VERSION,
+                        "User effects version mismatch, deleting file"
                     );
                     let _ = std::fs::remove_file(path);
                 }
@@ -492,10 +494,10 @@ fn get_icon_name_mapping(app_handle: &AppHandle) -> Option<&Mutex<HashMap<u64, S
             .filter(|p| p.exists())
             .unwrap_or_else(|| {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .parent()
-                    .unwrap()
-                    .parent()
-                    .unwrap()
+                    .ancestors()
+                    .nth(2)
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from("."))
                     .join("icons")
             });
 
@@ -545,10 +547,10 @@ pub async fn get_icon_preview(app_handle: AppHandle, ability_id: u64) -> Result<
         .filter(|p| p.exists())
         .unwrap_or_else(|| {
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap()
-                .parent()
-                .unwrap()
+                .ancestors()
+                .nth(2)
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."))
                 .join("icons")
         });
 

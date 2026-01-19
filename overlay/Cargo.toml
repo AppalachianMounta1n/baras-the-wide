@@ -6,18 +6,24 @@ edition = "2024"
 [lints]
 workspace = true
 
+[features]
+default = []
 
 [dependencies]
 baras-core = { path = "../core" }
 
 # Rendering (cross-platform)
 tiny-skia = "0.11"
-cosmic-text = "0.15"
+cosmic-text = "0.16"
 fontdb = "0.23"      # Shared font database (re-export from cosmic-text)
 sys-locale = "0.3"   # System locale detection
 
 # Async runtime
 tokio = { version = "1.48", features = ["sync", "rt", "macros"] }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 # Icon loading
 png = "0.17"
@@ -31,21 +37,43 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 memmap2 = "0.9"
 rustix = { version = "1.0", features = ["fs", "mm"] }
 
-# Platform: X11 (Linux fallback) - TODO
-# x11rb = "0.13"
+# Platform: X11 (Linux fallback)
+x11rb = { version = "0.13", features = ["randr", "shape", "shm"] }
 
 # Platform: Windows
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Gdi",
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_System_LibraryLoader",
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_System_LibraryLoader",
 ] }
 
-# Platform: macOS - TODO
-# [target.'cfg(target_os = "macos")'.dependencies]
-# cocoa = "0.25"
-# core-graphics = "0.23"
-# objc = "0.2"
+# Platform: macOS
+[target.'cfg(target_os = "macos")'.dependencies]
+# Keep core-graphics for CGContext operations
+core-graphics = "0.24"
+# GCD for main thread dispatch
+dispatch = "0.2"
+
+# New objc2 ecosystem
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "NSArray",
+  "NSDate",
+  "NSGeometry",
+  "NSObject",
+  "NSString",
+] }
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+  "NSApplication",
+  "NSColor",
+  "NSEvent",
+  "NSGraphicsContext",
+  "NSResponder",
+  "NSRunningApplication",
+  "NSScreen",
+  "NSView",
+  "NSWindow",
+] }

@@ -4,11 +4,11 @@ use dioxus::prelude::*;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::console;
 
 use crate::api;
 use crate::components::{
-    DataExplorerPanel, EffectEditorPanel, EncounterEditorPanel, HistoryPanel, SettingsPanel,
+    DataExplorerPanel, EffectEditorPanel, EncounterEditorPanel, HistoryPanel, HotkeyInput,
+    SettingsPanel, ToastFrame, ToastSeverity, use_toast, use_toast_provider,
 };
 use crate::types::{
     LogFileInfo, MetricType, OverlaySettings, OverlayStatus, OverlayType, SessionInfo, UpdateInfo,
@@ -24,6 +24,9 @@ static FONT: Asset = asset!("/assets/StarJedi.ttf");
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub fn App() -> Element {
+    // Initialize toast system at app root
+    let _toast_manager = use_toast_provider();
+
     // Overlay state
     let mut metric_overlays_enabled = use_signal(|| {
         MetricType::all()
@@ -239,8 +242,9 @@ pub fn App() -> Element {
     use_future(move || async move {
         let closure = Closure::new(move |event: JsValue| {
             if let Ok(payload) = js_sys::Reflect::get(&event, &JsValue::from_str("payload"))
-                && let Ok(info) = serde_wasm_bindgen::from_value::<UpdateInfo>(payload) {
-                    let _ = update_available.try_write().map(|mut w| *w = Some(info));
+                && let Ok(info) = serde_wasm_bindgen::from_value::<UpdateInfo>(payload)
+            {
+                let _ = update_available.try_write().map(|mut w| *w = Some(info));
             }
         });
         api::tauri_listen("update-available", &closure).await;
@@ -248,11 +252,14 @@ pub fn App() -> Element {
     });
 
     // Listen for update failures
+    let mut update_failed_toast = use_toast();
     use_future(move || async move {
         let closure = Closure::new(move |event: JsValue| {
             if let Ok(payload) = js_sys::Reflect::get(&event, &JsValue::from_str("payload"))
-                && let Some(msg) = payload.as_string() {
-                    console::error_1(&format!("Update failed: {}", msg).into());
+                && let Some(msg) = payload.as_string()
+            {
+                update_failed_toast
+                    .show(format!("Update failed: {}", msg), ToastSeverity::Critical);
             }
             // Reset installing state so user can retry
             let _ = update_installing.try_write().map(|mut w| *w = false);
@@ -306,7 +313,14 @@ pub fn App() -> Element {
     let watching = is_watching();
     let live_tailing = is_live_tailing();
     let current_file = active_file();
+
+    // Session state for the session tab
     let session = session_info();
+    let has_player = session
+        .as_ref()
+        .map(|s| s.player_name.as_ref().is_some_and(|n| !n.is_empty()))
+        .unwrap_or(false);
+    let show_empty_state = !has_player;
 
     // ─────────────────────────────────────────────────────────────────────────
     // Render
@@ -316,7 +330,7 @@ pub fn App() -> Element {
         link { rel: "stylesheet", href: CSS }
         link { rel: "stylesheet", href: DATA_EXPLORER_CSS }
         link { rel: "stylesheet", href: "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" }
-        style { "@font-face {{ font-family: 'StarJedi'; src: url('{FONT}') format('truetype'); }}" }
+        style { "@font-face {{ font-family: 'StarJedi'; src: url('{FONT}') format('truetype'); font-display: block; font-weight: normal; font-style: normal; }}" }
 
         main { class: "container",
             // Header
@@ -333,9 +347,10 @@ pub fn App() -> Element {
                                 disabled: update_installing(),
                                 onclick: move |_| {
                                     update_installing.set(true);
+                                    let mut toast = use_toast();
                                     spawn(async move {
                                         if let Err(e) = api::install_update().await {
-                                            console::error_1(&format!("Update failed: {}", e).into());
+                                            toast.show(format!("Update failed: {}", e), ToastSeverity::Critical);
                                             update_installing.set(false);
                                         }
                                         // On success, app will restart automatically
@@ -382,61 +397,75 @@ pub fn App() -> Element {
                         i { class: "fa-solid fa-circle-question" }
                     }
                 }
-                // Session indicator (always visible)
-                div { class: "header-session-indicator",
-                    // Watcher status dot
-                    span {
-                        class: if !live_tailing { "status-dot paused" }
-                            else if watching { "status-dot watching" }
-                            else { "status-dot not-watching" },
-                        title: if !live_tailing { "Paused" } else if watching { "Watching" } else { "Not watching" }
-                    }
-                    // Viewing indicator
-                    {
-                        let current_meta = log_files().iter().find(|f| f.path == current_file).cloned();
-                        let display = current_meta.as_ref()
-                            .map(|f| f.character_name.clone().unwrap_or_else(|| f.display_name.clone()))
-                            .unwrap_or_else(|| "None".to_string());
-                        let date = current_meta.as_ref().map(|f| f.date.clone()).unwrap_or_default();
-                        let is_latest = log_files().first().map(|f| f.path == current_file).unwrap_or(false);
-                        rsx! {
-                            span {
-                                class: if is_latest { "session-file latest" } else { "session-file" },
-                                title: if is_latest { format!("Viewing latest: {} - {}", display, date) } else { format!("Viewing: {} - {}", display, date) },
-                                if is_latest {
-                                    i { class: "fa-solid fa-clock" }
-                                } else {
-                                    i { class: "fa-solid fa-file-lines" }
-                                }
-                                " {display}"
-                            }
-                        }
-                    }
-                    // Resume button when paused
+                // Session indicator wrapper (resume button on left + indicator box)
+                div { class: "header-session-wrapper",
+                    // Resume Live button on the left
                     if !live_tailing {
                         button {
-                            class: "btn-header-resume",
+                            class: "btn-resume-live",
                             title: "Resume live tailing",
                             onclick: move |_| {
+                                let mut toast = use_toast();
                                 spawn(async move {
-                                    api::resume_live_tailing().await;
-                                    is_live_tailing.set(true);
+                                    if let Err(err) = api::resume_live_tailing().await {
+                                        toast.show(format!("Failed to resume live tailing: {}", err), ToastSeverity::Normal);
+                                    } else {
+                                        is_live_tailing.set(true);
+                                    }
                                 });
                             },
+                            "Resume Live "
                             i { class: "fa-solid fa-play" }
                         }
                     }
-                    // Restart watcher button
-                    button {
-                        class: "btn-header-restart",
-                        title: "Restart watcher",
-                        onclick: move |_| {
-                            spawn(async move {
-                                api::restart_watcher().await;
-                                is_live_tailing.set(true);
-                            });
-                        },
-                        i { class: "fa-solid fa-rotate" }
+                    // Session indicator box
+                    div { class: "header-session-indicator",
+                        // Watcher status dot
+                        span {
+                            class: if !live_tailing { "status-dot paused" }
+                                else if watching { "status-dot watching" }
+                                else { "status-dot not-watching" },
+                            title: if !live_tailing { "Paused" } else if watching { "Watching" } else { "Not watching" }
+                        }
+                        // Viewing indicator
+                        {
+                            let current_meta = log_files().iter().find(|f| f.path == current_file).cloned();
+                            let display = current_meta.as_ref()
+                                .map(|f| {
+                                    f.character_name.clone().unwrap_or_else(|| {
+                                        // Show different text for historical vs live when no character
+                                        if live_tailing { "Waiting for player...".to_string() }
+                                        else { "Loading file...".to_string() }
+                                    })
+                                })
+                                .unwrap_or_else(|| "None".to_string());
+                            let date = current_meta.as_ref().map(|f| f.date.clone()).unwrap_or_default();
+                            let is_latest = log_files().first().map(|f| f.path == current_file).unwrap_or(false);
+                            rsx! {
+                                span {
+                                    class: if is_latest { "session-file latest" } else { "session-file" },
+                                    title: if is_latest { format!("Viewing latest: {} - {}", display, date) } else { format!("Viewing: {} - {}", display, date) },
+                                    if is_latest {
+                                        i { class: "fa-solid fa-clock" }
+                                    } else {
+                                        i { class: "fa-solid fa-file-lines" }
+                                    }
+                                    " {display}"
+                                }
+                            }
+                        }
+                        // Restart watcher button
+                        button {
+                            class: "btn-header-restart",
+                            title: "Restart watcher",
+                            onclick: move |_| {
+                                spawn(async move {
+                                    api::restart_watcher().await;
+                                    is_live_tailing.set(true);
+                                });
+                            },
+                            i { class: "fa-solid fa-rotate" }
+                        }
                     }
                 }
 
@@ -450,20 +479,25 @@ pub fn App() -> Element {
                             value: active_profile().unwrap_or_default(),
                             onchange: move |e| {
                                 let selected = e.value();
+                                let mut toast = use_toast();
                                 spawn(async move {
-                                    if !selected.is_empty() && api::load_profile(&selected).await {
-                                        active_profile.set(Some(selected));
-                                        if let Some(cfg) = api::get_config().await {
-                                            overlay_settings.set(cfg.overlay_settings);
-                                        }
-                                        api::refresh_overlay_settings().await;
-                                        if let Some(status) = api::get_overlay_status().await {
-                                            apply_status(&status, &mut metric_overlays_enabled, &mut personal_enabled,
-                                                &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
-                                                &mut challenges_enabled, &mut alerts_enabled,
-                                                &mut effects_a_enabled, &mut effects_b_enabled,
-                                                &mut cooldowns_enabled, &mut dot_tracker_enabled,
-                                                &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
+                                    if !selected.is_empty() {
+                                        if let Err(err) = api::load_profile(&selected).await {
+                                            toast.show(format!("Failed to load profile: {}", err), ToastSeverity::Normal);
+                                        } else {
+                                            active_profile.set(Some(selected));
+                                            if let Some(cfg) = api::get_config().await {
+                                                overlay_settings.set(cfg.overlay_settings);
+                                            }
+                                            api::refresh_overlay_settings().await;
+                                            if let Some(status) = api::get_overlay_status().await {
+                                                apply_status(&status, &mut metric_overlays_enabled, &mut personal_enabled,
+                                                    &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
+                                                    &mut challenges_enabled, &mut alerts_enabled,
+                                                    &mut effects_a_enabled, &mut effects_b_enabled,
+                                                    &mut cooldowns_enabled, &mut dot_tracker_enabled,
+                                                    &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
+                                            }
                                         }
                                     }
                                 });
@@ -586,46 +620,197 @@ pub fn App() -> Element {
                 // Session Tab
                 // ─────────────────────────────────────────────────────────────
                 if active_tab() == "session" {
-                    if let Some(ref info) = session {
-                        section { class: "session-panel",
-                        if is_live_tailing() {
-                            h3 {"Live Session"}
+                    // Empty states: show when no player data yet
+                    if show_empty_state {
+                        if !live_tailing {
+                            // Loading a historical file
+                            div { class: "session-empty",
+                                i { class: "fa-solid fa-spinner fa-spin" }
+                                p { "Loading file..." }
+                                p { class: "hint", "Reading historical session data" }
+                            }
+                        } else if log_files().is_empty() {
+                            // No log files found - prompt user to configure directory
+                            div { class: "session-empty alert",
+                                i { class: "fa-solid fa-triangle-exclamation" }
+                                p { "No log files found" }
+                                p { class: "hint",
+                                    "Choose a log directory in "
+                                    span {
+                                        class: "settings-link",
+                                        onclick: move |_| general_settings_open.set(true),
+                                        "settings"
+                                    }
+                                }
+                            }
+                        } else if watching {
+                            // Live: Log file detected but no character data yet
+                            div { class: "session-empty",
+                                i { class: "fa-solid fa-hourglass-half" }
+                                p { "Waiting for player..." }
+                                p { class: "hint", "Log file detected, waiting for character login" }
+                            }
                         } else {
-                            h3 { "Historical Session" }
+                            // Not watching - watcher may have stopped
+                            div { class: "session-empty",
+                                i { class: "fa-solid fa-inbox" }
+                                p { "No Active Session" }
+                                p { class: "hint", "File watcher is not running" }
+                            }
                         }
+                    }
+
+                    // Session panel with info - only show when we have player data
+                    if let Some(ref info) = session {
+                    if has_player {
+                        section {
+                            class: if live_tailing { "session-panel" } else { "session-panel historical" },
+
+                            // Session toolbar: header + upload button
+                            div { class: "session-toolbar",
+                                if live_tailing {
+                                    h3 { class: "session-header live",
+                                        i { class: "fa-solid fa-circle-play" }
+                                        " Live Session"
+                                    }
+                                } else {
+                                    h3 { class: "session-header historical",
+                                        i { class: "fa-solid fa-circle-pause" }
+                                        " Historical Session"
+                                    }
+                                }
+
+                                // Parsely upload button
+                                if !current_file.is_empty() {
+                                    {
+                                        let path = current_file.clone();
+                                        let is_uploading = upload_status().as_ref().map(|(p, _, msg)| p == &path && msg == "Uploading...").unwrap_or(false);
+                                        rsx! {
+                                            div { class: "session-upload-group",
+                                                button {
+                                                    class: "btn btn-session-upload",
+                                                    title: "Upload to Parsely",
+                                                    disabled: is_uploading,
+                                                    onclick: move |_| {
+                                                        let p = path.clone();
+                                                        upload_status.set(Some((p.clone(), true, "Uploading...".to_string())));
+                                                        spawn(async move {
+                                                            match api::upload_to_parsely(&p).await {
+                                                                Ok(resp) if resp.success => {
+                                                                    let link = resp.link.unwrap_or_default();
+                                                                    upload_status.set(Some((p, true, link)));
+                                                                }
+                                                                Ok(resp) => {
+                                                                    let err = resp.error.unwrap_or_else(|| "Upload failed".to_string());
+                                                                    upload_status.set(Some((p, false, err)));
+                                                                }
+                                                                Err(e) => {
+                                                                    upload_status.set(Some((p, false, e)));
+                                                                }
+                                                            }
+                                                        });
+                                                    },
+                                                    if is_uploading {
+                                                        i { class: "fa-solid fa-spinner fa-spin" }
+                                                        " Uploading..."
+                                                    } else {
+                                                        i { class: "fa-solid fa-cloud-arrow-up" }
+                                                        " Parsely"
+                                                    }
+                                                }
+                                                // Show upload result inline
+                                                if let Some((ref p, success, ref msg)) = upload_status() {
+                                                    if p == &path && msg != "Uploading..." {
+                                                        if success {
+                                                            button {
+                                                                class: "btn btn-session-upload-result",
+                                                                title: "Open in browser",
+                                                                onclick: {
+                                                                    let url = msg.clone();
+                                                                    move |_| {
+                                                                        let u = url.clone();
+                                                                        spawn(async move { api::open_url(&u).await; });
+                                                                    }
+                                                                },
+                                                                i { class: "fa-solid fa-external-link-alt" }
+                                                            }
+                                                        } else {
+                                                            span { class: "upload-error", title: "{msg}",
+                                                                i { class: "fa-solid fa-triangle-exclamation" }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             div { class: "session-grid",
-                                // Row 1: Player - Area - Session Start
+                                // Player name - only show if present and non-empty
                                 if let Some(ref name) = info.player_name {
-                                    div { class: "session-item",
-                                        span { class: "label", "Player" }
-                                        span { class: "value", "{name}" }
+                                    if !name.is_empty() {
+                                        div { class: "session-item",
+                                            span { class: "label", "Player" }
+                                            span { class: "value", "{name}" }
+                                        }
                                     }
                                 }
-                                if let Some(ref area) = info.area_name {
-                                    div { class: "session-item",
-                                        span { class: "label", "Area" }
-                                        span { class: "value", "{area}" }
-                                    }
-                                }
+
+                                // Started time - only show if present
                                 if let Some(ref start) = info.session_start {
                                     div { class: "session-item",
                                         span { class: "label", "Started" }
                                         span { class: "value", "{start}" }
                                     }
                                 }
-                                // Row 2: Class - Discipline - Combat
-                                if let Some(ref class_name) = info.player_class {
-                                    div { class: "session-item",
-                                        span { class: "label", "Class" }
-                                        span { class: "value", "{class_name}" }
+
+                                // Area, Class, Discipline only for live sessions with actual values
+                                if live_tailing {
+                                    if let Some(ref area) = info.area_name {
+                                        if !area.is_empty() {
+                                            div { class: "session-item",
+                                                span { class: "label", "Area" }
+                                                span { class: "value", "{area}" }
+                                            }
+                                        }
+                                    }
+                                    if let Some(ref class_name) = info.player_class {
+                                        if !class_name.is_empty() {
+                                            div { class: "session-item",
+                                                span { class: "label", "Class" }
+                                                span { class: "value", "{class_name}" }
+                                            }
+                                        }
+                                    }
+                                    if let Some(ref disc) = info.player_discipline {
+                                        if !disc.is_empty() {
+                                            div { class: "session-item",
+                                                span { class: "label", "Discipline" }
+                                                span { class: "value", "{disc}" }
+                                            }
+                                        }
                                     }
                                 }
-                                if let Some(ref disc) = info.player_discipline {
-                                    div { class: "session-item",
-                                        span { class: "label", "Discipline" }
-                                        span { class: "value", "{disc}" }
+
+                                // Ended and Duration for historical sessions only
+                                if !live_tailing {
+                                    if let Some(ref end) = info.session_end {
+                                        div { class: "session-item",
+                                            span { class: "label", "Ended" }
+                                            span { class: "value", "{end}" }
+                                        }
+                                    }
+                                    if let Some(ref duration) = info.duration_formatted {
+                                        div { class: "session-item",
+                                            span { class: "label", "Duration" }
+                                            span { class: "value", "{duration}" }
+                                        }
                                     }
                                 }
+
+                                // Combat status - always shown
                                 div { class: "session-item",
                                     span { class: "label", "Combat" }
                                     span {
@@ -636,6 +821,10 @@ pub fn App() -> Element {
                             }
                         }
                     }
+                    }
+
+                    // Player stats for GCD/timing calculations
+                    PlayerStatsBar {}
 
                     div { class: "history-container-large", HistoryPanel { show_only_bosses } }
                 }
@@ -649,32 +838,67 @@ pub fn App() -> Element {
                         div { class: "overlays-top-bar",
                             button {
                                 class: "btn btn-customize",
+                                title: "Open overlay appearance and behavior settings",
                                 onclick: move |_| settings_open.set(!settings_open()),
                                 i { class: "fa-solid fa-screwdriver-wrench" }
-                                span { " Customize" }
+                                span { " Settings" }
                             }
-                            if !profile_names().is_empty() {
-                                div { class: "profile-selector",
+                            div { class: "profile-selector",
+                                if profile_names().is_empty() {
+                                    // Empty state: no profiles exist
+                                    span { class: "profile-label", "Profile:" }
+                                    span { class: "profile-current", "Default" }
+                                    button {
+                                        class: "profile-save-btn",
+                                        title: "Save current settings as a profile",
+                                        onclick: move |_| {
+                                            let mut toast = use_toast();
+                                            spawn(async move {
+                                                // Generate a unique profile name
+                                                let name = "Profile 1".to_string();
+                                                match api::save_profile(&name).await {
+                                                    Err(err) => {
+                                                        toast.show(format!("Failed to create profile: {}", err), ToastSeverity::Normal);
+                                                    }
+                                                    Ok(_) => {
+                                                        // Refresh profile list and set as active
+                                                        let names = api::get_profile_names().await;
+                                                        profile_names.set(names);
+                                                        active_profile.set(Some(name));
+                                                    }
+                                                }
+                                            });
+                                        },
+                                        i { class: "fa-solid fa-plus" }
+                                        span { " Save as Profile" }
+                                    }
+                                } else {
+                                    // Profiles exist: show dropdown
                                     span { class: "profile-label", "Profiles:" }
                                     select {
                                         class: "profile-dropdown",
                                         value: active_profile().unwrap_or_default(),
                                         onchange: move |e| {
                                             let selected = e.value();
+                                            let mut toast = use_toast();
                                             spawn(async move {
-                                                if !selected.is_empty() && api::load_profile(&selected).await {
-                                                    active_profile.set(Some(selected));
-                                                    if let Some(cfg) = api::get_config().await {
-                                                        overlay_settings.set(cfg.overlay_settings);
-                                                    }
-                                                    api::refresh_overlay_settings().await;
-                                                    if let Some(status) = api::get_overlay_status().await {
-                                                        apply_status(&status, &mut metric_overlays_enabled, &mut personal_enabled,
-                                                            &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
-                                                            &mut challenges_enabled, &mut alerts_enabled,
-                                                            &mut effects_a_enabled, &mut effects_b_enabled,
-                                                            &mut cooldowns_enabled, &mut dot_tracker_enabled,
-                                                            &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
+                                                if !selected.is_empty() {
+                                                    if let Err(err) = api::load_profile(&selected).await {
+                                                        toast.show(format!("Failed to load profile: {}", err), ToastSeverity::Normal);
+                                                    } else {
+                                                        active_profile.set(Some(selected));
+                                                        if let Some(cfg) = api::get_config().await {
+                                                            overlay_settings.set(cfg.overlay_settings);
+                                                        }
+                                                        api::refresh_overlay_settings().await;
+                                                        if let Some(status) = api::get_overlay_status().await {
+                                                            apply_status(&status, &mut metric_overlays_enabled, &mut personal_enabled,
+                                                                &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
+                                                                &mut challenges_enabled, &mut alerts_enabled,
+                                                                &mut effects_a_enabled, &mut effects_b_enabled,
+                                                                &mut cooldowns_enabled, &mut dot_tracker_enabled,
+                                                                &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
+                                                        }
                                                     }
                                                 }
                                             });
@@ -690,7 +914,12 @@ pub fn App() -> Element {
                                             onclick: move |_| {
                                                 if let Some(ref name) = active_profile() {
                                                     let n = name.clone();
-                                                    spawn(async move { api::save_profile(&n).await; });
+                                                    let mut toast = use_toast();
+                                                    spawn(async move {
+                                                        if let Err(err) = api::save_profile(&n).await {
+                                                            toast.show(format!("Failed to save profile: {}", err), ToastSeverity::Normal);
+                                                        }
+                                                    });
                                                 }
                                             },
                                             i { class: "fa-solid fa-floppy-disk" }
@@ -752,6 +981,7 @@ pub fn App() -> Element {
                         div { class: "overlay-grid",
                             button {
                                 class: if personal_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                title: "Shows your personal combat statistics",
                                 onclick: move |_| { spawn(async move {
                                     if api::toggle_overlay(OverlayType::Personal, personal_on).await {
                                         personal_enabled.set(!personal_on);
@@ -761,6 +991,7 @@ pub fn App() -> Element {
                             }
                             button {
                                 class: if raid_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                title: "Displays party/raid member health bars with effect tracking",
                                 onclick: move |_| { spawn(async move {
                                     if api::toggle_overlay(OverlayType::Raid, raid_on).await {
                                         raid_enabled.set(!raid_on);
@@ -771,6 +1002,7 @@ pub fn App() -> Element {
                             }
                             button {
                                 class: if boss_health_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                title: "Shows boss health bars and cast timers",
                                 onclick: move |_| { spawn(async move {
                                     if api::toggle_overlay(OverlayType::BossHealth, boss_health_on).await {
                                         boss_health_enabled.set(!boss_health_on);
@@ -780,6 +1012,7 @@ pub fn App() -> Element {
                             }
                             button {
                                 class: if timers_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                title: "Displays encounter-specific timers and phase markers",
                                 onclick: move |_| { spawn(async move {
                                     if api::toggle_overlay(OverlayType::Timers, timers_on).await {
                                         timers_enabled.set(!timers_on);
@@ -789,6 +1022,7 @@ pub fn App() -> Element {
                             }
                             button {
                                 class: if challenges_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                title: "Tracks raid challenge objectives and progress",
                                 onclick: move |_| { spawn(async move {
                                     if api::toggle_overlay(OverlayType::Challenges, challenges_on).await {
                                         challenges_enabled.set(!challenges_on);
@@ -798,6 +1032,7 @@ pub fn App() -> Element {
                             }
                             button {
                                 class: if alerts_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                title: "Shows combat alerts and notifications",
                                 onclick: move |_| { spawn(async move {
                                     if api::toggle_overlay(OverlayType::Alerts, alerts_on).await {
                                         alerts_enabled.set(!alerts_on);
@@ -812,6 +1047,7 @@ pub fn App() -> Element {
                         div { class: "overlay-grid",
                             button {
                                 class: if effects_a_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                title: "Displays tracked buffs and effects (Group A)",
                                 onclick: move |_| { spawn(async move {
                                     if api::toggle_overlay(OverlayType::EffectsA, effects_a_on).await {
                                         effects_a_enabled.set(!effects_a_on);
@@ -821,6 +1057,7 @@ pub fn App() -> Element {
                             }
                             button {
                                 class: if effects_b_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                title: "Displays tracked buffs and effects (Group B)",
                                 onclick: move |_| { spawn(async move {
                                     if api::toggle_overlay(OverlayType::EffectsB, effects_b_on).await {
                                         effects_b_enabled.set(!effects_b_on);
@@ -830,6 +1067,7 @@ pub fn App() -> Element {
                             }
                             button {
                                 class: if cooldowns_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                title: "Tracks ability cooldowns",
                                 onclick: move |_| { spawn(async move {
                                     if api::toggle_overlay(OverlayType::Cooldowns, cooldowns_on).await {
                                         cooldowns_enabled.set(!cooldowns_on);
@@ -839,6 +1077,7 @@ pub fn App() -> Element {
                             }
                             button {
                                 class: if dot_tracker_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                title: "Tracks damage-over-time effects on targets",
                                 onclick: move |_| { spawn(async move {
                                     if api::toggle_overlay(OverlayType::DotTracker, dot_tracker_on).await {
                                         dot_tracker_enabled.set(!dot_tracker_on);
@@ -881,10 +1120,13 @@ pub fn App() -> Element {
                                     checked: overlay_settings().hide_during_conversations,
                                     onchange: move |e| {
                                         let enabled = e.checked();
+                                        let mut toast = use_toast();
                                         spawn(async move {
                                             if let Some(mut cfg) = api::get_config().await {
                                                 cfg.overlay_settings.hide_during_conversations = enabled;
-                                                let _ = api::update_config(&cfg).await;
+                                                if let Err(err) = api::update_config(&cfg).await {
+                                                    toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                                }
                                             }
                                         });
                                     },
@@ -954,6 +1196,7 @@ pub fn App() -> Element {
                                 button { class: "btn btn-close", onclick: move |_| general_settings_open.set(false), "X" }
                             }
 
+                            div { class: "settings-content",
                             div { class: "settings-section",
                                 h4 { "Log Directory" }
                                 p { class: "hint", "Select the directory containing your SWTOR combat logs." }
@@ -966,22 +1209,28 @@ pub fn App() -> Element {
                                     }
                                     button {
                                         class: "btn btn-browse",
-                                        onclick: move |_| { spawn(async move {
-                                            if let Some(path) = api::pick_directory("Select Log Directory").await {
-                                                log_directory.set(path.clone());
-                                                if let Some(mut cfg) = api::get_config().await {
-                                                    cfg.log_directory = path;
-                                                    api::update_config(&cfg).await;
-                                                    // Restart watcher and rebuild index for new directory
-                                                    api::restart_watcher().await;
-                                                    api::refresh_log_index().await;
-                                                    is_watching.set(true);
-                                                    // Now fetch updated stats
-                                                    log_dir_size.set(api::get_log_directory_size().await);
-                                                    log_file_count.set(api::get_log_file_count().await);
+                                        onclick: move |_| {
+                                            let mut toast = use_toast();
+                                            spawn(async move {
+                                                if let Some(path) = api::pick_directory("Select Log Directory").await {
+                                                    log_directory.set(path.clone());
+                                                    if let Some(mut cfg) = api::get_config().await {
+                                                        cfg.log_directory = path;
+                                                        if let Err(err) = api::update_config(&cfg).await {
+                                                            toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                                        } else {
+                                                            // Restart watcher and rebuild index for new directory
+                                                            api::restart_watcher().await;
+                                                            api::refresh_log_index().await;
+                                                            is_watching.set(true);
+                                                            // Now fetch updated stats
+                                                            log_dir_size.set(api::get_log_directory_size().await);
+                                                            log_file_count.set(api::get_log_file_count().await);
+                                                        }
+                                                    }
                                                 }
-                                            }
-                                        }); },
+                                            });
+                                        },
                                         i { class: "fa-solid fa-folder-open" }
                                         " Browse"
                                     }
@@ -1012,10 +1261,13 @@ pub fn App() -> Element {
                                         onchange: move |e| {
                                             let checked = e.checked();
                                             auto_delete_empty.set(checked);
+                                            let mut toast = use_toast();
                                             spawn(async move {
                                                 if let Some(mut cfg) = api::get_config().await {
                                                     cfg.auto_delete_empty_files = checked;
-                                                    api::update_config(&cfg).await;
+                                                    if let Err(err) = api::update_config(&cfg).await {
+                                                        toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                                    }
                                                 }
                                             });
                                         }
@@ -1030,10 +1282,13 @@ pub fn App() -> Element {
                                         onchange: move |e| {
                                             let checked = e.checked();
                                             auto_delete_old.set(checked);
+                                            let mut toast = use_toast();
                                             spawn(async move {
                                                 if let Some(mut cfg) = api::get_config().await {
                                                     cfg.auto_delete_old_files = checked;
-                                                    api::update_config(&cfg).await;
+                                                    if let Err(err) = api::update_config(&cfg).await {
+                                                        toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                                    }
                                                 }
                                             });
                                         }
@@ -1051,10 +1306,13 @@ pub fn App() -> Element {
                                             if let Ok(days) = e.value().parse::<u32>() {
                                                 let days = days.clamp(1, 365);
                                                 retention_days.set(days);
+                                                let mut toast = use_toast();
                                                 spawn(async move {
                                                     if let Some(mut cfg) = api::get_config().await {
                                                         cfg.log_retention_days = days;
-                                                        api::update_config(&cfg).await;
+                                                        if let Err(err) = api::update_config(&cfg).await {
+                                                            toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                                        }
                                                     }
                                                 });
                                             }
@@ -1097,10 +1355,13 @@ pub fn App() -> Element {
                                         onchange: move |e| {
                                             let checked = e.checked();
                                             minimize_to_tray.set(checked);
+                                            let mut toast = use_toast();
                                             spawn(async move {
                                                 if let Some(mut cfg) = api::get_config().await {
                                                     cfg.minimize_to_tray = checked;
-                                                    api::update_config(&cfg).await;
+                                                    if let Err(err) = api::update_config(&cfg).await {
+                                                        toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                                    }
                                                 }
                                             });
                                         }
@@ -1111,7 +1372,11 @@ pub fn App() -> Element {
 
                             div { class: "settings-section",
                                 h4 { "Global Hotkeys" }
-                                p { class: "hint", "Format: Ctrl+Shift+Key (Windows only)" }
+                                p { class: "hint", "Click to capture a key combination. Backspace to clear." }
+                                p { class: "hint hint-warning",
+                                    i { class: "fa-solid fa-triangle-exclamation" }
+                                    " Global hotkeys are not supported on Linux Wayland"
+                                }
                                 p { class: "hint hint-warning",
                                     i { class: "fa-solid fa-triangle-exclamation" }
                                     " Restart app after changes."
@@ -1119,18 +1384,24 @@ pub fn App() -> Element {
                                 div { class: "hotkey-grid",
                                     div { class: "setting-row",
                                         label { "Show/Hide" }
-                                        input { r#type: "text", class: "hotkey-input", placeholder: "e.g., Ctrl+Shift+O",
-                                            value: hotkey_visibility, oninput: move |e| hotkey_visibility.set(e.value()) }
+                                        HotkeyInput {
+                                            value: hotkey_visibility(),
+                                            on_change: move |v| hotkey_visibility.set(v),
+                                        }
                                     }
                                     div { class: "setting-row",
                                         label { "Move Mode" }
-                                        input { r#type: "text", class: "hotkey-input", placeholder: "e.g., Ctrl+Shift+M",
-                                            value: hotkey_move_mode, oninput: move |e| hotkey_move_mode.set(e.value()) }
+                                        HotkeyInput {
+                                            value: hotkey_move_mode(),
+                                            on_change: move |v| hotkey_move_mode.set(v),
+                                        }
                                     }
                                     div { class: "setting-row",
                                         label { "Rearrange" }
-                                        input { r#type: "text", class: "hotkey-input", placeholder: "e.g., Ctrl+Shift+R",
-                                            value: hotkey_rearrange, oninput: move |e| hotkey_rearrange.set(e.value()) }
+                                        HotkeyInput {
+                                            value: hotkey_rearrange(),
+                                            on_change: move |v| hotkey_rearrange.set(v),
+                                        }
                                     }
                                 }
                                 div { class: "settings-footer",
@@ -1138,12 +1409,15 @@ pub fn App() -> Element {
                                         class: "btn btn-save",
                                         onclick: move |_| {
                                             let v = hotkey_visibility(); let m = hotkey_move_mode(); let r = hotkey_rearrange();
+                                            let mut toast = use_toast();
                                             spawn(async move {
                                                 if let Some(mut cfg) = api::get_config().await {
                                                     cfg.hotkeys.toggle_visibility = if v.is_empty() { None } else { Some(v) };
                                                     cfg.hotkeys.toggle_move_mode = if m.is_empty() { None } else { Some(m) };
                                                     cfg.hotkeys.toggle_rearrange_mode = if r.is_empty() { None } else { Some(r) };
-                                                    if api::update_config(&cfg).await {
+                                                    if let Err(err) = api::update_config(&cfg).await {
+                                                        toast.show(format!("Failed to save hotkeys: {}", err), ToastSeverity::Normal);
+                                                    } else {
                                                         hotkey_save_status.set("Saved! Restart to apply.".to_string());
                                                     }
                                                 }
@@ -1167,10 +1441,13 @@ pub fn App() -> Element {
                                         onchange: move |e| {
                                             let checked = e.checked();
                                             audio_enabled.set(checked);
+                                            let mut toast = use_toast();
                                             spawn(async move {
                                                 if let Some(mut cfg) = api::get_config().await {
                                                     cfg.audio.enabled = checked;
-                                                    api::update_config(&cfg).await;
+                                                    if let Err(err) = api::update_config(&cfg).await {
+                                                        toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                                    }
                                                 }
                                             });
                                         }
@@ -1188,10 +1465,13 @@ pub fn App() -> Element {
                                         oninput: move |e| {
                                             if let Ok(val) = e.value().parse::<u8>() {
                                                 audio_volume.set(val);
+                                                let mut toast = use_toast();
                                                 spawn(async move {
                                                     if let Some(mut cfg) = api::get_config().await {
                                                         cfg.audio.volume = val;
-                                                        api::update_config(&cfg).await;
+                                                        if let Err(err) = api::update_config(&cfg).await {
+                                                            toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                                        }
                                                     }
                                                 });
                                             }
@@ -1209,10 +1489,13 @@ pub fn App() -> Element {
                                         onchange: move |e| {
                                             let checked = e.checked();
                                             audio_countdown_enabled.set(checked);
+                                            let mut toast = use_toast();
                                             spawn(async move {
                                                 if let Some(mut cfg) = api::get_config().await {
                                                     cfg.audio.countdown_enabled = checked;
-                                                    api::update_config(&cfg).await;
+                                                    if let Err(err) = api::update_config(&cfg).await {
+                                                        toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                                    }
                                                 }
                                             });
                                         }
@@ -1228,10 +1511,13 @@ pub fn App() -> Element {
                                         onchange: move |e| {
                                             let checked = e.checked();
                                             audio_alerts_enabled.set(checked);
+                                            let mut toast = use_toast();
                                             spawn(async move {
                                                 if let Some(mut cfg) = api::get_config().await {
                                                     cfg.audio.alerts_enabled = checked;
-                                                    api::update_config(&cfg).await;
+                                                    if let Err(err) = api::update_config(&cfg).await {
+                                                        toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                                    }
                                                 }
                                             });
                                         }
@@ -1278,12 +1564,15 @@ pub fn App() -> Element {
                                             let u = parsely_username();
                                             let p = parsely_password();
                                             let g = parsely_guild();
+                                            let mut toast = use_toast();
                                             spawn(async move {
                                                 if let Some(mut cfg) = api::get_config().await {
                                                     cfg.parsely.username = u;
                                                     cfg.parsely.password = p;
                                                     cfg.parsely.guild = g;
-                                                    if api::update_config(&cfg).await {
+                                                    if let Err(err) = api::update_config(&cfg).await {
+                                                        toast.show(format!("Failed to save Parsely settings: {}", err), ToastSeverity::Normal);
+                                                    } else {
                                                         parsely_save_status.set("Saved!".to_string());
                                                     }
                                                 }
@@ -1294,6 +1583,7 @@ pub fn App() -> Element {
                                     span { class: "save-status", "{parsely_save_status}" }
                                 }
                             }
+                            } // settings-content
                         }
                     }
                 }
@@ -1329,10 +1619,13 @@ pub fn App() -> Element {
                                     onchange: move |e| {
                                         let checked = e.checked();
                                         hide_small_log_files.set(checked);
+                                        let mut toast = use_toast();
                                         spawn(async move {
                                             if let Some(mut cfg) = api::get_config().await {
                                                 cfg.hide_small_log_files = checked;
-                                                api::update_config(&cfg).await;
+                                                if let Err(err) = api::update_config(&cfg).await {
+                                                    toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                                }
                                             }
                                         });
                                     },
@@ -1430,13 +1723,14 @@ pub fn App() -> Element {
                                                         disabled: is_empty,
                                                         onclick: move |_| {
                                                             let p = path.clone();
-                                                            console::log_1(&format!("[DEBUG] Opening file: {}", p).into());
+                                                            let mut toast = use_toast();
                                                             file_browser_open.set(false);
                                                             spawn(async move {
-                                                                console::log_1(&"[DEBUG] spawn started".into());
-                                                                let result = api::open_historical_file(&p).await;
-                                                                console::log_1(&format!("[DEBUG] API returned: {}", result).into());
-                                                                is_live_tailing.set(false);
+                                                                if let Err(err) = api::open_historical_file(&p).await {
+                                                                    toast.show(format!("Failed to open log file: {}", err), ToastSeverity::Normal);
+                                                                } else {
+                                                                    is_live_tailing.set(false);
+                                                                }
                                                             });
                                                         },
                                                         i { class: "fa-solid fa-eye" }
@@ -1450,16 +1744,19 @@ pub fn App() -> Element {
                                                             let p = path_for_upload.clone();
                                                             upload_status.set(Some((p.clone(), true, "Uploading...".to_string())));
                                                             spawn(async move {
-                                                                if let Some(resp) = api::upload_to_parsely(&p).await {
-                                                                    if resp.success {
-                                                                        let link = resp.link.unwrap_or_default();
-                                                                        upload_status.set(Some((p, true, link)));
-                                                                    } else {
-                                                                        let err = resp.error.unwrap_or_else(|| "Upload failed".to_string());
-                                                                        upload_status.set(Some((p, false, err)));
+                                                                match api::upload_to_parsely(&p).await {
+                                                                    Ok(resp) => {
+                                                                        if resp.success {
+                                                                            let link = resp.link.unwrap_or_default();
+                                                                            upload_status.set(Some((p, true, link)));
+                                                                        } else {
+                                                                            let err = resp.error.unwrap_or_else(|| "Upload failed".to_string());
+                                                                            upload_status.set(Some((p, false, err)));
+                                                                        }
                                                                     }
-                                                                } else {
-                                                                    upload_status.set(Some((p, false, "Upload failed".to_string())));
+                                                                    Err(e) => {
+                                                                        upload_status.set(Some((p, false, e)));
+                                                                    }
                                                                 }
                                                             });
                                                         },
@@ -1522,6 +1819,85 @@ pub fn App() -> Element {
                                 },
                                 "Got it!"
                             }
+                        }
+                    }
+                }
+            }
+
+            // Toast notifications (rendered on top of everything)
+            ToastFrame {}
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Player Stats Bar
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Inline bar for alacrity and latency settings
+#[component]
+fn PlayerStatsBar() -> Element {
+    let mut alacrity = use_signal(|| 0.0f32);
+    let mut latency = use_signal(|| 0u16);
+    let mut loaded = use_signal(|| false);
+
+    // Load from config on mount
+    use_effect(move || {
+        if !loaded() {
+            spawn(async move {
+                if let Some(config) = api::get_config().await {
+                    alacrity.set(config.alacrity_percent);
+                    latency.set(config.latency_ms);
+                    loaded.set(true);
+                }
+            });
+        }
+    });
+
+    let save_config = move || {
+        let new_alacrity = alacrity();
+        let new_latency = latency();
+        let mut toast = use_toast();
+        spawn(async move {
+            if let Some(mut config) = api::get_config().await {
+                config.alacrity_percent = new_alacrity;
+                config.latency_ms = new_latency;
+                if let Err(err) = api::update_config(&config).await {
+                    toast.show(
+                        format!("Failed to save settings: {}", err),
+                        ToastSeverity::Normal,
+                    );
+                }
+            }
+        });
+    };
+
+    rsx! {
+        div { class: "player-stats-bar",
+            div { class: "stat-input",
+                label { "Alacrity %" }
+                input {
+                    r#type: "text",
+                    title: "Your alacrity percentage for GCD calculations",
+                    value: "{alacrity():.1}",
+                    onchange: move |e| {
+                        if let Ok(val) = e.value().parse::<f32>() {
+                            alacrity.set(val.clamp(0.0, 30.0));
+                            save_config();
+                        }
+                    }
+                }
+            }
+            div { class: "stat-input",
+                label { "Latency (ms)" }
+                input {
+                    r#type: "text",
+                    title: "Your network latency in milliseconds for ability timing",
+                    value: "{latency()}",
+                    onchange: move |e| {
+                        if let Ok(val) = e.value().parse::<u16>() {
+                            latency.set(val.clamp(0, 500));
+                            save_config();
                         }
                     }
                 }

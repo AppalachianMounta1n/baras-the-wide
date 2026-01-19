@@ -4,8 +4,7 @@
 //! This module handles detecting when counters should increment based on game events.
 
 use crate::combat_log::{CombatEvent, EntityType};
-use crate::dsl::BossEncounterDefinition;
-use crate::dsl::{EntityFilterMatching, EntitySelectorExt, Trigger};
+use crate::dsl::{EntityDefinition, EntityFilterMatching, EntitySelectorExt, Trigger};
 use crate::game_data::{effect_id, effect_type_id};
 use crate::state::SessionCache;
 
@@ -17,24 +16,27 @@ pub fn check_counter_increments(
     cache: &mut SessionCache,
     current_signals: &[GameSignal],
 ) -> Vec<GameSignal> {
-    // Clone the definition upfront to avoid borrow conflicts
-    let (counters, def) = {
+    // Clone the Arc (cheap) to hold definitions while we mutate cache
+    let (definitions, def_idx) = {
         let Some(enc) = cache.current_encounter() else {
             return Vec::new();
         };
-        let Some(def_idx) = enc.active_boss_idx() else {
+        let Some(idx) = enc.active_boss_idx() else {
             return Vec::new();
         };
-        let def = enc.boss_definitions()[def_idx].clone();
-        (def.counters.clone(), def)
+        (enc.boss_definitions_arc(), idx)
     };
+    let def = &definitions[def_idx];
 
     let mut signals = Vec::new();
 
-    for counter in &counters {
+    for counter in &def.counters {
         // Check increment_on trigger
-        if check_counter_trigger(&counter.increment_on, event, current_signals, &def) {
-            let enc = cache.current_encounter_mut().unwrap();
+        if check_counter_trigger(&counter.increment_on, event, current_signals, &def.entities) {
+            let Some(enc) = cache.current_encounter_mut() else {
+                tracing::error!("BUG: encounter missing in check_counter_increments (increment_on)");
+                continue;
+            };
             let (old_value, new_value) = enc.modify_counter(
                 &counter.id,
                 counter.decrement, // Legacy: use decrement flag for increment_on
@@ -51,9 +53,12 @@ pub fn check_counter_increments(
 
         // Check decrement_on trigger (always decrements)
         if let Some(ref decrement_trigger) = counter.decrement_on
-            && check_counter_trigger(decrement_trigger, event, current_signals, &def)
+            && check_counter_trigger(decrement_trigger, event, current_signals, &def.entities)
         {
-            let enc = cache.current_encounter_mut().unwrap();
+            let Some(enc) = cache.current_encounter_mut() else {
+                tracing::error!("BUG: encounter missing in check_counter_increments (decrement_on)");
+                continue;
+            };
             let (old_value, new_value) = enc.modify_counter(
                 &counter.id,
                 true, // Always decrement
@@ -69,8 +74,11 @@ pub fn check_counter_increments(
         }
 
         // Check reset_on trigger (resets to initial_value)
-        if check_counter_trigger(&counter.reset_on, event, current_signals, &def) {
-            let enc = cache.current_encounter_mut().unwrap();
+        if check_counter_trigger(&counter.reset_on, event, current_signals, &def.entities) {
+            let Some(enc) = cache.current_encounter_mut() else {
+                tracing::error!("BUG: encounter missing in check_counter_increments (reset_on)");
+                continue;
+            };
             let old_value = enc.get_counter(&counter.id);
             let new_value = counter.initial_value;
 
@@ -102,22 +110,27 @@ pub fn check_counter_timer_triggers(
         return Vec::new();
     }
 
-    let counters = {
+    // Clone the Arc (cheap) to hold definitions while we mutate cache
+    let (definitions, def_idx) = {
         let Some(enc) = cache.current_encounter() else {
             return Vec::new();
         };
-        let Some(def_idx) = enc.active_boss_idx() else {
+        let Some(idx) = enc.active_boss_idx() else {
             return Vec::new();
         };
-        enc.boss_definitions()[def_idx].counters.clone()
+        (enc.boss_definitions_arc(), idx)
     };
+    let def = &definitions[def_idx];
 
     let mut signals = Vec::new();
 
-    for counter in &counters {
+    for counter in &def.counters {
         // Check increment_on for timer triggers
         if matches_timer_trigger(&counter.increment_on, expired_timer_ids, started_timer_ids) {
-            let enc = cache.current_encounter_mut().unwrap();
+            let Some(enc) = cache.current_encounter_mut() else {
+                tracing::error!("BUG: encounter missing in check_counter_timer_triggers (increment_on)");
+                continue;
+            };
             let (old_value, new_value) =
                 enc.modify_counter(&counter.id, counter.decrement, counter.set_value);
             signals.push(GameSignal::CounterChanged {
@@ -131,7 +144,10 @@ pub fn check_counter_timer_triggers(
         // Check decrement_on for timer triggers
         if let Some(ref trigger) = counter.decrement_on {
             if matches_timer_trigger(trigger, expired_timer_ids, started_timer_ids) {
-                let enc = cache.current_encounter_mut().unwrap();
+                let Some(enc) = cache.current_encounter_mut() else {
+                    tracing::error!("BUG: encounter missing in check_counter_timer_triggers (decrement_on)");
+                    continue;
+                };
                 let (old_value, new_value) = enc.modify_counter(
                     &counter.id,
                     true, // Always decrement
@@ -148,7 +164,10 @@ pub fn check_counter_timer_triggers(
 
         // Check reset_on for timer triggers
         if matches_timer_trigger(&counter.reset_on, expired_timer_ids, started_timer_ids) {
-            let enc = cache.current_encounter_mut().unwrap();
+            let Some(enc) = cache.current_encounter_mut() else {
+                tracing::error!("BUG: encounter missing in check_counter_timer_triggers (reset_on)");
+                continue;
+            };
             let old_value = enc.get_counter(&counter.id);
             let new_value = counter.initial_value;
             if old_value != new_value {
@@ -188,7 +207,7 @@ pub fn check_counter_trigger(
     trigger: &Trigger,
     event: &CombatEvent,
     current_signals: &[GameSignal],
-    boss_def: &BossEncounterDefinition,
+    entities: &[EntityDefinition],
 ) -> bool {
     match trigger {
         Trigger::CombatStart => current_signals
@@ -214,7 +233,7 @@ pub fn check_counter_trigger(
             if !source.is_any() {
                 let source_name = crate::context::resolve(event.source_entity.name);
                 if !source.matches_source_target(
-                    &boss_def.entities,
+                    entities,
                     event.source_entity.class_id,
                     source_name,
                 ) {
@@ -244,7 +263,7 @@ pub fn check_counter_trigger(
                 } else {
                     let target_name = crate::context::resolve(event.target_entity.name);
                     if !target.matches_source_target(
-                        &boss_def.entities,
+                        entities,
                         event.target_entity.class_id,
                         target_name,
                     ) {
@@ -274,7 +293,7 @@ pub fn check_counter_trigger(
                 } else {
                     let target_name = crate::context::resolve(event.target_entity.name);
                     if !target.matches_source_target(
-                        &boss_def.entities,
+                        entities,
                         event.target_entity.class_id,
                         target_name,
                     ) {
@@ -303,7 +322,7 @@ pub fn check_counter_trigger(
                 } = s
                 {
                     // Use unified matching: roster alias → NPC ID → name
-                    selector.matches_with_roster(&boss_def.entities, *npc_id, Some(entity_name))
+                    selector.matches_with_roster(entities, *npc_id, Some(entity_name))
                 } else {
                     false
                 }
@@ -322,7 +341,7 @@ pub fn check_counter_trigger(
                         return true;
                     }
                     // Use unified matching: roster alias → NPC ID → name
-                    selector.matches_with_roster(&boss_def.entities, *npc_id, Some(entity_name))
+                    selector.matches_with_roster(entities, *npc_id, Some(entity_name))
                 } else {
                     false
                 }
@@ -349,7 +368,7 @@ pub fn check_counter_trigger(
                     }
                     // Check entity filter if specified
                     if !selector.is_empty()
-                        && !selector.matches_with_roster(&boss_def.entities, *npc_id, Some(entity_name))
+                        && !selector.matches_with_roster(entities, *npc_id, Some(entity_name))
                     {
                         return false;
                     }
@@ -392,7 +411,7 @@ pub fn check_counter_trigger(
                     if !source.is_any() {
                         let source_name_str = crate::context::resolve(*source_name);
                         if !source.matches_source_target(
-                            &boss_def.entities,
+                            entities,
                             *source_npc_id,
                             source_name_str,
                         ) {
@@ -402,7 +421,7 @@ pub fn check_counter_trigger(
                     if !target.is_any() {
                         // Target NPC ID is not available in DamageTaken signal, use 0
                         let target_name_str = crate::context::resolve(*target_name);
-                        if !target.matches_source_target(&boss_def.entities, 0, target_name_str) {
+                        if !target.matches_source_target(entities, 0, target_name_str) {
                             return false;
                         }
                     }
@@ -421,6 +440,6 @@ pub fn check_counter_trigger(
 
         Trigger::AnyOf { conditions } => conditions
             .iter()
-            .any(|c| check_counter_trigger(c, event, current_signals, boss_def)),
+            .any(|c| check_counter_trigger(c, event, current_signals, entities)),
     }
 }
