@@ -12,6 +12,7 @@
 
 ## Improvements
 
+- Metrics values should now display closer to parsely.io values - though not exact
 - Session page polish with loading indicators and empty states
 - Profile selector always visible with improved empty state
 - Overlay settings live preview
