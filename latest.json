@@ -12,8 +12,8 @@
       "url": "https://github.com/baras-app/baras/releases/download/v2026.1.1900/BARAS_2026.1.1900_x64-setup.exe"
     },
     "darwin-aarch64": {
-      "signature": "Not Found",
-      "url": "https://github.com/baras-app/baras/releases/download/v2026.1.1900/BARAS_2026.1.1900_aarch64.dmg"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTY0pJZnZRK3YyNHQyNTZZL2hFcldVWVFIZGszSU10eEhLZStpaG1uakUyNldMSEJNeWRMZUx5eGxGRGFlRnRpRlBrbmZqRk1kMHFyYjlqMjIvVm5UQmg1eTFUc2hyMEFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY4ODU2Mzc4CWZpbGU6QkFSQVMuYXBwLnRhci5negp6T01rK2thdXR2UXB4ZE1lMjNwL0FXcVR0U3ZTU2doeUNoVC9BUGxuMEpnMGJiUFo0WTJXbjdScGt1WmhzelBJWHNzQ0NRZnNiYlQ1TE1RWUpKVkZEZz09Cg==",
+      "url": "https://github.com/baras-app/baras/releases/download/v2026.1.1900/BARAS_aarch64.app.tar.gz"
     }
   }
 }

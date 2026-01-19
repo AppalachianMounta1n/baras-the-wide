@@ -220,7 +220,7 @@ jobs:
           # Download signatures
           LINUX_SIG=$(curl -sL "https://github.com/baras-app/baras/releases/download/v${VERSION}/BARAS_${VERSION}_amd64.AppImage.sig")
           WINDOWS_SIG=$(curl -sL "https://github.com/baras-app/baras/releases/download/v${VERSION}/BARAS_${VERSION}_x64-setup.exe.sig")
-          MACOS_SIG=$(curl -sL "https://github.com/baras-app/baras/releases/download/v${VERSION}/BARAS_${VERSION}_aarch64.dmg.sig")
+          MACOS_SIG=$(curl -sL "https://github.com/baras-app/baras/releases/download/v${VERSION}/BARAS_aarch64.app.tar.gz.sig")
 
           # Generate latest.json
           cat > latest.json << EOF
@@ -239,7 +239,7 @@ jobs:
               },
               "darwin-aarch64": {
                 "signature": "${MACOS_SIG}",
-                "url": "https://github.com/baras-app/baras/releases/download/v${VERSION}/BARAS_${VERSION}_aarch64.dmg"
+                "url": "https://github.com/baras-app/baras/releases/download/v${VERSION}/BARAS_aarch64.app.tar.gz"
               }
             }
           }
