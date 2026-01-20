@@ -18,7 +18,7 @@ The **Battle Analysis and Raid Assessment System** (BARAS) is the ultimate compa
 ### macOS
 
 1. Download the `.dmg` file from the [Releases page](https://github.com/baras-app/baras/releases)
-2. Open the `.dmg` and drag **BARAS.app** to your `Applications` folder
+2. Open the `.dmg` and drag **BARAS.app** to your `Applications` folder. Once the application is extracted you can discard the `.dmg` file
 3. **Important - First Run Setup:**
 
    BARAS is not signed with an Apple Developer certificate, so macOS will block it by default.
@@ -26,7 +26,7 @@ The **Battle Analysis and Raid Assessment System** (BARAS) is the ultimate compa
    Open **Terminal** (search "Terminal" in Spotlight) and run the command:
      ```bash
      xattr -cr /Applications/BARAS.app
-   This removes the quarantine flag so all components of the app can run.
+ This removes the quarantine flag so all components of the app can run.
 
   #### 4. Grant File Access:
 
