@@ -360,8 +360,8 @@ pub fn App() -> Element {
                                     i { class: "fa-solid fa-spinner fa-spin" }
                                     " Updating..."
                                 } else {
-                                    i { class: "fa-solid fa-download" }
-                                    " v{update.version}"
+                                    i { class: "fa-solid fa-arrow-up" }
+                                    " Update Available!"
                                 }
                             }
                         } else {
