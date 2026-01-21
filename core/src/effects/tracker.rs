@@ -195,9 +195,9 @@ pub struct EffectTracker {
     /// Alerts fired by effect start/end triggers
     fired_alerts: Vec<FiredAlert>,
 
-    /// Current target for each entity (source_id -> target_id)
+    /// Current target for each entity (source_id -> (target_id, target_name))
     /// Used as fallback when encounter doesn't have target info (e.g., outside combat)
-    current_targets: HashMap<i64, i64>,
+    current_targets: HashMap<i64, (i64, IStr)>,
 }
 
 impl Default for EffectTracker {
@@ -902,7 +902,7 @@ impl EffectTracker {
 
         let entities = get_entities(encounter);
         let current_target_id =
-            local_player_id.and_then(|id| self.current_targets.get(&id).copied());
+            local_player_id.and_then(|id| self.current_targets.get(&id).map(|(tid, _)| *tid));
         for def in matching_defs {
             // Check source filter from the trigger
             let source_filter = def.source_filter();
@@ -1172,7 +1172,7 @@ impl EffectTracker {
         // Get local player ID from self, boss entity IDs from encounter
         let local_player_id = self.local_player_id;
         let current_target_id =
-            local_player_id.and_then(|id| self.current_targets.get(&id).copied());
+            local_player_id.and_then(|id| self.current_targets.get(&id).map(|(tid, _)| *tid));
         let boss_ids = get_boss_ids(encounter);
 
         let entities = get_entities(encounter);
@@ -1331,20 +1331,23 @@ impl SignalHandler for EffectTracker {
                     let (resolved_target, resolved_target_name) = if is_self_or_empty {
                         // Query encounter for caster's current target, fall back to cached target,
                         // finally default to self (game casts on caster when no target)
-                        let target = encounter
-                            .and_then(|e| e.get_current_target(*source_id))
-                            .or_else(|| self.current_targets.get(source_id).copied())
-                            .unwrap_or(*source_id);
-                        // Resolve name: if targeting self use source_name, otherwise look up
-                        let name = if target == *source_id {
-                            *source_name
-                        } else {
-                            encounter
+                        if let Some((target, name)) =
+                            self.current_targets.get(source_id).copied()
+                        {
+                            (target, name)
+                        } else if let Some(target) =
+                            encounter.and_then(|e| e.get_current_target(*source_id))
+                        {
+                            // Encounter has target but we don't have cached name - look it up
+                            let name = encounter
                                 .and_then(|e| e.players.get(&target))
                                 .map(|p| p.name)
-                                .unwrap_or_else(|| crate::context::intern(""))
-                        };
-                        (target, name)
+                                .unwrap_or(*source_name);
+                            (target, name)
+                        } else {
+                            // No target info - default to self
+                            (*source_id, *source_name)
+                        }
                     } else {
                         (*target_id, *target_name)
                     };
@@ -1387,10 +1390,12 @@ impl SignalHandler for EffectTracker {
             GameSignal::TargetChanged {
                 source_id,
                 target_id,
+                target_name,
                 ..
             } => {
-                // Cache target for fallback when encounter doesn't have target info
-                self.current_targets.insert(*source_id, *target_id);
+                // Cache target ID and name for fallback when encounter doesn't have target info
+                self.current_targets
+                    .insert(*source_id, (*target_id, *target_name));
             }
             GameSignal::TargetCleared { source_id, .. } => {
                 self.current_targets.remove(source_id);
