@@ -67,16 +67,24 @@ impl EncounterHistory {
         self.current_area_name = None;
     }
 
-    /// Check if area changed and update tracking
+    /// Check if area changed and update tracking.
+    /// Falls back to checking the last encounter's area when current_area_name is None
+    /// (e.g., after app restart mid-raid).
     pub fn check_area_change(&mut self, area_name: &str) -> bool {
-        let changed = self
+        // First check in-memory state, then fall back to last encounter in history
+        let previous_area = self
             .current_area_name
             .as_ref()
-            .is_none_or(|prev| prev != area_name);
+            .or_else(|| self.summaries.last().map(|s| &s.area_name));
+
+        let changed = previous_area.is_none_or(|prev| prev != area_name);
         if changed {
             self.current_area_name = Some(area_name.to_string());
             // Reset trash count on area change
             self.trash_pull_count = 0;
+        } else if self.current_area_name.is_none() {
+            // Restore in-memory state from history
+            self.current_area_name = Some(area_name.to_string());
         }
         changed
     }
