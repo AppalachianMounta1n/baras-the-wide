@@ -566,9 +566,9 @@ pub async fn install_update() -> Result<(), String> {
 
 // Re-export query types from shared types crate
 pub use baras_types::{
-    AbilityBreakdown, BreakdownMode, CombatLogRow, DataTab, EffectChartData, EffectWindow,
-    EncounterTimeline, EntityBreakdown, PhaseSegment, PlayerDeath, RaidOverviewRow, TimeRange,
-    TimeSeriesPoint,
+    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow, DataTab,
+    EffectChartData, EffectWindow, EncounterTimeline, EntityBreakdown, PhaseSegment, PlayerDeath,
+    RaidOverviewRow, TimeRange, TimeSeriesPoint,
 };
 
 /// Query ability breakdown for an encounter and data tab.
@@ -852,6 +852,7 @@ pub async fn query_combat_log(
     target_filter: Option<&str>,
     search_filter: Option<&str>,
     time_range: Option<&TimeRange>,
+    event_filters: Option<&CombatLogFilters>,
 ) -> Option<Vec<CombatLogRow>> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
@@ -882,6 +883,12 @@ pub async fn query_combat_log(
     } else {
         js_set(&obj, "timeRange", &JsValue::NULL);
     }
+    if let Some(ef) = event_filters {
+        let ef_js = serde_wasm_bindgen::to_value(ef).unwrap_or(JsValue::NULL);
+        js_set(&obj, "eventFilters", &ef_js);
+    } else {
+        js_set(&obj, "eventFilters", &JsValue::NULL);
+    }
     let result = invoke("query_combat_log", obj.into()).await;
     from_js(result)
 }
@@ -893,6 +900,7 @@ pub async fn query_combat_log_count(
     target_filter: Option<&str>,
     search_filter: Option<&str>,
     time_range: Option<&TimeRange>,
+    event_filters: Option<&CombatLogFilters>,
 ) -> Option<u64> {
     let obj = js_sys::Object::new();
     if let Some(idx) = encounter_idx {
@@ -921,7 +929,55 @@ pub async fn query_combat_log_count(
     } else {
         js_set(&obj, "timeRange", &JsValue::NULL);
     }
+    if let Some(ef) = event_filters {
+        let ef_js = serde_wasm_bindgen::to_value(ef).unwrap_or(JsValue::NULL);
+        js_set(&obj, "eventFilters", &ef_js);
+    } else {
+        js_set(&obj, "eventFilters", &JsValue::NULL);
+    }
     let result = invoke("query_combat_log_count", obj.into()).await;
+    from_js(result)
+}
+
+/// Find matching rows in combat log (returns position and row_idx).
+pub async fn query_combat_log_find(
+    encounter_idx: Option<u32>,
+    find_text: &str,
+    source_filter: Option<&str>,
+    target_filter: Option<&str>,
+    time_range: Option<&TimeRange>,
+    event_filters: Option<&CombatLogFilters>,
+) -> Option<Vec<CombatLogFindMatch>> {
+    let obj = js_sys::Object::new();
+    if let Some(idx) = encounter_idx {
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
+    } else {
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
+    }
+    js_set(&obj, "findText", &JsValue::from_str(find_text));
+    if let Some(s) = source_filter {
+        js_set(&obj, "sourceFilter", &JsValue::from_str(s));
+    } else {
+        js_set(&obj, "sourceFilter", &JsValue::NULL);
+    }
+    if let Some(t) = target_filter {
+        js_set(&obj, "targetFilter", &JsValue::from_str(t));
+    } else {
+        js_set(&obj, "targetFilter", &JsValue::NULL);
+    }
+    if let Some(tr) = time_range {
+        let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
+        js_set(&obj, "timeRange", &tr_js);
+    } else {
+        js_set(&obj, "timeRange", &JsValue::NULL);
+    }
+    if let Some(ef) = event_filters {
+        let ef_js = serde_wasm_bindgen::to_value(ef).unwrap_or(JsValue::NULL);
+        js_set(&obj, "eventFilters", &ef_js);
+    } else {
+        js_set(&obj, "eventFilters", &JsValue::NULL);
+    }
+    let result = invoke("query_combat_log_find", obj.into()).await;
     from_js(result)
 }
 

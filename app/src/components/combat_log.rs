@@ -5,7 +5,7 @@
 use dioxus::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::api::{self, CombatLogRow, TimeRange};
+use crate::api::{self, CombatLogFilters, CombatLogFindMatch, CombatLogRow, TimeRange};
 use crate::components::ability_icon::AbilityIcon;
 
 /// Row height in pixels for virtual scrolling calculations.
@@ -14,6 +14,34 @@ const ROW_HEIGHT: f64 = 24.0;
 const OVERSCAN: usize = 10;
 /// Page size for data fetching.
 const PAGE_SIZE: u64 = 200;
+
+// Effect type IDs for mapping to readable names
+const EFFECT_TYPE_APPLYEFFECT: i64 = 836045448945477;
+const EFFECT_TYPE_REMOVEEFFECT: i64 = 836045448945478;
+const EFFECT_TYPE_EVENT: i64 = 836045448945472;
+const EFFECT_TYPE_SPEND: i64 = 836045448945473;
+const EFFECT_TYPE_RESTORE: i64 = 836045448945476;
+
+// Effect IDs for mapping
+const EFFECT_DAMAGE: i64 = 836045448945501;
+const EFFECT_HEAL: i64 = 836045448945500;
+const EFFECT_ABILITYACTIVATE: i64 = 836045448945479;
+const EFFECT_ABILITYDEACTIVATE: i64 = 836045448945480;
+const EFFECT_ABILITYINTERRUPT: i64 = 836045448945482;
+const EFFECT_DEATH: i64 = 836045448945493;
+const EFFECT_REVIVED: i64 = 836045448945494;
+
+// Defense type IDs
+const DEFENSE_SHIELD: i64 = 836045448945509;
+const DEFENSE_IMMUNE: i64 = 836045448945506;
+const DEFENSE_DEFLECT: i64 = 836045448945508;
+const DEFENSE_PARRY: i64 = 836045448945503;
+const DEFENSE_DODGE: i64 = 836045448945505;
+const DEFENSE_MISS: i64 = 836045448945502;
+const DEFENSE_RESIST: i64 = 836045448945507;
+const DEFENSE_COVER: i64 = 836045448945510;
+const DEFENSE_ABSORBED: i64 = 836045448945511;
+const DEFENSE_REFLECTED: i64 = 836045448953649;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct CombatLogProps {
@@ -50,25 +78,62 @@ fn format_number(n: i32) -> String {
     result
 }
 
-/// Get CSS class for effect type.
-fn effect_type_class(effect_type: &str) -> &'static str {
-    match effect_type {
-        "ApplyEffect" => "log-apply",
-        "RemoveEffect" => "log-remove",
-        "Event" => "log-event",
+/// Get readable event type from effect_type_id and effect_id.
+fn readable_event_type(row: &CombatLogRow) -> &'static str {
+    match row.effect_type_id {
+        EFFECT_TYPE_APPLYEFFECT => match row.effect_id {
+            EFFECT_DAMAGE => "Damage",
+            EFFECT_HEAL => "Healing",
+            _ => "Effect gained",
+        },
+        EFFECT_TYPE_REMOVEEFFECT => "Effect lost",
+        EFFECT_TYPE_EVENT => match row.effect_id {
+            EFFECT_ABILITYACTIVATE => "Activation",
+            EFFECT_ABILITYDEACTIVATE => "Deactivation",
+            EFFECT_ABILITYINTERRUPT => "Interrupt",
+            EFFECT_DEATH => "Death",
+            EFFECT_REVIVED => "Revive",
+            _ => "Event",
+        },
+        EFFECT_TYPE_SPEND => "Spend",
+        EFFECT_TYPE_RESTORE => "Restore",
+        _ => "",
+    }
+}
+
+/// Get readable defense/mitigation type.
+fn readable_defense_type(id: i64) -> &'static str {
+    match id {
+        DEFENSE_SHIELD => "shield",
+        DEFENSE_IMMUNE => "immune",
+        DEFENSE_DEFLECT => "deflect",
+        DEFENSE_PARRY => "parry",
+        DEFENSE_DODGE => "dodge",
+        DEFENSE_MISS => "miss",
+        DEFENSE_RESIST => "resist",
+        DEFENSE_COVER => "cover",
+        DEFENSE_ABSORBED => "absorbed",
+        DEFENSE_REFLECTED => "reflected",
         _ => "",
     }
 }
 
 /// Get CSS class for row based on content.
-fn row_class(row: &CombatLogRow) -> String {
+fn row_class(row: &CombatLogRow, highlighted_row_idx: Option<u64>) -> String {
     let mut classes = vec!["log-row"];
 
-    // Effect type based coloring
+    // Row background tint based on effect type
+    if row.effect_id == EFFECT_DAMAGE {
+        classes.push("log-damage-row");
+    } else if row.effect_id == EFFECT_HEAL {
+        classes.push("log-heal-row");
+    }
+
+    // Value color classes
     if row.value > 0 {
-        if row.effect_name.contains("Damage") || row.damage_type.is_empty() {
+        if row.effect_id == EFFECT_DAMAGE {
             classes.push("log-damage");
-        } else {
+        } else if row.effect_id == EFFECT_HEAL {
             classes.push("log-heal");
         }
     }
@@ -78,12 +143,28 @@ fn row_class(row: &CombatLogRow) -> String {
         classes.push("log-crit");
     }
 
-    // Miss/dodge/etc
-    if !row.defense_type_id.is_positive() {
-        classes.push("log-avoid");
+    // Highlighted row (Find feature)
+    if highlighted_row_idx == Some(row.row_idx) {
+        classes.push("log-row-highlighted");
     }
 
     classes.join(" ")
+}
+
+/// Get CSS class for event type text.
+fn event_type_class(row: &CombatLogRow) -> &'static str {
+    match row.effect_type_id {
+        EFFECT_TYPE_APPLYEFFECT => {
+            if row.effect_id == EFFECT_DAMAGE {
+                "log-type-damage"
+            } else {
+                "log-apply"
+            }
+        }
+        EFFECT_TYPE_REMOVEEFFECT => "log-remove",
+        EFFECT_TYPE_EVENT => "log-event",
+        _ => "",
+    }
 }
 
 #[component]
@@ -105,6 +186,24 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
     let mut target_filter = use_signal(|| None::<String>);
     let mut search_text = use_signal(|| props.initial_search.clone().unwrap_or_default());
 
+    // Event type filter checkboxes (all default true except simplified)
+    let mut filter_damage = use_signal(|| true);
+    let mut filter_healing = use_signal(|| true);
+    let mut filter_actions = use_signal(|| true);
+    let mut filter_effects = use_signal(|| true);
+    let mut filter_simplified = use_signal(|| false);
+
+    // Show IDs toggle
+    let mut show_ids = use_signal(|| false);
+
+    // Find feature - searches all data via backend query
+    let mut find_text = use_signal(String::new);
+    let mut find_debounce = use_signal(String::new);
+    // Stores find match results with position and row_idx
+    let mut find_matches = use_signal(Vec::<CombatLogFindMatch>::new);
+    let mut find_current_idx = use_signal(|| 0usize);
+    let mut highlighted_row = use_signal(|| None::<u64>);
+
     // Data state
     let mut rows = use_signal(Vec::<CombatLogRow>::new);
     let mut total_count = use_signal(|| 0u64);
@@ -113,6 +212,23 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
 
     // Virtual scroll state
     let mut scroll_top = use_signal(|| 0.0f64);
+
+    // Column widths for resizable columns (in pixels)
+    let mut col_time = use_signal(|| 70.0f64);
+    let mut col_source = use_signal(|| 150.0f64);
+    let mut col_type = use_signal(|| 90.0f64);
+    let mut col_target = use_signal(|| 150.0f64);
+    let mut col_ability = use_signal(|| 200.0f64);
+    let mut col_value = use_signal(|| 70.0f64);
+    let mut col_abs = use_signal(|| 50.0f64);
+    let mut col_mit = use_signal(|| 60.0f64);
+    let mut col_over = use_signal(|| 50.0f64);
+    let mut col_threat = use_signal(|| 60.0f64);
+
+    // Column resize dragging state
+    let mut resizing_col = use_signal(|| None::<usize>);
+    let mut resize_start_x = use_signal(|| 0.0f64);
+    let mut resize_start_width = use_signal(|| 0.0f64);
     let mut container_height = use_signal(|| 500.0f64);
     let mut loaded_offset = use_signal(|| 0u64);
 
@@ -132,6 +248,28 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
         });
     });
 
+    // Build event filters from checkboxes
+    let build_event_filters = move || -> Option<CombatLogFilters> {
+        let damage = *filter_damage.read();
+        let healing = *filter_healing.read();
+        let actions = *filter_actions.read();
+        let effects = *filter_effects.read();
+        let simplified = *filter_simplified.read();
+
+        // If all are true and simplified is false, return None (no filtering)
+        if damage && healing && actions && effects && !simplified {
+            return None;
+        }
+
+        Some(CombatLogFilters {
+            damage,
+            healing,
+            actions,
+            effects,
+            simplified,
+        })
+    };
+
     // Load data when filters, time range, or encounter change
     use_effect(move || {
         let idx = *encounter_idx_signal.read();
@@ -144,6 +282,7 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
         } else {
             Some(search)
         };
+        let event_filters = build_event_filters();
 
         // Reset scroll position - both signal and DOM element
         scroll_top.set(0.0);
@@ -169,6 +308,7 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                 target.as_deref(),
                 search_opt.as_deref(),
                 tr_opt,
+                event_filters.as_ref(),
             )
             .await
             {
@@ -184,6 +324,7 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                 target.as_deref(),
                 search_opt.as_deref(),
                 tr_opt,
+                event_filters.as_ref(),
             )
             .await
             {
@@ -205,6 +346,74 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
         }
     });
 
+    // Debounce find input
+    use_effect({
+        move || {
+            let text = find_text.read().clone();
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(300).await;
+                if *find_text.read() == text {
+                    find_debounce.set(text);
+                }
+            });
+        }
+    });
+
+    // Find feature: query backend for all matches when find text changes
+    use_effect(move || {
+        let find = find_debounce.read().clone();
+        let idx = *encounter_idx_signal.read();
+        let tr = time_range_signal.read().clone();
+        let source = source_filter.read().clone();
+        let target = target_filter.read().clone();
+        let event_filters = build_event_filters();
+
+        if find.is_empty() {
+            find_matches.set(vec![]);
+            find_current_idx.set(0);
+            highlighted_row.set(None);
+            return;
+        }
+
+        spawn(async move {
+            let tr_opt = if tr.start == 0.0 && tr.end == 0.0 {
+                None
+            } else {
+                Some(&tr)
+            };
+
+            if let Some(matches) = api::query_combat_log_find(
+                Some(idx),
+                &find,
+                source.as_deref(),
+                target.as_deref(),
+                tr_opt,
+                event_filters.as_ref(),
+            )
+            .await
+            {
+                find_current_idx.set(0);
+                if let Some(first_match) = matches.first() {
+                    highlighted_row.set(Some(first_match.row_idx));
+                    // Scroll to center the first match in viewport
+                    if let Some(window) = web_sys::window()
+                        && let Some(doc) = window.document()
+                        && let Some(elem) = doc.get_element_by_id("combat-log-scroll")
+                        && let Some(html_elem) = elem.dyn_ref::<web_sys::HtmlElement>()
+                    {
+                        let container_h = html_elem.client_height() as f64;
+                        let scroll_y = (first_match.pos as f64 * ROW_HEIGHT) - (container_h / 2.0) + (ROW_HEIGHT / 2.0);
+                        elem.set_scroll_top(scroll_y.max(0.0) as i32);
+                    }
+                } else {
+                    highlighted_row.set(None);
+                }
+                find_matches.set(matches);
+            }
+        });
+    });
+
+
     // Calculate virtual scroll window (for rendering)
     let total = *total_count.read() as usize;
     let scroll = *scroll_top.read();
@@ -216,9 +425,7 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
     let end_idx = (start_idx + visible_count).min(total);
 
     // Load more data when scrolling beyond current buffer
-    // Must read signals INSIDE the effect for Dioxus to track them as dependencies
     use_effect(move || {
-        // Read scroll signals inside effect so Dioxus tracks them
         let idx = *encounter_idx_signal.read();
         let total = *total_count.read() as usize;
         let scroll = *scroll_top.read();
@@ -238,6 +445,7 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
             let target = target_filter.read().clone();
             let search = search_debounce.read().clone();
             let new_offset = start_idx.saturating_sub(OVERSCAN) as u64;
+            let event_filters = build_event_filters();
 
             spawn(async move {
                 let search_opt = if search.is_empty() {
@@ -259,6 +467,7 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                     target.as_deref(),
                     search_opt.as_deref(),
                     tr_opt,
+                    event_filters.as_ref(),
                 )
                 .await
                 {
@@ -275,7 +484,6 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
     let visible_rows: Vec<CombatLogRow> = if !current_rows.is_empty() {
         let rel_start = start_idx.saturating_sub(offset).min(current_rows.len());
         let rel_end = end_idx.saturating_sub(offset).min(current_rows.len());
-        // Ensure start <= end
         if rel_start < rel_end {
             current_rows[rel_start..rel_end].to_vec()
         } else {
@@ -287,10 +495,14 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
 
     let sources_list = source_names.read().clone();
     let targets_list = target_names.read().clone();
+    let show_ids_val = *show_ids.read();
+    let highlighted_row_idx = *highlighted_row.read();
+    let find_match_count = find_matches.read().len();
+    let find_idx = *find_current_idx.read();
 
     rsx! {
         div { class: "combat-log-panel",
-            // Filter bar
+            // Filter bar - row 1
             div { class: "log-filters",
                 // Source filter
                 select {
@@ -320,17 +532,155 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                     }
                 }
 
-                // Search input
+                // Search input (filter)
                 input {
                     class: "log-search",
                     r#type: "text",
-                    placeholder: "Search...",
+                    placeholder: "Filter... (use OR)",
                     value: "{search_text}",
                     oninput: move |e| search_text.set(e.value()),
                 }
 
+                // Find group (searches all data via backend)
+                div { class: "log-find-group",
+                    input {
+                        class: "log-find-input",
+                        r#type: "text",
+                        placeholder: "Find...",
+                        value: "{find_text}",
+                        oninput: move |e| find_text.set(e.value()),
+                    }
+                    button {
+                        class: "find-nav-btn",
+                        r#type: "button",
+                        disabled: find_match_count == 0,
+                        onclick: move |_| {
+                            // Clone data out of signals to avoid borrow issues
+                            let matches_vec = find_matches.read().clone();
+                            if matches_vec.is_empty() {
+                                return;
+                            }
+                            let current = *find_current_idx.read();
+                            let prev = if current == 0 {
+                                matches_vec.len().saturating_sub(1)
+                            } else {
+                                current - 1
+                            };
+                            let m = &matches_vec[prev];
+
+                            // Now update state
+                            find_current_idx.set(prev);
+                            highlighted_row.set(Some(m.row_idx));
+
+                            // Scroll to center match in viewport
+                            if let Some(window) = web_sys::window()
+                                && let Some(doc) = window.document()
+                                && let Some(elem) = doc.get_element_by_id("combat-log-scroll")
+                                && let Some(html_elem) = elem.dyn_ref::<web_sys::HtmlElement>()
+                            {
+                                let container_h = html_elem.client_height() as f64;
+                                let scroll_y = (m.pos as f64 * ROW_HEIGHT) - (container_h / 2.0) + (ROW_HEIGHT / 2.0);
+                                elem.set_scroll_top(scroll_y.max(0.0) as i32);
+                            }
+                        },
+                        "▲"
+                    }
+                    button {
+                        class: "find-nav-btn",
+                        r#type: "button",
+                        disabled: find_match_count == 0,
+                        onclick: move |_| {
+                            // Clone data out of signals to avoid borrow issues
+                            let matches_vec = find_matches.read().clone();
+                            if matches_vec.is_empty() {
+                                return;
+                            }
+                            let current = *find_current_idx.read();
+                            let next = if current + 1 >= matches_vec.len() {
+                                0
+                            } else {
+                                current + 1
+                            };
+                            let m = &matches_vec[next];
+
+                            // Now update state
+                            find_current_idx.set(next);
+                            highlighted_row.set(Some(m.row_idx));
+
+                            // Scroll to center match in viewport
+                            if let Some(window) = web_sys::window()
+                                && let Some(doc) = window.document()
+                                && let Some(elem) = doc.get_element_by_id("combat-log-scroll")
+                                && let Some(html_elem) = elem.dyn_ref::<web_sys::HtmlElement>()
+                            {
+                                let container_h = html_elem.client_height() as f64;
+                                let scroll_y = (m.pos as f64 * ROW_HEIGHT) - (container_h / 2.0) + (ROW_HEIGHT / 2.0);
+                                elem.set_scroll_top(scroll_y.max(0.0) as i32);
+                            }
+                        },
+                        "▼"
+                    }
+                    if find_match_count > 0 {
+                        span { class: "find-count", "{find_idx + 1}/{find_match_count}" }
+                    }
+                }
+
+                // Show IDs toggle
+                label { class: "log-show-ids",
+                    input {
+                        r#type: "checkbox",
+                        checked: show_ids_val,
+                        onchange: move |e| show_ids.set(e.checked()),
+                    }
+                    "Show IDs"
+                }
+
                 // Row count
                 span { class: "log-count", "{total} events" }
+            }
+
+            // Filter bar - row 2 (event type checkboxes)
+            div { class: "log-event-filters",
+                label { class: "log-filter-checkbox damage",
+                    input {
+                        r#type: "checkbox",
+                        checked: *filter_damage.read(),
+                        onchange: move |e| filter_damage.set(e.checked()),
+                    }
+                    "Damage"
+                }
+                label { class: "log-filter-checkbox healing",
+                    input {
+                        r#type: "checkbox",
+                        checked: *filter_healing.read(),
+                        onchange: move |e| filter_healing.set(e.checked()),
+                    }
+                    "Healing"
+                }
+                label { class: "log-filter-checkbox actions",
+                    input {
+                        r#type: "checkbox",
+                        checked: *filter_actions.read(),
+                        onchange: move |e| filter_actions.set(e.checked()),
+                    }
+                    "Actions"
+                }
+                label { class: "log-filter-checkbox effects",
+                    input {
+                        r#type: "checkbox",
+                        checked: *filter_effects.read(),
+                        onchange: move |e| filter_effects.set(e.checked()),
+                    }
+                    "Effects"
+                }
+                label { class: "log-filter-checkbox simplified",
+                    input {
+                        r#type: "checkbox",
+                        checked: *filter_simplified.read(),
+                        onchange: move |e| filter_simplified.set(e.checked()),
+                    }
+                    "Simplified"
+                }
             }
 
             // Table container with virtual scrolling
@@ -338,26 +688,131 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                 class: "log-table-container",
                 id: "combat-log-scroll",
                 onscroll: move |_| {
-                    // Get scroll position from DOM element
                     if let Some(window) = web_sys::window()
                         && let Some(doc) = window.document()
-                            && let Some(elem) = doc.get_element_by_id("combat-log-scroll")
-                                && let Some(html_elem) = elem.dyn_ref::<web_sys::HtmlElement>() {
-                                    scroll_top.set(html_elem.scroll_top() as f64);
-                                    container_height.set(html_elem.client_height() as f64);
+                        && let Some(elem) = doc.get_element_by_id("combat-log-scroll")
+                        && let Some(html_elem) = elem.dyn_ref::<web_sys::HtmlElement>()
+                    {
+                        scroll_top.set(html_elem.scroll_top() as f64);
+                        container_height.set(html_elem.client_height() as f64);
                     }
                 },
                 // Header row (sticky)
-                div { class: "log-header",
-                    div { class: "log-cell log-time", "Time" }
-                    div { class: "log-cell log-source", "Source" }
-                    div { class: "log-cell log-type", "Type" }
-                    div { class: "log-cell log-target", "Target" }
-                    div { class: "log-cell log-ability", "Ability" }
-                    div { class: "log-cell log-value", "Value" }
-                    div { class: "log-cell log-absorbed", "Abs" }
-                    div { class: "log-cell log-overheal", "Over" }
-                    div { class: "log-cell log-threat", "Threat" }
+                div {
+                    class: "log-header",
+                    onmousemove: move |e| {
+                        if let Some(col_idx) = *resizing_col.read() {
+                            let delta = e.client_coordinates().x - *resize_start_x.read();
+                            let new_width = (*resize_start_width.read() + delta).max(40.0);
+                            match col_idx {
+                                0 => col_time.set(new_width),
+                                1 => col_source.set(new_width),
+                                2 => col_type.set(new_width),
+                                3 => col_target.set(new_width),
+                                4 => col_ability.set(new_width),
+                                5 => col_value.set(new_width),
+                                6 => col_abs.set(new_width),
+                                7 => col_mit.set(new_width),
+                                8 => col_over.set(new_width),
+                                9 => col_threat.set(new_width),
+                                _ => {}
+                            }
+                        }
+                    },
+                    onmouseup: move |_| resizing_col.set(None),
+                    onmouseleave: move |_| resizing_col.set(None),
+
+                    div { class: "log-cell log-time", style: "width: {col_time}px; min-width: {col_time}px;", "Time" }
+                    div {
+                        class: "log-resize-handle",
+                        onmousedown: move |e| {
+                            e.prevent_default();
+                            resizing_col.set(Some(0));
+                            resize_start_x.set(e.client_coordinates().x);
+                            resize_start_width.set(*col_time.read());
+                        },
+                    }
+                    div { class: "log-cell log-source", style: "width: {col_source}px; min-width: {col_source}px;", "Source" }
+                    div {
+                        class: "log-resize-handle",
+                        onmousedown: move |e| {
+                            e.prevent_default();
+                            resizing_col.set(Some(1));
+                            resize_start_x.set(e.client_coordinates().x);
+                            resize_start_width.set(*col_source.read());
+                        },
+                    }
+                    div { class: "log-cell log-type", style: "width: {col_type}px; min-width: {col_type}px;", "Type" }
+                    div {
+                        class: "log-resize-handle",
+                        onmousedown: move |e| {
+                            e.prevent_default();
+                            resizing_col.set(Some(2));
+                            resize_start_x.set(e.client_coordinates().x);
+                            resize_start_width.set(*col_type.read());
+                        },
+                    }
+                    div { class: "log-cell log-target", style: "width: {col_target}px; min-width: {col_target}px;", "Target" }
+                    div {
+                        class: "log-resize-handle",
+                        onmousedown: move |e| {
+                            e.prevent_default();
+                            resizing_col.set(Some(3));
+                            resize_start_x.set(e.client_coordinates().x);
+                            resize_start_width.set(*col_target.read());
+                        },
+                    }
+                    div { class: "log-cell log-ability", style: "width: {col_ability}px; min-width: {col_ability}px;", "Ability" }
+                    div {
+                        class: "log-resize-handle",
+                        onmousedown: move |e| {
+                            e.prevent_default();
+                            resizing_col.set(Some(4));
+                            resize_start_x.set(e.client_coordinates().x);
+                            resize_start_width.set(*col_ability.read());
+                        },
+                    }
+                    div { class: "log-cell log-value", style: "width: {col_value}px; min-width: {col_value}px;", "Value" }
+                    div {
+                        class: "log-resize-handle",
+                        onmousedown: move |e| {
+                            e.prevent_default();
+                            resizing_col.set(Some(5));
+                            resize_start_x.set(e.client_coordinates().x);
+                            resize_start_width.set(*col_value.read());
+                        },
+                    }
+                    div { class: "log-cell log-absorbed", style: "width: {col_abs}px; min-width: {col_abs}px;", "Abs" }
+                    div {
+                        class: "log-resize-handle",
+                        onmousedown: move |e| {
+                            e.prevent_default();
+                            resizing_col.set(Some(6));
+                            resize_start_x.set(e.client_coordinates().x);
+                            resize_start_width.set(*col_abs.read());
+                        },
+                    }
+                    div { class: "log-cell log-mitigation", style: "width: {col_mit}px; min-width: {col_mit}px;", "Mit" }
+                    div {
+                        class: "log-resize-handle",
+                        onmousedown: move |e| {
+                            e.prevent_default();
+                            resizing_col.set(Some(7));
+                            resize_start_x.set(e.client_coordinates().x);
+                            resize_start_width.set(*col_mit.read());
+                        },
+                    }
+                    div { class: "log-cell log-overheal log-overheal-header", style: "width: {col_over}px; min-width: {col_over}px;", title: "Overheal", "Over" }
+                    div {
+                        class: "log-resize-handle",
+                        onmousedown: move |e| {
+                            e.prevent_default();
+                            resizing_col.set(Some(8));
+                            resize_start_x.set(e.client_coordinates().x);
+                            resize_start_width.set(*col_over.read());
+                        },
+                    }
+                    div { class: "log-cell log-threat", style: "width: {col_threat}px; min-width: {col_threat}px;", "Threat" }
                 }
 
                 // Virtual scroll container
@@ -371,12 +826,24 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                         for row in visible_rows.iter() {
                             div {
                                 key: "{row.row_idx}",
-                                class: "{row_class(&row)}",
-                                div { class: "log-cell log-time", "{format_time(row.time_secs)}" }
-                                div { class: "log-cell log-source", "{row.source_name}" }
-                                div { class: "log-cell log-type {effect_type_class(&row.effect_type)}", "{row.effect_type}" }
-                                div { class: "log-cell log-target", "{row.target_name}" }
-                                div { class: "log-cell log-ability",
+                                class: "{row_class(&row, highlighted_row_idx)}",
+                                div { class: "log-cell log-time", style: "width: {col_time}px; min-width: {col_time}px;", "{format_time(row.time_secs)}" }
+                                div { class: "log-cell log-source", style: "width: {col_source}px; min-width: {col_source}px;",
+                                    "{row.source_name}"
+                                    if show_ids_val && row.source_id != 0 {
+                                        span { class: "log-id-suffix", " [{row.source_id}]" }
+                                    }
+                                }
+                                div { class: "log-cell log-type {event_type_class(&row)}", style: "width: {col_type}px; min-width: {col_type}px;",
+                                    "{readable_event_type(&row)}"
+                                }
+                                div { class: "log-cell log-target", style: "width: {col_target}px; min-width: {col_target}px;",
+                                    "{row.target_name}"
+                                    if show_ids_val && row.target_id != 0 {
+                                        span { class: "log-id-suffix", " [{row.target_id}]" }
+                                    }
+                                }
+                                div { class: "log-cell log-ability", style: "width: {col_ability}px; min-width: {col_ability}px;",
                                     if row.ability_id != 0 {
                                         AbilityIcon { key: "{row.ability_id}", ability_id: row.ability_id, size: 16 }
                                     }
@@ -385,14 +852,18 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                                     } else {
                                         "{row.effect_name}"
                                     }
+                                    if show_ids_val && row.ability_id != 0 {
+                                        span { class: "log-id-suffix", " [{row.ability_id}]" }
+                                    }
                                 }
-                                div { class: "log-cell log-value",
+                                div { class: "log-cell log-value", style: "width: {col_value}px; min-width: {col_value}px;",
                                     if row.is_crit { "*" } else { "" }
                                     "{format_number(row.value)}"
                                 }
-                                div { class: "log-cell log-absorbed", "{format_number(row.absorbed)}" }
-                                div { class: "log-cell log-overheal", "{format_number(row.overheal)}" }
-                                div { class: "log-cell log-threat",
+                                div { class: "log-cell log-absorbed", style: "width: {col_abs}px; min-width: {col_abs}px;", "{format_number(row.absorbed)}" }
+                                div { class: "log-cell log-mitigation", style: "width: {col_mit}px; min-width: {col_mit}px;", "{readable_defense_type(row.defense_type_id)}" }
+                                div { class: "log-cell log-overheal", style: "width: {col_over}px; min-width: {col_over}px;", "{format_number(row.overheal)}" }
+                                div { class: "log-cell log-threat", style: "width: {col_threat}px; min-width: {col_threat}px;",
                                     {
                                         let threat_str = if row.threat > 0.0 {
                                             format!("{:.0}", row.threat)

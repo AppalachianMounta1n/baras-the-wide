@@ -225,6 +225,7 @@ pub fn run() {
             commands::query_effect_windows,
             commands::query_combat_log,
             commands::query_combat_log_count,
+            commands::query_combat_log_find,
             commands::query_source_names,
             commands::query_target_names,
             commands::query_player_deaths,

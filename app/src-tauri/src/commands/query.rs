@@ -3,8 +3,9 @@
 //! Provides SQL-based queries over encounter data using DataFusion.
 
 use baras_core::query::{
-    AbilityBreakdown, BreakdownMode, CombatLogRow, DataTab, EffectChartData, EffectWindow,
-    EncounterTimeline, EntityBreakdown, PlayerDeath, RaidOverviewRow, TimeRange, TimeSeriesPoint,
+    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow, DataTab,
+    EffectChartData, EffectWindow, EncounterTimeline, EntityBreakdown, PlayerDeath,
+    RaidOverviewRow, TimeRange, TimeSeriesPoint,
 };
 use tauri::State;
 
@@ -165,6 +166,7 @@ pub async fn query_combat_log(
     target_filter: Option<String>,
     search_filter: Option<String>,
     time_range: Option<TimeRange>,
+    event_filters: Option<CombatLogFilters>,
 ) -> Result<Vec<CombatLogRow>, String> {
     handle
         .query_combat_log(
@@ -175,6 +177,7 @@ pub async fn query_combat_log(
             target_filter,
             search_filter,
             time_range,
+            event_filters,
         )
         .await
 }
@@ -188,6 +191,7 @@ pub async fn query_combat_log_count(
     target_filter: Option<String>,
     search_filter: Option<String>,
     time_range: Option<TimeRange>,
+    event_filters: Option<CombatLogFilters>,
 ) -> Result<u64, String> {
     handle
         .query_combat_log_count(
@@ -196,6 +200,30 @@ pub async fn query_combat_log_count(
             target_filter,
             search_filter,
             time_range,
+            event_filters,
+        )
+        .await
+}
+
+/// Find matching rows in combat log (for Find feature).
+#[tauri::command]
+pub async fn query_combat_log_find(
+    handle: State<'_, ServiceHandle>,
+    encounter_idx: Option<u32>,
+    find_text: String,
+    source_filter: Option<String>,
+    target_filter: Option<String>,
+    time_range: Option<TimeRange>,
+    event_filters: Option<CombatLogFilters>,
+) -> Result<Vec<CombatLogFindMatch>, String> {
+    handle
+        .query_combat_log_find(
+            encounter_idx,
+            find_text,
+            source_filter,
+            target_filter,
+            time_range,
+            event_filters,
         )
         .await
 }

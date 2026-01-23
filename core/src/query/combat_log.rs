@@ -1,6 +1,87 @@
 //! Combat log viewer queries.
 
 use super::*;
+use crate::game_data::{effect_id, effect_type_id};
+
+/// Build search clause supporting case-insensitive search and OR logic.
+/// Search terms separated by " OR " are combined with OR logic.
+fn build_search_clause(search: &str) -> String {
+    let terms: Vec<&str> = search.split(" OR ").map(|s| s.trim()).collect();
+
+    let term_clauses: Vec<String> = terms
+        .iter()
+        .filter(|t| !t.is_empty())
+        .map(|term| {
+            let escaped = sql_escape(term).to_lowercase();
+            format!(
+                "(LOWER(source_name) LIKE '%{0}%' OR LOWER(target_name) LIKE '%{0}%' OR LOWER(ability_name) LIKE '%{0}%' OR LOWER(effect_name) LIKE '%{0}%')",
+                escaped
+            )
+        })
+        .collect();
+
+    if term_clauses.is_empty() {
+        return "1=1".to_string();
+    }
+
+    format!("({})", term_clauses.join(" OR "))
+}
+
+/// Build event type filter clause based on CombatLogFilters.
+fn build_event_filter_clause(filters: &CombatLogFilters) -> Option<String> {
+    let mut conditions = Vec::new();
+
+    // If all filters are false (default), show everything
+    let any_enabled = filters.damage || filters.healing || filters.actions || filters.effects;
+    if !any_enabled && !filters.simplified {
+        return None;
+    }
+
+    if filters.damage {
+        conditions.push(format!("effect_id = {}", effect_id::DAMAGE));
+    }
+    if filters.healing {
+        conditions.push(format!("effect_id = {}", effect_id::HEAL));
+    }
+    if filters.actions {
+        conditions.push(format!(
+            "(effect_type_id = {} AND effect_id IN ({}, {}, {}))",
+            effect_type_id::EVENT,
+            effect_id::ABILITYACTIVATE,
+            effect_id::ABILITYDEACTIVATE,
+            effect_id::ABILITYINTERRUPT
+        ));
+    }
+    if filters.effects {
+        // Buffs/debuffs applied or removed, excluding damage/heal effects
+        conditions.push(format!(
+            "(effect_type_id IN ({}, {}) AND effect_id NOT IN ({}, {}))",
+            effect_type_id::APPLYEFFECT,
+            effect_type_id::REMOVEEFFECT,
+            effect_id::DAMAGE,
+            effect_id::HEAL
+        ));
+    }
+
+    // Build the main OR clause
+    let mut clause = if conditions.is_empty() {
+        "1=1".to_string()
+    } else {
+        format!("({})", conditions.join(" OR "))
+    };
+
+    // Simplified mode: exclude Spend/Restore events
+    if filters.simplified {
+        clause = format!(
+            "{} AND effect_type_id NOT IN ({}, {})",
+            clause,
+            effect_type_id::SPEND,
+            effect_type_id::RESTORE
+        );
+    }
+
+    Some(clause)
+}
 
 impl EncounterQuery<'_> {
     /// Query combat log rows for the combat log viewer.
@@ -14,6 +95,7 @@ impl EncounterQuery<'_> {
         target_filter: Option<&str>,
         search_filter: Option<&str>,
         time_range: Option<&TimeRange>,
+        event_filters: Option<&CombatLogFilters>,
     ) -> Result<Vec<CombatLogRow>, String> {
         let mut where_clauses = vec!["combat_time_secs IS NOT NULL".to_string()];
 
@@ -24,14 +106,17 @@ impl EncounterQuery<'_> {
             where_clauses.push(format!("target_name = '{}'", sql_escape(target)));
         }
         if let Some(search) = search_filter {
-            let escaped = sql_escape(search);
-            where_clauses.push(format!(
-                "(source_name LIKE '%{0}%' OR target_name LIKE '%{0}%' OR ability_name LIKE '%{0}%' OR effect_name LIKE '%{0}%')",
-                escaped
-            ));
+            if !search.is_empty() {
+                where_clauses.push(build_search_clause(search));
+            }
         }
         if let Some(tr) = time_range {
             where_clauses.push(tr.sql_filter());
+        }
+        if let Some(filters) = event_filters {
+            if let Some(filter_clause) = build_event_filter_clause(filters) {
+                where_clauses.push(filter_clause);
+            }
         }
 
         let where_clause = where_clauses.join(" AND ");
@@ -56,7 +141,11 @@ impl EncounterQuery<'_> {
                 COALESCE(threat, 0.0) as threat,
                 is_crit,
                 COALESCE(dmg_type, '') as damage_type,
-                COALESCE(defense_type_id, 0) as defense_type_id
+                COALESCE(defense_type_id, 0) as defense_type_id,
+                effect_id,
+                effect_type_id,
+                source_id,
+                target_id
             FROM events
             WHERE {where_clause}
             ORDER BY combat_time_secs
@@ -67,6 +156,7 @@ impl EncounterQuery<'_> {
 
         let mut results = Vec::new();
         for batch in &batches {
+            let num_rows = batch.num_rows();
             let line_numbers = col_i64(batch, 0)?;
             let times = col_f32(batch, 1)?;
             let source_names = col_strings(batch, 2)?;
@@ -85,7 +175,12 @@ impl EncounterQuery<'_> {
             let damage_types = col_strings(batch, 15)?;
             let defense_type_ids = col_i64(batch, 16)?;
 
-            for i in 0..batch.num_rows() {
+            let effect_ids = col_i64(batch, 17)?;
+            let effect_type_ids = col_i64(batch, 18)?;
+            let source_ids = col_i64(batch, 19)?;
+            let target_ids = col_i64(batch, 20)?;
+
+            for i in 0..num_rows {
                 results.push(CombatLogRow {
                     row_idx: line_numbers[i] as u64,
                     time_secs: times[i],
@@ -104,6 +199,10 @@ impl EncounterQuery<'_> {
                     is_crit: is_crits[i],
                     damage_type: damage_types[i].clone(),
                     defense_type_id: defense_type_ids[i],
+                    effect_id: effect_ids[i],
+                    effect_type_id: effect_type_ids[i],
+                    source_id: source_ids[i],
+                    target_id: target_ids[i],
                 });
             }
         }
@@ -117,6 +216,7 @@ impl EncounterQuery<'_> {
         target_filter: Option<&str>,
         search_filter: Option<&str>,
         time_range: Option<&TimeRange>,
+        event_filters: Option<&CombatLogFilters>,
     ) -> Result<u64, String> {
         let mut where_clauses = vec!["combat_time_secs IS NOT NULL".to_string()];
 
@@ -127,14 +227,17 @@ impl EncounterQuery<'_> {
             where_clauses.push(format!("target_name = '{}'", sql_escape(target)));
         }
         if let Some(search) = search_filter {
-            let escaped = sql_escape(search);
-            where_clauses.push(format!(
-                "(source_name LIKE '%{0}%' OR target_name LIKE '%{0}%' OR ability_name LIKE '%{0}%' OR effect_name LIKE '%{0}%')",
-                escaped
-            ));
+            if !search.is_empty() {
+                where_clauses.push(build_search_clause(search));
+            }
         }
         if let Some(tr) = time_range {
             where_clauses.push(tr.sql_filter());
+        }
+        if let Some(filters) = event_filters {
+            if let Some(filter_clause) = build_event_filter_clause(filters) {
+                where_clauses.push(filter_clause);
+            }
         }
 
         let where_clause = where_clauses.join(" AND ");
@@ -178,6 +281,87 @@ impl EncounterQuery<'_> {
         let mut results = Vec::new();
         for batch in &batches {
             results.extend(col_strings(batch, 0)?);
+        }
+        Ok(results)
+    }
+
+    /// Find all row positions matching search text (for Find feature).
+    ///
+    /// The position is the row's index in the filtered result set (for scrolling),
+    /// and row_idx (line_number) is used for highlighting when that row is loaded.
+    pub async fn query_combat_log_find(
+        &self,
+        find_text: &str,
+        source_filter: Option<&str>,
+        target_filter: Option<&str>,
+        time_range: Option<&TimeRange>,
+        event_filters: Option<&CombatLogFilters>,
+    ) -> Result<Vec<CombatLogFindMatch>, String> {
+        if find_text.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Build base WHERE clause (same filters as main query)
+        let mut where_clauses = vec!["combat_time_secs IS NOT NULL".to_string()];
+
+        if let Some(source) = source_filter {
+            where_clauses.push(format!("source_name = '{}'", sql_escape(source)));
+        }
+        if let Some(target) = target_filter {
+            where_clauses.push(format!("target_name = '{}'", sql_escape(target)));
+        }
+        if let Some(tr) = time_range {
+            where_clauses.push(tr.sql_filter());
+        }
+        if let Some(filters) = event_filters {
+            if let Some(filter_clause) = build_event_filter_clause(filters) {
+                where_clauses.push(filter_clause);
+            }
+        }
+
+        let base_where = where_clauses.join(" AND ");
+
+        // Find text filter - use COALESCE to handle NULLs
+        let find_lower = sql_escape(find_text).to_lowercase();
+        let find_filter = format!(
+            "(LOWER(COALESCE(src, '')) LIKE '%{0}%' OR LOWER(COALESCE(tgt, '')) LIKE '%{0}%' OR LOWER(COALESCE(abl, '')) LIKE '%{0}%' OR LOWER(COALESCE(eff, '')) LIKE '%{0}%')",
+            find_lower
+        );
+
+        // CTE: number ALL rows in base result, then filter for find matches
+        // This gives us the position in the FULL list for correct scrolling
+        let batches = self
+            .sql(&format!(
+                r#"
+                WITH numbered AS (
+                    SELECT
+                        line_number,
+                        CAST(ROW_NUMBER() OVER (ORDER BY combat_time_secs) - 1 AS BIGINT) as pos,
+                        source_name as src,
+                        target_name as tgt,
+                        ability_name as abl,
+                        effect_name as eff
+                    FROM events
+                    WHERE {base_where}
+                )
+                SELECT pos, line_number
+                FROM numbered
+                WHERE {find_filter}
+                ORDER BY pos
+                "#
+            ))
+            .await?;
+
+        let mut results = Vec::new();
+        for batch in &batches {
+            let positions = col_i64(batch, 0)?;
+            let line_numbers = col_i64(batch, 1)?;
+            for i in 0..batch.num_rows() {
+                results.push(CombatLogFindMatch {
+                    pos: positions[i] as u64,
+                    row_idx: line_numbers[i] as u64,
+                });
+            }
         }
         Ok(results)
     }

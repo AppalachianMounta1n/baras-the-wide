@@ -241,6 +241,38 @@ pub struct CombatLogRow {
     pub damage_type: String,
     /// Avoid type (miss, dodge, parry, etc.)
     pub defense_type_id: i64,
+    /// Effect ID for readable event type mapping
+    pub effect_id: i64,
+    /// Effect type ID for event type filtering
+    pub effect_type_id: i64,
+    /// Source entity log_id for Show IDs feature
+    pub source_id: i64,
+    /// Target entity log_id for Show IDs feature
+    pub target_id: i64,
+}
+
+/// Filter options for combat log event types.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CombatLogFilters {
+    /// Show damage events
+    pub damage: bool,
+    /// Show healing events
+    pub healing: bool,
+    /// Show action events (AbilityActivate/Deactivate/Interrupt)
+    pub actions: bool,
+    /// Show effect events (buff/debuff gained/lost)
+    pub effects: bool,
+    /// Hide Spend/Restore (energy) events
+    pub simplified: bool,
+}
+
+/// A match result from the combat log find feature.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CombatLogFindMatch {
+    /// Position in the filtered result set (for scrolling)
+    pub pos: u64,
+    /// Row index / line_number (for highlighting)
+    pub row_idx: u64,
 }
 
 /// A phase segment - one occurrence of a phase (phases can repeat).

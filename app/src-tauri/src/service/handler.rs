@@ -12,8 +12,9 @@ use baras_core::context::{AppConfig, AppConfigExt, resolve};
 use baras_core::encounter::EncounterState;
 use baras_core::game_data::Discipline;
 use baras_core::query::{
-    AbilityBreakdown, BreakdownMode, CombatLogRow, DataTab, EffectChartData, EffectWindow,
-    EncounterTimeline, EntityBreakdown, PlayerDeath, RaidOverviewRow, TimeRange, TimeSeriesPoint,
+    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow, DataTab,
+    EffectChartData, EffectWindow, EncounterTimeline, EntityBreakdown, PlayerDeath,
+    RaidOverviewRow, TimeRange, TimeSeriesPoint,
 };
 
 use super::{CombatData, LogFileInfo, ServiceCommand, SessionInfo};
@@ -837,6 +838,7 @@ impl ServiceHandle {
         target_filter: Option<String>,
         search_filter: Option<String>,
         time_range: Option<TimeRange>,
+        event_filters: Option<CombatLogFilters>,
     ) -> Result<Vec<CombatLogRow>, String> {
         let session_guard = self.shared.session.read().await;
         let session = session_guard.as_ref().ok_or("No active session")?;
@@ -869,6 +871,7 @@ impl ServiceHandle {
                 target_filter.as_deref(),
                 search_filter.as_deref(),
                 time_range.as_ref(),
+                event_filters.as_ref(),
             )
             .await
     }
@@ -881,6 +884,7 @@ impl ServiceHandle {
         target_filter: Option<String>,
         search_filter: Option<String>,
         time_range: Option<TimeRange>,
+        event_filters: Option<CombatLogFilters>,
     ) -> Result<u64, String> {
         let session_guard = self.shared.session.read().await;
         let session = session_guard.as_ref().ok_or("No active session")?;
@@ -911,8 +915,58 @@ impl ServiceHandle {
                 target_filter.as_deref(),
                 search_filter.as_deref(),
                 time_range.as_ref(),
+                event_filters.as_ref(),
             )
             .await
+    }
+
+    /// Find matching rows in combat log (returns position and row_idx).
+    pub async fn query_combat_log_find(
+        &self,
+        encounter_idx: Option<u32>,
+        find_text: String,
+        source_filter: Option<String>,
+        target_filter: Option<String>,
+        time_range: Option<TimeRange>,
+        event_filters: Option<CombatLogFilters>,
+    ) -> Result<Vec<CombatLogFindMatch>, String> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref().ok_or("No active session")?;
+        let session = session.read().await;
+
+        if let Some(idx) = encounter_idx {
+            let dir = session.encounters_dir().ok_or("No encounters directory")?;
+            let path = dir.join(baras_core::storage::encounter_filename(idx));
+            if !path.exists() {
+                return Err(format!("Encounter file not found: {:?}", path));
+            }
+            self.shared.query_context.register_parquet(&path).await?;
+        } else {
+            let writer = session
+                .encounter_writer()
+                .ok_or("No live encounter buffer")?;
+            let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
+            self.shared.query_context.register_batch(batch).await?;
+        }
+
+        let result = self.shared
+            .query_context
+            .query()
+            .await
+            .query()
+            .query_combat_log_find(
+                &find_text,
+                source_filter.as_deref(),
+                target_filter.as_deref(),
+                time_range.as_ref(),
+                event_filters.as_ref(),
+            )
+            .await;
+
+        if let Err(ref e) = result {
+            tracing::error!("query_combat_log_find failed: {}", e);
+        }
+        result
     }
 
     /// Get distinct source names for combat log filter dropdown.

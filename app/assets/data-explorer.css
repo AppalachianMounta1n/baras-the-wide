@@ -1023,6 +1023,10 @@
 
 .log-header .log-cell {
   padding: 6px 4px;
+  text-align: center;
+}
+.log-header .log-ability {
+  display: block;
 }
 
 /* Virtual scroll container */
@@ -1052,58 +1056,80 @@
   white-space: nowrap;
 }
 
+/* Resize handle between columns */
+.log-resize-handle {
+  width: 5px;
+  cursor: col-resize;
+  background: var(--border-subtle);
+  flex-shrink: 0;
+  position: relative;
+}
+.log-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 25%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1px;
+  height: 50%;
+  background: var(--text-muted);
+}
+.log-resize-handle:hover {
+  background: var(--accent-gold);
+}
+.log-resize-handle:hover::after {
+  background: var(--accent-gold);
+}
+
 .log-time {
-  width: 70px;
   flex-shrink: 0;
   color: var(--text-muted);
 }
 .log-source {
-  width: 120px;
   flex-shrink: 0;
 }
 .log-type {
-  width: 90px;
   flex-shrink: 0;
   font-size: 10px;
 }
 .log-target {
-  width: 120px;
   flex-shrink: 0;
 }
 .log-ability {
-  flex: 1;
-  min-width: 150px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 4px;
 }
 .log-value {
-  width: 70px;
   flex-shrink: 0;
   text-align: right;
 }
 .log-absorbed {
-  width: 50px;
   flex-shrink: 0;
   text-align: right;
   color: var(--text-muted);
 }
 .log-overheal {
-  width: 50px;
   flex-shrink: 0;
   text-align: right;
   color: var(--text-muted);
 }
 .log-threat {
-  width: 60px;
   flex-shrink: 0;
   text-align: right;
   color: var(--text-muted);
+}
+.log-mitigation {
+  flex-shrink: 0;
 }
 
 /* Effect type colors */
 .log-apply {
   color: hsl(120, 50%, 50%);
+}
+.log-type-damage {
+  color: hsl(30, 90%, 55%);
 }
 .log-remove {
   color: hsl(0, 50%, 60%);
@@ -1130,4 +1156,196 @@
 /* Alternating row backgrounds for readability */
 .log-row:nth-child(even) {
   background: rgba(255, 255, 255, 0.02);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Combat Log Row Coloring
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Damage row tint */
+.log-damage-row {
+  background: hsla(0, 50%, 30%, 0.15);
+}
+.log-damage-row:nth-child(even) {
+  background: hsla(0, 50%, 30%, 0.2);
+}
+
+/* Heal row tint */
+.log-heal-row {
+  background: hsla(120, 50%, 30%, 0.15);
+}
+.log-heal-row:nth-child(even) {
+  background: hsla(120, 50%, 30%, 0.2);
+}
+
+/* Highlighted row (Find feature) */
+.log-row-highlighted {
+  background: hsla(45, 80%, 50%, 0.3) !important;
+  outline: 2px solid var(--accent-gold);
+  outline-offset: -2px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Mitigation Column
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.log-mitigation {
+  width: 60px;
+  flex-shrink: 0;
+  text-align: center;
+  color: hsl(280, 60%, 70%);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Event Type Filter Checkboxes
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.log-event-filters {
+  display: flex;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.log-filter-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+  white-space: nowrap;
+}
+
+.log-filter-checkbox:hover {
+  background: var(--bg-hover);
+}
+
+.log-filter-checkbox input {
+  margin: 0;
+  cursor: pointer;
+}
+
+.log-filter-checkbox.damage {
+  color: hsl(0, 70%, 65%);
+}
+
+.log-filter-checkbox.healing {
+  color: hsl(120, 60%, 55%);
+}
+
+.log-filter-checkbox.actions {
+  color: hsl(200, 60%, 65%);
+}
+
+.log-filter-checkbox.effects {
+  color: hsl(45, 70%, 60%);
+}
+
+.log-filter-checkbox.simplified {
+  color: var(--text-muted);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Find Input Group
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.log-find-group {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-left: var(--space-sm);
+}
+
+.log-find-input {
+  padding: 4px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+  width: 140px;
+}
+
+.log-find-input:focus {
+  outline: none;
+  border-color: var(--accent-gold);
+}
+
+.log-find-input::placeholder {
+  color: var(--text-muted);
+}
+
+.find-nav-btn {
+  padding: 4px 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  transition: all var(--transition-fast);
+}
+
+.find-nav-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.find-nav-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.find-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  min-width: 30px;
+  text-align: center;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Show IDs Toggle
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.log-show-ids {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+  margin-left: auto;
+}
+
+.log-show-ids:hover {
+  background: var(--bg-hover);
+}
+
+.log-show-ids input {
+  margin: 0;
+  cursor: pointer;
+}
+
+/* ID suffix in names */
+.log-id-suffix {
+  color: var(--text-muted);
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+/* Overheal header with tooltip */
+.log-overheal-header {
+  cursor: help;
 }
