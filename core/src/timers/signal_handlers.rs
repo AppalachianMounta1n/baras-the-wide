@@ -66,7 +66,8 @@ pub(super) fn handle_ability(
         .collect();
 
     for def in matching {
-        manager.start_timer(&def, timestamp, Some(target_id));
+        let instance_id = if def.per_target { Some(target_id) } else { None };
+        manager.start_timer(&def, timestamp, instance_id);
     }
 
     // Check for cancel triggers on ability cast
@@ -118,7 +119,8 @@ pub(super) fn handle_effect_applied(
         .collect();
 
     for def in matching {
-        manager.start_timer(&def, timestamp, Some(target_id));
+        let instance_id = if def.per_target { Some(target_id) } else { None };
+        manager.start_timer(&def, timestamp, instance_id);
     }
 
     // Check for cancel triggers on effect applied
@@ -170,7 +172,8 @@ pub(super) fn handle_effect_removed(
         .collect();
 
     for def in matching {
-        manager.start_timer(&def, timestamp, Some(target_id));
+        let instance_id = if def.per_target { Some(target_id) } else { None };
+        manager.start_timer(&def, timestamp, instance_id);
     }
 
     // Check for cancel triggers on effect removed
@@ -466,7 +469,8 @@ pub(super) fn handle_damage_taken(
         .collect();
 
     for def in matching {
-        manager.start_timer(&def, timestamp, Some(target_id));
+        let instance_id = if def.per_target { Some(target_id) } else { None };
+        manager.start_timer(&def, timestamp, instance_id);
     }
 
     // Check for cancel triggers on damage taken

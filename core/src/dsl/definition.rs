@@ -299,6 +299,13 @@ pub struct BossTimerDefinition {
     /// Audio configuration (alerts, countdown, custom sounds)
     #[serde(default)]
     pub audio: AudioConfig,
+
+    // ─── Advanced ────────────────────────────────────────────────────────────
+    /// If true, create separate timer instances per target (e.g., for tracking
+    /// individual player debuffs). Defaults to false for boss timers, meaning
+    /// only one instance can be active at a time regardless of target.
+    #[serde(default, skip_serializing_if = "crate::serde_defaults::is_false")]
+    pub per_target: bool,
 }
 
 impl BossTimerDefinition {
@@ -339,6 +346,8 @@ impl BossTimerDefinition {
             difficulties: self.difficulties.clone(),
             phases: self.phases.clone(),
             counter_condition: self.counter_condition.clone(),
+            // Boss timers default to single-instance (per_target = false)
+            per_target: self.per_target,
         }
     }
 }

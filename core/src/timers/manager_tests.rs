@@ -35,6 +35,7 @@ fn make_timer(id: &str, name: &str, trigger: TimerTrigger, duration: f32) -> Tim
         difficulties: Vec::new(),
         phases: Vec::new(),
         counter_condition: None,
+        per_target: true, // Tests use per-target behavior by default
     }
 }
 

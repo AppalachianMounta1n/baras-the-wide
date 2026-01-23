@@ -106,6 +106,13 @@ pub struct TimerDefinition {
     /// Only active when counter meets condition
     #[serde(default)]
     pub counter_condition: Option<CounterCondition>,
+
+    // ─── Instance Behavior ───────────────────────────────────────────────────
+    /// If true, create separate timer instances per target. If false, only one
+    /// instance can be active at a time (keyed by definition ID only).
+    /// Defaults to true for user-created timers, false for boss encounter timers.
+    #[serde(default = "crate::serde_defaults::default_true")]
+    pub per_target: bool,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

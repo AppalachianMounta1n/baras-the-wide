@@ -632,6 +632,7 @@ fn test_bestia_complete_encounter() {
             difficulties: Vec::new(),
             phases: Vec::new(),
             counter_condition: None,
+            per_target: bt.per_target,
         })
         .collect();
 
