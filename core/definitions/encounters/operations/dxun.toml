@@ -749,3 +749,21 @@ is_alert = true
 alert_text = "Photogensis HP threshold"
 color = [53, 211, 214, 255]
 difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "apex_1st_contagion"
+name = "1st Contagion"
+duration = 33.0
+trigger = { type = "combat_start" }
+color = [0, 0, 0, 255]
+difficulties = ["story", "veteran", "master"]
+
+[[boss.timer]]
+id = "apex_vanguard_contagion"
+name = "Contagion"
+trigger = { type = "effect_applied", target = "local_player", effects = [
+  4352726016196922,
+] }
+duration_secs = 63
+color = [0, 0, 0, 255]
+difficulties = ["story", "veteran", "master"]
