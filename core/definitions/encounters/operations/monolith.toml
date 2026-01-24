@@ -1,0 +1,15 @@
+[area]
+name = "Colossal Monolith"
+id = 3541801830973440
+
+
+[[bosss]]
+id = "monolith"
+name = "Colossal Monolith"
+difficulties = ["story", "veteran"]
+
+[[boss.entities]]
+name = "Colossal Monolith"
+ids = [3541140406009856, 3570951774011392, 3570947479044096, 3570956068978688]
+is_boss = true
+triggers_encounter = true
