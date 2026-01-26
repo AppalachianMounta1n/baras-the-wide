@@ -1014,7 +1014,7 @@ pub fn App() -> Element {
                                 class: if timers_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
                                 title: "Displays encounter-specific timers and phase markers",
                                 onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::Timers, timers_on).await {
+                                    if api::toggle_overlay(OverlayType::TimersA, timers_on).await {
                                         timers_enabled.set(!timers_on);
                                     }
                                 }); },
