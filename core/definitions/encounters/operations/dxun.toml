@@ -134,9 +134,9 @@ is_boss = true
 triggers_encounter = true
 
 [[boss.entities]]
-name = "Rampaging Charger"
-ids = [4250514384486400]
-is_boss = false
+name = "Czerka Warden Droiid"
+ids = [4245686841245696]
+is_boss = true
 triggers_encounter = true
 
 
@@ -738,32 +738,606 @@ name = "Voltinator Damage"
 metric = "damage"
 phase = "apex_voltinator"
 
-
 [[boss.timer]]
 id = "apex_photo_hp"
 name = "Photogenesis HP"
-trigger = { type = "boss_hp_below", hp_percent = 94.0, selector = [
-  "Apex Vanguard",
-] }
 is_alert = true
 alert_text = "Photogensis HP threshold"
 color = [53, 211, 214, 255]
 difficulties = ["veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "boss_hp_below"
+hp_percent = 94.0
+selector = ["Apex Vanguard"]
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
 
 [[boss.timer]]
-id = "apex_1st_contagion"
-name = "1st Contagion"
-duration = 33.0
-trigger = { type = "combat_start" }
-color = [0, 0, 0, 255]
+id = "apex_vanguard_1st_acid"
+name = "1st Acid"
+display_text = "Acid Blast"
+duration_secs = 10.0
+color = [0, 250, 9, 255]
+difficulties = ["master"]
+enabled = true
+show_at_secs = 8.0
+
+[boss.timer.trigger]
+type = "combat_start"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_acid_blast"
+name = "Acid Blast"
+duration_secs = 30.0
+color = [0, 250, 1, 255]
 difficulties = ["story", "veteran", "master"]
+enabled = true
+show_at_secs = 8.0
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [4305094828883968]
+source = "any"
+target = "any"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
 
 [[boss.timer]]
 id = "apex_vanguard_contagion"
 name = "Contagion"
-trigger = { type = "effect_applied", target = "local_player", effects = [
-  4352726016196922,
-] }
-duration_secs = 63
-color = [0, 0, 0, 255]
+duration_secs = 63.0
+color = [0, 250, 250, 255]
+difficulties = ["veteran", "master"]
+enabled = true
+show_at_secs = 8.0
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [4306117031100416]
+source = "any"
+target = "any"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_1st_contagion"
+name = "1st Contagion"
+display_text = "Contagion"
+duration_secs = 30.0
+color = [5, 250, 250, 255]
+difficulties = ["veteran", "master"]
+enabled = true
+show_at_secs = 8.0
+
+[boss.timer.trigger]
+type = "combat_start"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_2nd_deluge"
+name = "2nd Deluge"
+display_text = "Acid Deluge"
+duration_secs = 122.0
+color = [0, 250, 0, 255]
 difficulties = ["story", "veteran", "master"]
+enabled = true
+show_at_secs = 30.0
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [4330254747303936]
+source = "any"
+target = "any"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_1st_bloodlust"
+name = "1st Bloodlust"
+display_text = "Bloodlust"
+duration_secs = 60.0
+color = [250, 0, 0, 255]
+difficulties = ["master"]
+enabled = true
+show_at_secs = 45.0
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [4297819154284544]
+source = "any"
+target = "any"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_bloodlust"
+name = "Bloodlust"
+duration_secs = 63.0
+color = [250, 0, 0, 255]
+difficulties = ["master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [4385835919081472]
+source = "any"
+target = "any"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_1st_red_venom"
+name = "1st Red Venom"
+display_text = "Red Venom"
+duration_secs = 60.0
+color = [200, 0, 250, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [4297819154284544]
+source = "any"
+target = "any"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_1st_mass_target"
+name = "1st Mass Target"
+display_text = "Mass Target Lock"
+duration_secs = 60.0
+color = [255, 128, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "apex_vanguard_1st_red_venom"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_1st_voltinator"
+name = "1st Voltinator"
+display_text = "Voltinator"
+duration_secs = 60.0
+color = [255, 255, 255, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "apex_vanguard_1st_mass_target"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_venom_or_target"
+name = "Venom OR Target Split"
+display_text = "Venom OR Target"
+duration_secs = 60.0
+color = [255, 128, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "apex_vanguard_1st_voltinator"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_first_venom_or_target_part_2"
+name = "Venom OR Target Part 2"
+duration_secs = 30.0
+color = [255, 128, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "any_of"
+
+[[boss.timer.trigger.conditions]]
+type = "timer_expires"
+timer_id = "apex_vanguard_venom_or_target"
+
+[[boss.timer.trigger.conditions]]
+type = "boss_hp_below"
+hp_percent = 59.0
+selector = ["Apex Vanguard"]
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_venom_or_volt_split"
+name = "Venom OR Volt Split"
+duration_secs = 60.0
+color = [200, 8, 250, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "apex_vanguard_first_venom_or_target_part_2"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_venom_or_volt_part_2"
+name = "Venom OR Volt Part 2"
+duration_secs = 30.0
+color = [200, 0, 250, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "apex_vanguard_venom_or_volt_split"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_target_or_volt_split"
+name = "Target OR Volt Split"
+display_text = "Target OR Volt"
+duration_secs = 60.0
+color = [255, 255, 255, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "apex_vanguard_venom_or_volt_part_2"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_target_or_volt_part_2"
+name = "Target OR Volt Part 2"
+display_text = "Target OR Volt"
+duration_secs = 30.0
+color = [255, 255, 255, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "apex_vanguard_target_or_volt_split"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_ultraviolence"
+name = "ULTRAVIOLENCE"
+duration_secs = 63.0
+color = [250, 0, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+show_at_secs = 45.0
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [4409239195877376]
+source = "any"
+target = "any"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_1st_deluge"
+name = "1st Deluge"
+display_text = "Acid Deluge"
+duration_secs = 60.0
+color = [0, 250, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "apex_vanguard_target_or_volt_part_2"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_zone_defense"
+name = "Zone Defense"
+duration_secs = 310.0
+color = [250, 250, 0, 255]
+difficulties = ["veteran", "master"]
+enabled = true
+show_at_secs = 15.0
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [4333050771013632]
+source = "any"
+target = "any"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_1st_rockets"
+name = "1st Rockets"
+display_text = "Rockets"
+duration_secs = 16.0
+color = [250, 250, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "combat_start"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_rockets"
+name = "Rockets"
+duration_secs = 24.0
+color = [250, 250, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+show_at_secs = 8.0
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [4308741256118272]
+source = "any"
+target = "any"
+
+[boss.timer.cancel_trigger]
+type = "ability_cast"
+abilities = []
+source = "any"
+target = "any"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_target_lock_p3"
+name = "Target Lock P3"
+display_text = "Mass Target Lock"
+duration_secs = 30.0
+color = [255, 128, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "combat_start"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_voltinator_p3"
+name = "Voltinator P3"
+display_text = "Voltinator"
+duration_secs = 30.0
+color = [255, 255, 255, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "apex_vanguard_target_lock_p3"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_red_venom_p4"
+name = "Red Venom P4"
+display_text = "Red Venom"
+duration_secs = 60.0
+color = [200, 0, 250, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "apex_vanguard_voltinator_p3"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_target_and_venom"
+name = "Target AND Venom"
+duration_secs = 30.0
+color = [255, 128, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "any_of"
+
+[[boss.timer.trigger.conditions]]
+type = "timer_expires"
+timer_id = "apex_vanguard_red_venom_p4"
+
+[[boss.timer.trigger.conditions]]
+type = "boss_hp_below"
+hp_percent = 16.0
+selector = ["Apex Vanguard"]
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_target_lock_p4"
+name = "Target Lock P4"
+display_text = "Mass Target Lock"
+duration_secs = 30.0
+color = [255, 128, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "combat_start"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_1st_flare"
+name = "1st Flare"
+duration_secs = 2.5
+color = [255, 0, 150, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "entity_death"
+selector = [4297557161279488]
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_flare"
+name = "Flare"
+display_text = "Flare Ends"
+duration_secs = 30.0
+color = [255, 0, 150, 255]
+difficulties = ["veteran", "master"]
+enabled = true
+show_at_secs = 10.0
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = []
+source = "any_player"
+target = "any"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "apex_vanguard_flares_crafted"
+name = "Flares crafted"
+duration_secs = 45.0
+color = [0, 50, 250, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+can_be_refreshed = true
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [4326784413728768]
+source = "any_player"
+target = "any"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 3
+
+[[boss.timer]]
+id = "apex_vanguard_bombardment"
+name = "Bombardment"
+duration_secs = 32.0
+color = [0, 150, 250, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "effect_applied"
+effects = [4308938824613888]
+source = "any"
+target = "any_player"
+
+[boss.timer.cancel_trigger]
+type = "effect_removed"
+effects = [4308938824613888]
+source = "any"
+target = "any_player"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
