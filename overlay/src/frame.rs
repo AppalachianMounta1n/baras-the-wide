@@ -101,14 +101,16 @@ impl OverlayFrame {
         // Clear with transparent
         self.window.clear(colors::transparent());
 
-        // Draw background only if alpha > 0 (fully transparent overlays skip this)
-        if self.background_alpha > 0 {
-            // In move mode, use reduced alpha (20%) to make overlay semi-transparent
-            let alpha = if in_move_mode {
-                (self.background_alpha as f32 * 0.20).round() as u8
-            } else {
-                self.background_alpha
-            };
+        // Calculate background alpha
+        // In move mode: use 20% of normal alpha, but always at least 20% visible for draggability
+        let alpha = if in_move_mode {
+            (self.background_alpha as f32 * 0.20).round().max(51.0) as u8
+        } else {
+            self.background_alpha
+        };
+
+        // Draw background if there's any alpha to show
+        if alpha > 0 {
             let bg_color = Color::from_rgba8(30, 30, 30, alpha);
             self.window
                 .fill_rounded_rect(0.0, 0.0, width, height, corner_radius, bg_color);
