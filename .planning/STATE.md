@@ -13,7 +13,7 @@ Milestone: v1.2 macOS Support
 Phase: 15 of 16 (objc2 Migration)
 Plan: 03 of 03
 Status: Phase complete
-Last activity: 2026-01-18 - Completed 15-03-PLAN.md (cocoa crate removal)
+Last activity: 2026-01-26 - Completed quick task 001: Encounter timers A/B display targets
 
 Progress: [#########################.....] 37/38 plans (v1.0 + v1.1 complete, v1.2 in progress)
 
@@ -70,6 +70,12 @@ Recent:
 - Overlay test format_number has pre-existing failure (precision mismatch)
 - [RESOLVED] define_class! with NSRect parameter validated - compiles successfully
 - [RESOLVED] cocoa crate removal complete - macos.rs now uses objc2-app-kit exclusively
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 001 | Encounter timers A/B display targets | 2026-01-26 | e18a0d9 | [001-encounter-timers-a-b-display-targets](./quick/001-encounter-timers-a-b-display-targets/) |
 
 ## Session Continuity
 
