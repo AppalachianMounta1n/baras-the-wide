@@ -286,6 +286,14 @@ fn TimerEditForm(
     let mut confirm_delete = use_signal(|| false);
     let mut just_saved = use_signal(|| false);
 
+    // Reset just_saved when user makes new changes after saving
+    let timer_original_for_effect = timer_original.clone();
+    use_effect(move || {
+        if draft() != timer_original_for_effect && just_saved() {
+            just_saved.set(false);
+        }
+    });
+
     let has_changes = use_memo(move || !just_saved() && draft() != timer_original);
 
     // Notify parent when dirty state changes

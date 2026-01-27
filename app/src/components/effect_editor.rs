@@ -668,13 +668,16 @@ fn EffectEditForm(
         }
     });
 
-    // For drafts, always enable save; for existing effects, only when changed and not just saved
-    let has_changes = use_memo(move || {
-        if just_saved() {
-            return false;
+    // Reset just_saved when user makes new changes after saving
+    let effect_original_for_effect = effect_original.clone();
+    use_effect(move || {
+        if draft() != effect_original_for_effect && just_saved() {
+            just_saved.set(false);
         }
-        is_draft || draft() != effect_original
     });
+
+    // For drafts, always enable save; for existing effects, only when changed
+    let has_changes = use_memo(move || is_draft || (!just_saved() && draft() != effect_original));
 
     // Notify parent when dirty state changes
     use_effect(move || {

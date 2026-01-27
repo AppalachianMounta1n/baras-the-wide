@@ -259,6 +259,14 @@ fn EntityEditForm(
     let mut draft = use_signal(|| entity_for_draft);
     let mut just_saved = use_signal(|| false);
 
+    // Reset just_saved when user makes new changes after saving
+    let original_for_effect = original.clone();
+    use_effect(move || {
+        if draft() != original_for_effect && just_saved() {
+            just_saved.set(false);
+        }
+    });
+
     let has_changes = use_memo(move || !just_saved() && draft() != original);
 
     // Notify parent when dirty state changes
