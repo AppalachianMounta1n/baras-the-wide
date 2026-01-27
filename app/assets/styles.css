@@ -5323,11 +5323,18 @@ details[open] .collapsible-summary::before {
   font-size: 0.75rem;
   color: var(--swtor-orange, #f0ad4e);
   margin-left: 8px;
-  font-style: italic;
+  font-weight: bold;
 }
 
 .unsaved-indicator::before {
   content: "unsaved changes";
+}
+
+/* Orange outline on rows with unsaved changes */
+.list-item:has(.unsaved-indicator),
+.effect-row:has(.unsaved-indicator) {
+  outline: 2px solid var(--swtor-orange, #f0ad4e);
+  outline-offset: -2px;
 }
 
 /* ─── Color Swatch ───────────────────────────────────────────────────────────── */
