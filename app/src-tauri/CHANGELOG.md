@@ -1,59 +1,31 @@
-# v2026.1.1900
+# v2026.1.2700
 
-## Hotfix v2026.1.1902
+## What's New
 
-- Fixed issue causing names to not appear in raid frames
-- Raid frames now fill in vertically by column
-- Update prompt button is now easier to spot
+### General
 
-## Hotfix v2026.1.1901
+- Improvements to encounter success/wipe classification
+- Improvements to encounter naming
+- World Bosses should now be detected as named encounters
 
-- macOS overlay colors should now render correctly
-- update readme instructions addressing potential permissions issues on macOS
-- application config now writes to the ~/Library/Application Support on macOS
+### UI
 
-## New Features
-
-- macOS support (experimental)
-- X11 support for Linux
-
-## Under the hood
-
-- Application error logs + major stability improvements
-- Parsing time significantly reduced for larger files
-
-## Improvements
-
-- Metrics values should now display closer to parsely.io values - though not exact
-- Session page polish with loading indicators and empty states
-- Profile selector always visible with improved empty state
-- Overlay settings live preview
-- Overlay button tooltips
-- Effect editor card-based UI with tooltips
-- Alacrity/latency parameters moved to the session page
+- Combat Log in data explorer has been significantly improved with filters and IDs
+- Data Explorer now remembers position if navigating to another tab
+- Added visual indicator if changes are unsaved for timers or effects
 
 ## Overlays
 
-- Overlay customization previews are now visible immediately without saving
-- Class icons can now be displayed on metrics overlays
-- Effective damage visually shows boss/non-boss DPS splits
-- Raw healing visually shows total/effective HPS splits
-- Effective healing now shows shielding
+- Added ability to set encounter timers on specific A/B timer overlay
+- Added icon support to raid frames (enable in customization)
 
-## Bugfixes
+### Timers and Bosses
 
-- The application can now only have one instance open at at time
-- Changing overlay profiles no longer changes overlay visibility
-- Raid frames properly re-render after profiles are changed
-- Timers now load on the first encounter when application is restarted within an area
-- Overlays now display the latest combat encounter automatically when a file is opened
-- Data explorer race conditions and formatting fixed
-- Combat log scroll resets when new encounter selected
-
-## Timers/Definitions
-
-- Shelleigh is now counted to boss DPS in Huntmaster
-- XR-53 digestive enzyme and Revan force bond no longer contribute to player DPS
-- Corruptor Zero timer for first gravity field added
-- Vorgath boss encounter is now properly detected on story mode
-- Revanite Commanders now appear on boss healthbar
+- Added Colossal Monolith definition to encounter builder
+- Fixed Brontes Reaches active timer appearing after only 1 hand was pushed
+- Fixed Firebrand and Stormcaller DD and incinerate armor timers not firing on start of a new phase
+- Fixed Firebrand and Stormcaller defensive systems timer
+- Set Revan 3rd floor Push/Pull timers to proper 15 second interval
+- Added Apex Vanguard timers (thanks @zazeg)
+- Added Dread Palace timers and phases (thanks @wolfy)
+- Added Sparky timers and phases
