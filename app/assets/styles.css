@@ -5332,7 +5332,7 @@ details[open] .collapsible-summary::before {
 
 /* Orange outline on inner form body when unsaved */
 .list-item-header:has(.unsaved-indicator) + .list-item-body,
-.effect-row-header:has(.unsaved-indicator) + .effect-edit-form {
+.effect-row-summary:has(.unsaved-indicator) + .effect-edit-form {
   outline: 2px solid var(--swtor-orange, #f0ad4e);
   outline-offset: -2px;
 }
