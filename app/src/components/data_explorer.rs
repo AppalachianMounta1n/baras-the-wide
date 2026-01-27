@@ -15,7 +15,7 @@ use crate::api::{
 use crate::components::ability_icon::AbilityIcon;
 use crate::components::charts_panel::ChartsPanel;
 use crate::components::class_icons::{get_class_icon, get_role_icon};
-use crate::components::combat_log::CombatLog;
+use crate::components::combat_log::{CombatLog, CombatLogState};
 use crate::components::history_panel::EncounterSummary;
 use crate::components::phase_timeline::PhaseTimelineFilter;
 use crate::components::{ToastSeverity, use_toast};
@@ -370,6 +370,8 @@ pub struct DataExplorerProps {
     pub selected_encounter: Signal<Option<u32>>,
     /// Persisted view mode (survives tab switches)
     pub view_mode: Signal<ViewMode>,
+    /// Persisted combat log state (survives tab switches)
+    pub combat_log_state: Signal<CombatLogState>,
 }
 
 #[component]
@@ -1324,6 +1326,7 @@ pub fn DataExplorerPanel(props: DataExplorerProps) -> Element {
                                 encounter_idx: enc_idx,
                                 time_range: time_range(),
                                 initial_search: death_search_text(),
+                                state: props.combat_log_state,
                             }
                         }
                     } else if matches!(*view_mode.read(), ViewMode::Charts) {

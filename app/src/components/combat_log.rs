@@ -43,6 +43,38 @@ const DEFENSE_COVER: i64 = 836045448945510;
 const DEFENSE_ABSORBED: i64 = 836045448945511;
 const DEFENSE_REFLECTED: i64 = 836045448953649;
 
+/// Persisted combat log filter/scroll state that survives component unmounts.
+#[derive(Clone, PartialEq)]
+pub struct CombatLogState {
+    pub encounter_idx: Option<u32>,
+    pub source_filter: Option<String>,
+    pub target_filter: Option<String>,
+    pub search_text: String,
+    pub filter_damage: bool,
+    pub filter_healing: bool,
+    pub filter_actions: bool,
+    pub filter_effects: bool,
+    pub filter_simplified: bool,
+    pub scroll_offset: f64,
+}
+
+impl Default for CombatLogState {
+    fn default() -> Self {
+        Self {
+            encounter_idx: None,
+            source_filter: None,
+            target_filter: None,
+            search_text: String::new(),
+            filter_damage: true,
+            filter_healing: true,
+            filter_actions: true,
+            filter_effects: true,
+            filter_simplified: false,
+            scroll_offset: 0.0,
+        }
+    }
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct CombatLogProps {
     pub encounter_idx: u32,
@@ -50,6 +82,8 @@ pub struct CombatLogProps {
     /// Optional initial search text (e.g., player name from death tracker)
     #[props(default)]
     pub initial_search: Option<String>,
+    /// Persisted state signal (survives tab switches)
+    pub state: Signal<CombatLogState>,
 }
 
 /// Format time as M:SS.d
@@ -181,20 +215,42 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
         encounter_idx_signal.set(props.encounter_idx);
     }
 
-    // Filter state - initialize search from props if provided (e.g., death tracker)
-    let mut source_filter = use_signal(|| None::<String>);
-    let mut target_filter = use_signal(|| None::<String>);
-    let mut search_text = use_signal(|| props.initial_search.clone().unwrap_or_default());
+    // Determine whether to restore saved state:
+    // - Only restore if no initial_search override (death tracker click)
+    // - Only restore if encounter matches (filters are encounter-specific)
+    let mut state = props.state;
+    let should_restore = props.initial_search.is_none()
+        && state.peek().encounter_idx == Some(props.encounter_idx);
 
-    // Event type filter checkboxes (all default true except simplified)
-    let mut filter_damage = use_signal(|| true);
-    let mut filter_healing = use_signal(|| true);
-    let mut filter_actions = use_signal(|| true);
-    let mut filter_effects = use_signal(|| true);
-    let mut filter_simplified = use_signal(|| false);
+    // Filter state - restore from saved state or use defaults
+    let mut source_filter = use_signal(|| {
+        if should_restore { state.peek().source_filter.clone() } else { None }
+    });
+    let mut target_filter = use_signal(|| {
+        if should_restore { state.peek().target_filter.clone() } else { None }
+    });
+    let mut search_text = use_signal(|| {
+        if let Some(ref search) = props.initial_search {
+            search.clone()
+        } else if should_restore {
+            state.peek().search_text.clone()
+        } else {
+            String::new()
+        }
+    });
+
+    // Event type filter checkboxes
+    let mut filter_damage = use_signal(|| if should_restore { state.peek().filter_damage } else { true });
+    let mut filter_healing = use_signal(|| if should_restore { state.peek().filter_healing } else { true });
+    let mut filter_actions = use_signal(|| if should_restore { state.peek().filter_actions } else { true });
+    let mut filter_effects = use_signal(|| if should_restore { state.peek().filter_effects } else { true });
+    let mut filter_simplified = use_signal(|| if should_restore { state.peek().filter_simplified } else { false });
 
     // Show IDs toggle
     let mut show_ids = use_signal(|| false);
+
+    // Scroll restoration flag - true only on first mount when we have saved scroll
+    let mut restoring_scroll = use_signal(|| should_restore && state.peek().scroll_offset > 0.0);
 
     // Find feature - searches all data via backend query
     let mut find_text = use_signal(String::new);
@@ -284,15 +340,27 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
         };
         let event_filters = build_event_filters();
 
-        // Reset scroll position - both signal and DOM element
-        scroll_top.set(0.0);
-        loaded_offset.set(0);
-        if let Some(window) = web_sys::window()
-            && let Some(doc) = window.document()
-            && let Some(elem) = doc.get_element_by_id("combat-log-scroll")
-        {
-            elem.set_scroll_top(0);
+        // Scroll restoration: on first mount with saved state, load data at
+        // the saved offset and restore scroll after data loads.
+        let is_restoring = *restoring_scroll.peek();
+        let load_offset = if is_restoring {
+            let saved = state.peek().scroll_offset;
+            ((saved / ROW_HEIGHT) as u64).saturating_sub(OVERSCAN as u64)
+        } else {
+            0u64
+        };
+
+        if !is_restoring {
+            // Reset scroll position - both signal and DOM element
+            scroll_top.set(0.0);
+            if let Some(window) = web_sys::window()
+                && let Some(doc) = window.document()
+                && let Some(elem) = doc.get_element_by_id("combat-log-scroll")
+            {
+                elem.set_scroll_top(0);
+            }
         }
+        loaded_offset.set(load_offset);
 
         spawn(async move {
             let tr_opt = if tr.start == 0.0 && tr.end == 0.0 {
@@ -315,10 +383,10 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                 total_count.set(count);
             }
 
-            // Load first page
+            // Load page at computed offset
             if let Some(data) = api::query_combat_log(
                 Some(idx),
-                0,
+                load_offset,
                 PAGE_SIZE,
                 source.as_deref(),
                 target.as_deref(),
@@ -329,6 +397,20 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
             .await
             {
                 rows.set(data);
+            }
+
+            // Restore scroll position after data is loaded
+            if is_restoring {
+                let saved = state.peek().scroll_offset;
+                gloo_timers::future::TimeoutFuture::new(16).await;
+                scroll_top.set(saved);
+                if let Some(window) = web_sys::window()
+                    && let Some(doc) = window.document()
+                    && let Some(elem) = doc.get_element_by_id("combat-log-scroll")
+                {
+                    elem.set_scroll_top(saved as i32);
+                }
+                restoring_scroll.set(false);
             }
         });
     });
@@ -413,6 +495,24 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
         });
     });
 
+
+    // Save filter/scroll state on unmount so it persists across tab switches
+    use_drop(move || {
+        if let Ok(mut s) = state.try_write() {
+            *s = CombatLogState {
+                encounter_idx: Some(*encounter_idx_signal.peek()),
+                source_filter: source_filter.peek().clone(),
+                target_filter: target_filter.peek().clone(),
+                search_text: search_text.peek().clone(),
+                filter_damage: *filter_damage.peek(),
+                filter_healing: *filter_healing.peek(),
+                filter_actions: *filter_actions.peek(),
+                filter_effects: *filter_effects.peek(),
+                filter_simplified: *filter_simplified.peek(),
+                scroll_offset: *scroll_top.peek(),
+            };
+        }
+    });
 
     // Calculate virtual scroll window (for rendering)
     let total = *total_count.read() as usize;

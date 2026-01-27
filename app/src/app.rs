@@ -7,7 +7,8 @@ use wasm_bindgen_futures::spawn_local;
 
 use crate::api;
 use crate::components::{
-    DataExplorerPanel, EffectEditorPanel, EncounterEditorPanel, HistoryPanel, HotkeyInput, ViewMode,
+    CombatLogState, DataExplorerPanel, EffectEditorPanel, EncounterEditorPanel, HistoryPanel,
+    HotkeyInput, ViewMode,
     SettingsPanel, ToastFrame, ToastSeverity, use_toast, use_toast_provider,
 };
 use crate::types::{
@@ -72,6 +73,7 @@ pub fn App() -> Element {
     let mut show_only_bosses = use_signal(|| false);
     let explorer_selected_encounter = use_signal(|| None::<u32>);
     let explorer_view_mode = use_signal(ViewMode::default);
+    let explorer_combat_log_state = use_signal(CombatLogState::default);
 
     // Hotkey state
     let mut hotkey_visibility = use_signal(String::new);
@@ -1204,6 +1206,7 @@ pub fn App() -> Element {
                         show_only_bosses,
                         selected_encounter: explorer_selected_encounter,
                         view_mode: explorer_view_mode,
+                        combat_log_state: explorer_combat_log_state,
                     }
                 }
             }
