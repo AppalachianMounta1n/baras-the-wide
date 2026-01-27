@@ -13,7 +13,7 @@ Milestone: v1.2 macOS Support
 Phase: 15 of 16 (objc2 Migration)
 Plan: 03 of 03
 Status: Phase complete
-Last activity: 2026-01-26 - Completed quick task 002: Encounter section overlay UI
+Last activity: 2026-01-26 - Completed quick task 003: Encounters settings subsection with Timers A/B
 
 Progress: [#########################.....] 37/38 plans (v1.0 + v1.1 complete, v1.2 in progress)
 
@@ -77,10 +77,11 @@ Recent:
 |---|-------------|------|--------|-----------|
 | 001 | Encounter timers A/B display targets | 2026-01-26 | e18a0d9 | [001-encounter-timers-a-b-display-targets](./quick/001-encounter-timers-a-b-display-targets/) |
 | 002 | Encounter section overlay UI | 2026-01-26 | 59b1c72 | [002-encounter-section-overlay-ui](./quick/002-encounter-section-overlay-ui/) |
+| 003 | Encounters settings subsection with Timers A/B | 2026-01-26 | 7d9d761 | [003-encounters-settings-subsection-timers-ab](./quick/003-encounters-settings-subsection-timers-ab/) |
 
 ## Session Continuity
 
 Last session: 2026-01-26
-Stopped at: Completed quick task 002: Encounter section overlay UI
+Stopped at: Completed quick task 003: Encounters settings subsection with Timers A/B
 Resume file: None
 Next: Phase 16 - Dependency Cleanup
