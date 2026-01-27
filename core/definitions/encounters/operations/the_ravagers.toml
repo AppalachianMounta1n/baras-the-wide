@@ -37,6 +37,81 @@ id = "sparky_burn"
 name = "Burn"
 trigger = { type = "boss_hp_below", hp_percent = 25.1, selector = ["Sparky"] }
 
+[[boss.timer]]
+id = "sparky_brutalize"
+name = "Brutalize"
+trigger = { type = "any_of", conditions = [
+  { type = "effect_removed", effects = [
+    3380452794564608,
+  ] },
+  { type = "phase_entered", phase_id = "sparky_burn" },
+] }
+is_alert = true
+alert_text = "Brutalize"
+color = [224, 128, 24, 255]
+difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "sparky_shoulder_throw"
+name = "Shoulder Throw"
+trigger = { type = "ability_cast", abilities = [3377850044383232] }
+duration_secs = 13.0
+color = [203, 204, 46, 255]
+difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "sparky_rampage_end"
+name = "Rampage END"
+trigger = { type = "ability_cast", abilities = [3380452794564608] }
+duration_secs = 15.0
+color = [187, 29, 224, 255]
+difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "sparky_rampage_p2"
+name = "Rampage P2"
+display_text = "Rampage"
+trigger = { type = "any_of", conditions = [
+  { type = "ability_cast", abilities = [
+    3380452794564608,
+  ] },
+  { type = "phase_entered", phaes_id = "sparky_p2" },
+] }
+duration_secs = 36.0
+color = [187, 29, 224, 255]
+difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "sparky_rampage_p3"
+name = "Rampage P3"
+trigger = { type = "any_of", conditions = [
+  { type = "ability_cast", abilities = [
+    3380452794564608,
+  ] },
+  { type = "boss_hp_below", hp_percent = 25.0, selector = [
+    "Sparky",
+  ] },
+] }
+duration_secs = 46.0
+color = [187, 29, 224, 255]
+difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "sparky_forceful_roar_adds"
+name = "Forceful Roar (Adds)"
+trigger = { type = "ability_cast", abilities = [3380792096980992] }
+duration_secs = 40.5
+color = [34, 173, 19, 255]
+difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "sparky_roar_adds"
+name = "Roar (Adds)"
+trigger = { type = "ability_cast", abilities = [3378502879412224] }
+duration_secs = 17.5
+color = [34, 173, 19, 255]
+difficulties = ["veteran", "master"]
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Boss 2: Quartermaster Bulo
