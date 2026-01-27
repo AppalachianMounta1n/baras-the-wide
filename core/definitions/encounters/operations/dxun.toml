@@ -134,7 +134,7 @@ is_boss = true
 triggers_encounter = true
 
 [[boss.entities]]
-name = "Czerka Warden Droiid"
+name = "Czerka Warden Droid"
 ids = [4245686841245696]
 is_boss = true
 triggers_encounter = true
