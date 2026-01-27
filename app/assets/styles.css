@@ -5330,9 +5330,9 @@ details[open] .collapsible-summary::before {
   content: "unsaved changes";
 }
 
-/* Orange outline on rows with unsaved changes */
-.list-item:has(.unsaved-indicator),
-.effect-row:has(.unsaved-indicator) {
+/* Orange outline on inner form body when unsaved */
+.list-item-header:has(.unsaved-indicator) + .list-item-body,
+.effect-row-header:has(.unsaved-indicator) + .effect-edit-form {
   outline: 2px solid var(--swtor-orange, #f0ad4e);
   outline-offset: -2px;
 }
