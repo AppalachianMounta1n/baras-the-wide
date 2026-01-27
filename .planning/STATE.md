@@ -13,7 +13,7 @@ Milestone: v1.2 macOS Support
 Phase: 15 of 16 (objc2 Migration)
 Plan: 03 of 03
 Status: Phase complete
-Last activity: 2026-01-26 - Completed quick task 003: Encounters settings subsection with Timers A/B
+Last activity: 2026-01-27 - Completed quick task 004: Raid frames optional icon support
 
 Progress: [#########################.....] 37/38 plans (v1.0 + v1.1 complete, v1.2 in progress)
 
@@ -78,10 +78,11 @@ Recent:
 | 001 | Encounter timers A/B display targets | 2026-01-26 | e18a0d9 | [001-encounter-timers-a-b-display-targets](./quick/001-encounter-timers-a-b-display-targets/) |
 | 002 | Encounter section overlay UI | 2026-01-26 | 59b1c72 | [002-encounter-section-overlay-ui](./quick/002-encounter-section-overlay-ui/) |
 | 003 | Encounters settings subsection with Timers A/B | 2026-01-26 | 7d9d761 | [003-encounters-settings-subsection-timers-ab](./quick/003-encounters-settings-subsection-timers-ab/) |
+| 004 | Raid frames optional icon support | 2026-01-27 | e6b29ff | [004-raid-frames-optional-icon-support-charge](./quick/004-raid-frames-optional-icon-support-charge/) |
 
 ## Session Continuity
 
-Last session: 2026-01-26
-Stopped at: Completed quick task 003: Encounters settings subsection with Timers A/B
+Last session: 2026-01-27
+Stopped at: Completed quick task 004: Raid frames optional icon support
 Resume file: None
 Next: Phase 16 - Dependency Cleanup
