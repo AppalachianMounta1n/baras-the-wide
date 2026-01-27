@@ -910,6 +910,7 @@ impl RaidOverlay {
 
     /// Render effect indicators on the LEFT side of the frame (matches SWTOR debuff placement)
     /// Effects with duration show a fill that depletes from bottom to top as time expires.
+    /// When show_effect_icons is enabled, renders icons with wipedown effect instead of colored squares.
     /// Returns the effect row height for layout calculations
     fn render_effects(&mut self, raid_frame: &RaidFrame, x: f32, y: f32) -> f32 {
         let max_effects = self.config.max_effects_per_frame as usize;
@@ -925,47 +926,77 @@ impl RaidOverlay {
             let ex = x + 3.0 + (i as f32 * (effect_size + spacing));
             let ey = y + vertical_offset;
 
-            // Dark background (always visible even when fill is empty)
-            self.frame.fill_rounded_rect(
-                ex,
-                ey,
-                effect_size,
-                effect_size,
-                corner_radius,
-                colors::effect_bar_bg(),
-            );
+            // Draw icon or colored square
+            let has_icon = if self.config.show_effect_icons {
+                if let Some(ref icon_arc) = effect.icon {
+                    let (img_w, img_h, ref rgba) = **icon_arc;
+                    self.frame
+                        .draw_image(rgba, img_w, img_h, ex, ey, effect_size, effect_size);
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
 
-            // Calculate fill based on remaining duration
-            let fill_percent = effect.fill_percent();
-
-            if fill_percent > 0.0 {
-                // Fill depletes from bottom to top (remaining time shrinks upward)
-                // Use explicit bottom coordinate to avoid floating-point rounding issues
-                let max_fill_height = effect_size - border_width * 2.0;
-                let fill_bottom = ey + effect_size - border_width;
-                let fill_height = (max_fill_height * fill_percent).round();
-                let fill_y = fill_bottom - fill_height;
-
-                // Combine per-effect alpha (from color) with config opacity
-                // This allows per-effect control while config acts as global multiplier
-                let effect_alpha = (effect.color.alpha() * 255.0) as u16;
-                let combined_alpha = ((effect_alpha * fill_opacity as u16) / 255).min(255) as u8;
-
-                let fill_color = Color::from_rgba8(
-                    (effect.color.red() * 255.0) as u8,
-                    (effect.color.green() * 255.0) as u8,
-                    (effect.color.blue() * 255.0) as u8,
-                    combined_alpha,
+            if !has_icon {
+                // Dark background (always visible even when fill is empty)
+                self.frame.fill_rounded_rect(
+                    ex,
+                    ey,
+                    effect_size,
+                    effect_size,
+                    corner_radius,
+                    colors::effect_bar_bg(),
                 );
 
-                // Inner fill area (inset by border width)
-                // Use rounded coordinates to avoid sub-pixel rendering artifacts
+                // Calculate fill based on remaining duration
+                let fill_percent = effect.fill_percent();
+
+                if fill_percent > 0.0 {
+                    // Fill depletes from bottom to top (remaining time shrinks upward)
+                    // Use explicit bottom coordinate to avoid floating-point rounding issues
+                    let max_fill_height = effect_size - border_width * 2.0;
+                    let fill_bottom = ey + effect_size - border_width;
+                    let fill_height = (max_fill_height * fill_percent).round();
+                    let fill_y = fill_bottom - fill_height;
+
+                    // Combine per-effect alpha (from color) with config opacity
+                    // This allows per-effect control while config acts as global multiplier
+                    let effect_alpha = (effect.color.alpha() * 255.0) as u16;
+                    let combined_alpha = ((effect_alpha * fill_opacity as u16) / 255).min(255) as u8;
+
+                    let fill_color = Color::from_rgba8(
+                        (effect.color.red() * 255.0) as u8,
+                        (effect.color.green() * 255.0) as u8,
+                        (effect.color.blue() * 255.0) as u8,
+                        combined_alpha,
+                    );
+
+                    // Inner fill area (inset by border width)
+                    // Use rounded coordinates to avoid sub-pixel rendering artifacts
+                    self.frame.fill_rect(
+                        (ex + border_width).round(),
+                        fill_y.round(),
+                        max_fill_height.round(),
+                        fill_height,
+                        fill_color,
+                    );
+                }
+            }
+
+            // Wipedown overlay (works for both icon and colored square)
+            // Shows remaining duration as darkened area from top
+            let progress = effect.fill_percent();
+            let overlay_height = effect_size * (1.0 - progress);
+            if overlay_height > 1.0 {
                 self.frame.fill_rect(
-                    (ex + border_width).round(),
-                    fill_y.round(),
-                    max_fill_height.round(),
-                    fill_height,
-                    fill_color,
+                    ex,
+                    ey,
+                    effect_size,
+                    overlay_height,
+                    Color::from_rgba8(0, 0, 0, 140),
                 );
             }
 
