@@ -69,7 +69,7 @@ id = "mal_spear_fixate"
 name = "Spear Fixate"
 trigger = { type = "effect_removed", effects = [
   3437799197900800,
-], target = "local local_player" }
+], target = "local_player" }
 duration_secs = 3.0
 color = [164, 29, 224, 255]
 difficulties = ["veteran"]
