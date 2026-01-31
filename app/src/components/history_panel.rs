@@ -10,7 +10,7 @@ use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::api;
 use crate::components::class_icons::{get_class_icon, get_role_icon};
-use crate::components::{ToastSeverity, use_toast};
+use crate::components::{ToastSeverity, use_parsely_upload, use_toast};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Upload State Tracking
@@ -155,6 +155,8 @@ pub fn HistoryPanel(props: HistoryPanelProps) -> Element {
     let mut show_only_bosses = props.show_only_bosses;
     // Track upload state per encounter_id
     let mut upload_states = use_signal(HashMap::<u64, UploadState>::new);
+    // Get parsely upload manager for event handlers
+    let mut parsely_upload = use_parsely_upload();
 
     // Fetch encounter history
     use_future(move || async move {
@@ -184,6 +186,24 @@ pub fn HistoryPanel(props: HistoryPanelProps) -> Element {
         });
         api::tauri_listen("session-updated", &closure).await;
         closure.forget();
+    });
+
+    // Listen for parsely upload success (to refresh encounter links)
+    use_future(move || async move {
+        if let Some(window) = web_sys::window() {
+            let closure = Closure::<dyn Fn(web_sys::Event)>::new(move |_event: web_sys::Event| {
+                spawn(async move {
+                    if let Some(history) = api::get_encounter_history().await {
+                        let _ = encounters.try_write().map(|mut w| *w = history);
+                    }
+                });
+            });
+            let _ = window.add_event_listener_with_callback(
+                "parsely-upload-success",
+                closure.as_ref().unchecked_ref()
+            );
+            closure.forget();
+        }
     });
 
     let history = encounters();
@@ -392,51 +412,27 @@ pub fn HistoryPanel(props: HistoryPanelProps) -> Element {
                                                                             button {
                                                                                 class: "parsely-upload-btn",
                                                                                 title: "Upload to Parsely",
-                                                                                onclick: move |e| {
-                                                                                    e.stop_propagation();
-                                                                                    let area = area_line;
-                                                                                    spawn(async move {
-                                                                                        // Set uploading state
-                                                                                        upload_states.with_mut(|states| {
-                                                                                            states.insert(enc_id, UploadState::Uploading);
-                                                                                        });
+                                                                                onclick: {
+                                                                                    let encounter_name = enc.display_name.clone();
+                                                                                    move |e| {
+                                                                                        e.stop_propagation();
                                                                                         
-                                                                                        match api::get_active_file().await {
-                                                                                            Some(path) => {
-                                                                                                match api::upload_encounter_to_parsely(&path, start_line, end_line, area).await {
-                                                                                                    Ok(response) if response.success => {
-                                                                                                        let link = response.link.unwrap_or_default();
-                                                                                                        // Save link to backend for persistence
-                                                                                                        let _ = api::set_encounter_parsely_link(enc_id, &link).await;
-                                                                                                        // Clear transient state and refresh encounters
-                                                                                                        upload_states.with_mut(|states| {
-                                                                                                            states.remove(&enc_id);
-                                                                                                        });
-                                                                                                        // Refresh encounter list to show persisted link
-                                                                                                        if let Some(history) = api::get_encounter_history().await {
-                                                                                                            encounters.set(history);
-                                                                                                        }
-                                                                                                    }
-                                                                                                    Ok(response) => {
-                                                                                                        let err = response.error.unwrap_or_else(|| "Unknown error".to_string());
-                                                                                                        upload_states.with_mut(|states| {
-                                                                                                            states.insert(enc_id, UploadState::Error(err));
-                                                                                                        });
-                                                                                                    }
-                                                                                                    Err(e) => {
-                                                                                                        upload_states.with_mut(|states| {
-                                                                                                            states.insert(enc_id, UploadState::Error(e));
-                                                                                                        });
-                                                                                                    }
-                                                                                                }
+                                                                                        let name = encounter_name.clone();
+                                                                                        
+                                                                                        // Get the active file path
+                                                                                        spawn(async move {
+                                                                                            if let Some(path) = api::get_active_file().await {
+                                                                                                parsely_upload.open_encounter(
+                                                                                                    path,
+                                                                                                    name,
+                                                                                                    enc_id,
+                                                                                                    start_line,
+                                                                                                    end_line,
+                                                                                                    area_line,
+                                                                                                );
                                                                                             }
-                                                                                            None => {
-                                                                                                upload_states.with_mut(|states| {
-                                                                                                    states.insert(enc_id, UploadState::Error("No active log file".to_string()));
-                                                                                                });
-                                                                                            }
-                                                                                        }
-                                                                                    });
+                                                                                        });
+                                                                                    }
                                                                                 },
                                                                                 i { class: "fa-solid fa-upload" }
                                                                             }

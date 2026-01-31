@@ -8,7 +8,8 @@ use wasm_bindgen_futures::spawn_local;
 use crate::api;
 use crate::components::{
     DataExplorerPanel, EffectEditorPanel, EncounterEditorPanel, HistoryPanel,
-    HotkeyInput, SettingsPanel, ToastFrame, ToastSeverity, use_toast, use_toast_provider,
+    HotkeyInput, ParselyUploadModal, SettingsPanel, ToastFrame, ToastSeverity, use_parsely_upload,
+    use_parsely_upload_provider, use_toast, use_toast_provider,
 };
 use crate::types::{
     CombatLogSessionState, DataExplorerState, EffectsEditorState, EncounterBuilderState,
@@ -28,6 +29,10 @@ static FONT: Asset = asset!("/assets/StarJedi.ttf");
 pub fn App() -> Element {
     // Initialize toast system at app root
     let _toast_manager = use_toast_provider();
+    // Initialize Parsely upload modal at app root
+    let _parsely_upload_manager = use_parsely_upload_provider();
+    // Get parsely upload manager for use in event handlers
+    let mut parsely_upload = use_parsely_upload();
 
     // Overlay state
     let mut metric_overlays_enabled = use_signal(|| {
@@ -62,7 +67,7 @@ pub fn App() -> Element {
     // File browser state
     let mut file_browser_open = use_signal(|| false);
     let mut log_files = use_signal(Vec::<LogFileInfo>::new);
-    let mut upload_status = use_signal(|| None::<(String, bool, String)>); // (path, success, message)
+    let mut upload_status = use_signal(HashMap::<String, (bool, String)>::new); // path -> (success, message)
     let mut file_browser_filter = use_signal(String::new);
     let mut hide_small_log_files = use_signal(|| true);
 
@@ -266,6 +271,38 @@ pub fn App() -> Element {
         });
         api::tauri_listen("session-updated", &closure).await;
         closure.forget();
+    });
+
+    // Listen for Parsely upload completion (to update inline UI status)
+    use_future(move || async move {
+        if let Some(window) = web_sys::window() {
+            let closure = Closure::<dyn Fn(web_sys::Event)>::new(move |_event: web_sys::Event| {
+                spawn_local(async move {
+                    let global = js_sys::global();
+                    if let Ok(data) = js_sys::Reflect::get(&global, &"__parsely_upload_result".into()) {
+                        if let Some(data_str) = data.as_string() {
+                            // Parse format: "path|success|message"
+                            let parts: Vec<&str> = data_str.splitn(3, '|').collect();
+                            if parts.len() == 3 {
+                                let path = parts[0].to_string();
+                                let success = parts[1] == "true";
+                                let message = parts[2].to_string();
+                                let _ = upload_status.try_write().map(|mut w| {
+                                    w.insert(path, (success, message));
+                                });
+                            }
+                            // Clear after reading
+                            js_sys::Reflect::delete_property(&global, &"__parsely_upload_result".into()).ok();
+                        }
+                    }
+                });
+            });
+            let _ = window.add_event_listener_with_callback(
+                "parsely-upload-complete",
+                closure.as_ref().unchecked_ref()
+            );
+            closure.forget();
+        }
     });
 
     // Listen for session ended (player logged out, data preserved for upload)
@@ -740,60 +777,44 @@ pub fn App() -> Element {
                                 if !current_file.is_empty() {
                                     {
                                         let path = current_file.clone();
-                                        let is_uploading = upload_status().as_ref().map(|(p, _, msg)| p == &path && msg == "Uploading...").unwrap_or(false);
+                                        let upload_result = upload_status().get(&path).cloned();
                                         rsx! {
                                             div { class: "session-upload-group",
                                                 button {
                                                     class: "btn btn-session-upload",
                                                     title: "Upload to Parsely",
-                                                    disabled: is_uploading,
-                                                    onclick: move |_| {
+                                                    onclick: {
                                                         let p = path.clone();
-                                                        upload_status.set(Some((p.clone(), true, "Uploading...".to_string())));
-                                                        spawn(async move {
-                                                            match api::upload_to_parsely(&p).await {
-                                                                Ok(resp) if resp.success => {
-                                                                    let link = resp.link.unwrap_or_default();
-                                                                    upload_status.set(Some((p, true, link)));
-                                                                }
-                                                                Ok(resp) => {
-                                                                    let err = resp.error.unwrap_or_else(|| "Upload failed".to_string());
-                                                                    upload_status.set(Some((p, false, err)));
-                                                                }
-                                                                Err(e) => {
-                                                                    upload_status.set(Some((p, false, e)));
-                                                                }
-                                                            }
-                                                        });
+                                                        move |_| {
+                                                            // Extract filename from path
+                                                            let filename = p.split('/').last()
+                                                                .or_else(|| p.split('\\').last())
+                                                                .unwrap_or("combat.txt")
+                                                                .to_string();
+                                                            parsely_upload.open_file(p.clone(), filename);
+                                                        }
                                                     },
-                                                    if is_uploading {
-                                                        i { class: "fa-solid fa-spinner fa-spin" }
-                                                        " Uploading..."
-                                                    } else {
-                                                        i { class: "fa-solid fa-cloud-arrow-up" }
-                                                        " Parsely"
-                                                    }
+                                                    i { class: "fa-solid fa-cloud-arrow-up" }
+                                                    " Parsely"
                                                 }
                                                 // Show upload result inline
-                                                if let Some((ref p, success, ref msg)) = upload_status() {
-                                                    if p == &path && msg != "Uploading..." {
-                                                        if success {
-                                                            button {
-                                                                class: "btn btn-session-upload-result",
-                                                                title: "Open in browser",
-                                                                onclick: {
-                                                                    let url = msg.clone();
-                                                                    move |_| {
-                                                                        let u = url.clone();
-                                                                        spawn(async move { api::open_url(&u).await; });
-                                                                    }
-                                                                },
-                                                                i { class: "fa-solid fa-external-link-alt" }
-                                                            }
-                                                        } else {
-                                                            span { class: "upload-error", title: "{msg}",
-                                                                i { class: "fa-solid fa-triangle-exclamation" }
-                                                            }
+                                                if let Some((success, ref msg)) = upload_result {
+                                                    if success {
+                                                        button {
+                                                            class: "btn btn-session-upload-result",
+                                                            title: "Open in browser",
+                                                            onclick: {
+                                                                let url = msg.clone();
+                                                                move |_| {
+                                                                    let u = url.clone();
+                                                                    spawn(async move { api::open_url(&u).await; });
+                                                                }
+                                                            },
+                                                            i { class: "fa-solid fa-external-link-alt" }
+                                                        }
+                                                    } else {
+                                                        span { class: "upload-error", title: "{msg}",
+                                                            i { class: "fa-solid fa-triangle-exclamation" }
                                                         }
                                                     }
                                                 }
@@ -1753,8 +1774,7 @@ pub fn App() -> Element {
                                         };
                                         let is_empty = file.is_empty;
                                         let is_current = path == current_file;
-                                        let upload_st = upload_status();
-                                        let is_uploading = upload_st.as_ref().map(|(p, _, _)| p == &path).unwrap_or(false);
+                                        let upload_result = upload_status().get(&path).cloned();
                                         rsx! {
                                             div {
                                                 class: match (is_empty, is_current) {
@@ -1771,32 +1791,28 @@ pub fn App() -> Element {
                                                         span { class: "file-size", "{size_str}" }
                                                     }
                                                     // Show upload result for this file
-                                                    if let Some((ref p, success, ref msg)) = upload_st {
-                                                        if p == &path {
-                                                            if success && msg != "Uploading..." {
-                                                                // Show clickable link that opens in browser
-                                                                {
-                                                                    let url = msg.clone();
-                                                                    rsx! {
-                                                                        button {
-                                                                            class: "upload-link",
-                                                                            title: "Open in browser",
-                                                                            onclick: move |_| {
-                                                                                let u = url.clone();
-                                                                                spawn(async move {
-                                                                                    api::open_url(&u).await;
-                                                                                });
-                                                                            },
-                                                                            i { class: "fa-solid fa-external-link-alt" }
-                                                                            " {msg}"
-                                                                        }
+                                                    if let Some((success, ref msg)) = upload_result {
+                                                        if success {
+                                                            // Show clickable link that opens in browser
+                                                            {
+                                                                let url = msg.clone();
+                                                                rsx! {
+                                                                    button {
+                                                                        class: "upload-link",
+                                                                        title: "Open in browser",
+                                                                        onclick: move |_| {
+                                                                            let u = url.clone();
+                                                                            spawn(async move {
+                                                                                api::open_url(&u).await;
+                                                                            });
+                                                                        },
+                                                                        i { class: "fa-solid fa-external-link-alt" }
+                                                                        " {msg}"
                                                                     }
                                                                 }
-                                                            } else if success {
-                                                                span { class: "upload-status", "{msg}" }
-                                                            } else {
-                                                                span { class: "upload-status error", "{msg}" }
                                                             }
+                                                        } else {
+                                                            span { class: "upload-status error", "{msg}" }
                                                         }
                                                     }
                                                 }
@@ -1821,27 +1837,14 @@ pub fn App() -> Element {
                                                     }
                                                     button {
                                                         class: "btn btn-upload",
-                                                        disabled: is_empty || is_uploading,
+                                                        disabled: is_empty,
                                                         title: "Upload to Parsely.io",
-                                                        onclick: move |_| {
+                                                        onclick: {
                                                             let p = path_for_upload.clone();
-                                                            upload_status.set(Some((p.clone(), true, "Uploading...".to_string())));
-                                                            spawn(async move {
-                                                                match api::upload_to_parsely(&p).await {
-                                                                    Ok(resp) => {
-                                                                        if resp.success {
-                                                                            let link = resp.link.unwrap_or_default();
-                                                                            upload_status.set(Some((p, true, link)));
-                                                                        } else {
-                                                                            let err = resp.error.unwrap_or_else(|| "Upload failed".to_string());
-                                                                            upload_status.set(Some((p, false, err)));
-                                                                        }
-                                                                    }
-                                                                    Err(e) => {
-                                                                        upload_status.set(Some((p, false, e)));
-                                                                    }
-                                                                }
-                                                            });
+                                                            let display_name = format!("{} - {}", char_name, date);
+                                                            move |_| {
+                                                                parsely_upload.open_file(p.clone(), display_name.clone());
+                                                            }
                                                         },
                                                         i { class: "fa-solid fa-cloud-arrow-up" }
                                                     }
@@ -1906,6 +1909,9 @@ pub fn App() -> Element {
                     }
                 }
             }
+
+            // Parsely upload modal
+            ParselyUploadModal {}
 
             // Toast notifications (rendered on top of everything)
             ToastFrame {}

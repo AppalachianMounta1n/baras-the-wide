@@ -6234,6 +6234,11 @@ details[open] .collapsible-summary::before {
     pointer-events: auto;
 }
 
+.toast-success {
+    border-color: var(--color-success, #5fd98e);
+    background: linear-gradient(135deg, rgba(95, 217, 142, 0.15) 0%, rgba(30, 30, 46, 0.95) 100%);
+}
+
 .toast-critical {
     border-color: var(--color-error, #ef5350);
     background: linear-gradient(135deg, rgba(239, 83, 80, 0.15) 0%, rgba(30, 30, 46, 0.95) 100%);
@@ -6242,6 +6247,10 @@ details[open] .collapsible-summary::before {
 .toast-icon {
     color: var(--color-warning, #f9a825);
     flex-shrink: 0;
+}
+
+.toast-success .toast-icon {
+    color: var(--color-success, #5fd98e);
 }
 
 .toast-critical .toast-icon {
@@ -6358,4 +6367,181 @@ details[open] .collapsible-summary::before {
 .empty-state-guidance .hint {
   font-size: 0.85em;
   color: var(--text-disabled);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   PARSELY UPLOAD MODAL
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+.parsely-upload-modal {
+  background: var(--gradient-panel);
+  border-radius: var(--radius-xl);
+  width: 90vw;
+  max-width: 450px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--blue-alpha-20);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    0 0 20px var(--blue-alpha-10);
+}
+
+.parsely-upload-modal .modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1em 1.25em;
+  border-bottom: 1px solid var(--blue-alpha-15);
+}
+
+.parsely-upload-modal .modal-header h3 {
+  margin: 0;
+  font-size: 1.1em;
+  color: var(--swtor-blue);
+}
+
+.parsely-upload-modal .modal-content {
+  padding: 1.25em;
+  display: flex;
+  flex-direction: column;
+  gap: 1em;
+}
+
+.parsely-upload-modal .upload-message {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.95em;
+  line-height: 1.5;
+}
+
+.parsely-upload-modal .upload-message strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.parsely-upload-modal label {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 0.9em;
+  margin-bottom: 0.4em;
+}
+
+.parsely-upload-modal .field-header {
+  font-weight: bold;
+  font-size: 0.85em;
+  text-align: left;
+  display: block;
+  color: var(--text-primary);
+  margin-bottom: 0.5em;
+  margin-top: 1em;
+}
+
+.parsely-upload-notes {
+  width: 100%;
+  padding: 0.6em;
+  background: var(--bg-input);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 0.9em;
+  resize: vertical;
+  min-height: 60px;
+  transition: border-color var(--transition-normal);
+}
+
+.parsely-upload-notes:focus {
+  outline: none;
+  border-color: var(--swtor-blue);
+  box-shadow: 0 0 0 2px var(--blue-alpha-15);
+}
+
+.parsely-upload-notes:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.parsely-upload-notes::placeholder {
+  color: var(--text-muted);
+}
+
+.parsely-upload-visibility {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+.parsely-upload-visibility .radio-group {
+  display: flex;
+  gap: 1em;
+  margin-top: 0.25em;
+}
+
+.parsely-upload-visibility .radio-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.9em;
+  user-select: none;
+  transition: color var(--transition-normal);
+}
+
+.parsely-upload-visibility .radio-option:hover {
+  color: var(--text-primary);
+}
+
+.parsely-upload-visibility .radio-option input[type="radio"] {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--swtor-blue);
+}
+
+.parsely-upload-visibility .radio-option input[type="radio"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.parsely-upload-modal .modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75em;
+  padding: 1em 1.25em;
+  border-top: 1px solid var(--blue-alpha-15);
+}
+
+.parsely-upload-modal .modal-footer .btn {
+  padding: 0.6em 1.5em;
+  min-width: 100px;
+}
+
+.parsely-upload-modal .modal-footer .btn-secondary {
+  background: var(--bg-light);
+  border-color: var(--border-medium);
+  color: var(--text-secondary);
+}
+
+.parsely-upload-modal .modal-footer .btn-secondary:hover:not(:disabled) {
+  background: var(--bg-mid);
+  border-color: var(--border-light);
+  color: var(--text-primary);
+}
+
+.parsely-upload-modal .modal-footer .btn-primary {
+  background: linear-gradient(180deg, var(--swtor-blue) 0%, var(--swtor-blue-dim) 100%);
+  border-color: var(--swtor-blue);
+  color: white;
+}
+
+.parsely-upload-modal .modal-footer .btn-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--swtor-blue-bright) 0%, var(--swtor-blue) 100%);
+  box-shadow: 0 0 12px var(--blue-alpha-20);
+}
+
+.parsely-upload-modal .modal-footer .btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }

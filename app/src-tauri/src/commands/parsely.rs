@@ -25,6 +25,8 @@ pub struct ParselyUploadResponse {
 #[tauri::command]
 pub async fn upload_to_parsely(
     path: PathBuf,
+    visibility: u8,
+    notes: Option<String>,
     handle: State<'_, ServiceHandle>,
 ) -> Result<ParselyUploadResponse, String> {
     // Quick metadata check before reading
@@ -51,7 +53,16 @@ pub async fn upload_to_parsely(
         .mime_str("text/html")
         .map_err(|e| format!("Failed to create file part: {}", e))?;
 
-    let mut form = Form::new().part("file", file_part).text("public", "1");
+    let mut form = Form::new()
+        .part("file", file_part)
+        .text("public", visibility.to_string());
+
+    // Add notes if provided
+    if let Some(ref note) = notes {
+        if !note.is_empty() {
+            form = form.text("notes", note.clone());
+        }
+    }
 
     let config = handle.config().await;
     if !config.parsely.username.is_empty() && !config.parsely.password.is_empty() {
@@ -97,6 +108,8 @@ pub async fn upload_encounter_to_parsely(
     start_line: u64,
     end_line: u64,
     area_entered_line: Option<u64>,
+    visibility: u8,
+    notes: Option<String>,
     handle: State<'_, ServiceHandle>,
 ) -> Result<ParselyUploadResponse, String> {
     // Extract and compress the relevant lines
@@ -123,7 +136,16 @@ pub async fn upload_encounter_to_parsely(
         .mime_str("text/html")
         .map_err(|e| format!("Failed to create file part: {}", e))?;
 
-    let mut form = Form::new().part("file", file_part).text("public", "1");
+    let mut form = Form::new()
+        .part("file", file_part)
+        .text("public", visibility.to_string());
+
+    // Add notes if provided
+    if let Some(ref note) = notes {
+        if !note.is_empty() {
+            form = form.text("notes", note.clone());
+        }
+    }
 
     let config = handle.config().await;
     if !config.parsely.username.is_empty() && !config.parsely.password.is_empty() {

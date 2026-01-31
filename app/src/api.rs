@@ -528,8 +528,20 @@ pub struct ParselyUploadResponse {
 }
 
 /// Upload a log file to Parsely.io
-pub async fn upload_to_parsely(path: &str) -> Result<ParselyUploadResponse, String> {
-    let result = try_invoke("upload_to_parsely", build_args("path", &path)).await?;
+pub async fn upload_to_parsely(
+    path: &str,
+    visibility: u8,
+    notes: Option<String>,
+) -> Result<ParselyUploadResponse, String> {
+    let obj = js_sys::Object::new();
+    js_set(&obj, "path", &JsValue::from_str(path));
+    js_set(&obj, "visibility", &JsValue::from_f64(visibility as f64));
+    if let Some(note) = notes {
+        js_set(&obj, "notes", &JsValue::from_str(&note));
+    } else {
+        js_set(&obj, "notes", &JsValue::NULL);
+    }
+    let result = try_invoke("upload_to_parsely", obj.into()).await?;
     from_js(result).ok_or_else(|| "Failed to parse upload response".to_string())
 }
 
@@ -539,6 +551,8 @@ pub async fn upload_encounter_to_parsely(
     start_line: u64,
     end_line: u64,
     area_entered_line: Option<u64>,
+    visibility: u8,
+    notes: Option<String>,
 ) -> Result<ParselyUploadResponse, String> {
     let obj = js_sys::Object::new();
     js_set(&obj, "path", &JsValue::from_str(path));
@@ -548,6 +562,12 @@ pub async fn upload_encounter_to_parsely(
         js_set(&obj, "areaEnteredLine", &JsValue::from_f64(line as f64));
     } else {
         js_set(&obj, "areaEnteredLine", &JsValue::NULL);
+    }
+    js_set(&obj, "visibility", &JsValue::from_f64(visibility as f64));
+    if let Some(note) = notes {
+        js_set(&obj, "notes", &JsValue::from_str(&note));
+    } else {
+        js_set(&obj, "notes", &JsValue::NULL);
     }
     let result = try_invoke("upload_encounter_to_parsely", obj.into()).await?;
     from_js(result).ok_or_else(|| "Failed to parse upload response".to_string())

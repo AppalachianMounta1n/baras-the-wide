@@ -9,6 +9,8 @@ use gloo_timers::future::TimeoutFuture;
 /// Severity level for toast notifications.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ToastSeverity {
+    /// Success messages - 5 second duration
+    Success,
     /// Normal warnings/errors - 5 second duration
     Normal,
     /// Critical errors - 7 second duration
@@ -67,6 +69,7 @@ impl ToastManager {
         // Auto-dismiss after timeout
         let mut toasts_signal = self.toasts;
         let duration = match severity {
+            ToastSeverity::Success => 5000,
             ToastSeverity::Normal => 5000,
             ToastSeverity::Critical => 7000,
         };
@@ -117,11 +120,15 @@ pub fn ToastFrame() -> Element {
                 div {
                     key: "{toast.id}",
                     class: match toast.severity {
+                        ToastSeverity::Success => "toast toast-success",
                         ToastSeverity::Normal => "toast",
                         ToastSeverity::Critical => "toast toast-critical",
                     },
                     span { class: "toast-icon",
-                        i { class: "fa-solid fa-triangle-exclamation" }
+                        match toast.severity {
+                            ToastSeverity::Success => rsx! { i { class: "fa-solid fa-circle-check" } },
+                            _ => rsx! { i { class: "fa-solid fa-triangle-exclamation" } },
+                        }
                     }
                     span { class: "toast-message", "{toast.message}" }
                     button {
