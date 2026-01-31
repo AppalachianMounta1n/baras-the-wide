@@ -215,24 +215,8 @@ fn handle_in_combat(
     let should_end_on_local_revive = local_player_revived && !is_boss_encounter;
 
     if effect_id == effect_id::ENTERCOMBAT {
-        // Unexpected EnterCombat while in combat - terminate and restart
-        let encounter_id = cache.current_encounter().map(|e| e.id).unwrap_or(0);
-        if let Some(enc) = cache.current_encounter_mut() {
-            enc.exit_combat_time = Some(timestamp);
-            enc.state = EncounterState::PostCombat {
-                exit_time: timestamp,
-            };
-            let duration = enc.duration_seconds().unwrap_or(0) as f32;
-            enc.challenge_tracker.finalize(timestamp, duration);
-        }
-
-        signals.push(GameSignal::CombatEnded {
-            timestamp,
-            encounter_id,
-        });
-
-        cache.push_new_encounter();
-        signals.extend(advance_combat_state(event, cache));
+        // Ignore - local player re-entering combat mid-fight (e.g., after battle rez)
+        // ENTERCOMBAT only fires for local player, so this is always a rejoin scenario
     } else if effect_id == effect_id::EXITCOMBAT
         || all_players_dead
         || all_kill_targets_dead
