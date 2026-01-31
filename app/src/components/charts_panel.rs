@@ -404,11 +404,19 @@ pub struct ChartsPanelProps {
 pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
     // Mirror time_range prop into a signal for reactivity
     let mut time_range_signal = use_signal(|| props.time_range.clone());
+    
+    // Mirror encounter_idx prop into a signal for reactivity
+    let mut encounter_idx_signal = use_signal(|| props.encounter_idx);
 
-    // Update signal when props change (runs on every render with new props)
-    if *time_range_signal.read() != props.time_range {
-        time_range_signal.set(props.time_range.clone());
-    }
+    // Sync props to signals when they change (use_effect for proper reactivity)
+    use_effect({
+        let time_range = props.time_range.clone();
+        let encounter_idx = props.encounter_idx;
+        move || {
+            time_range_signal.set(time_range.clone());
+            encounter_idx_signal.set(encounter_idx);
+        }
+    });
 
     // Entity selection (default to none - show aggregated data)
     let mut selected_entity = use_signal(|| None::<String>);
@@ -450,48 +458,46 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
     ];
 
     // Load entities on mount and auto-select first player (with retry for race conditions)
-    use_effect({
-        let idx = props.encounter_idx;
-        move || {
-            spawn(async move {
-                // Retry up to 3 seconds if data not ready
-                for attempt in 0..10 {
-                    if let Some(data) = api::query_raid_overview(idx, None, None).await {
-                        let players: Vec<_> = data
-                            .into_iter()
-                            .filter(|r| r.entity_type == "Player" || r.entity_type == "Companion")
-                            .collect();
-                        if !players.is_empty() {
-                            // Auto-select first player
-                            if let Some(first) = players.first() {
-                                selected_entity.set(Some(first.name.clone()));
-                            }
-                            // Store class icons lookup
-                            let icons: HashMap<String, String> = players
-                                .iter()
-                                .filter_map(|r| {
-                                    r.class_icon
-                                        .as_ref()
-                                        .map(|icon| (r.name.clone(), icon.clone()))
-                                })
-                                .collect();
-                            class_icons.set(icons);
-                            // Store entity names
-                            entities.set(players.into_iter().map(|r| r.name).collect());
-                            return;
+    use_effect(move || {
+        let idx = encounter_idx_signal();
+        spawn(async move {
+            // Retry up to 3 seconds if data not ready
+            for attempt in 0..10 {
+                if let Some(data) = api::query_raid_overview(idx, None, None).await {
+                    let players: Vec<_> = data
+                        .into_iter()
+                        .filter(|r| r.entity_type == "Player" || r.entity_type == "Companion")
+                        .collect();
+                    if !players.is_empty() {
+                        // Auto-select first player
+                        if let Some(first) = players.first() {
+                            selected_entity.set(Some(first.name.clone()));
                         }
-                    }
-                    if attempt < 9 {
-                        gloo_timers::future::TimeoutFuture::new(300).await;
+                        // Store class icons lookup
+                        let icons: HashMap<String, String> = players
+                            .iter()
+                            .filter_map(|r| {
+                                r.class_icon
+                                    .as_ref()
+                                    .map(|icon| (r.name.clone(), icon.clone()))
+                            })
+                            .collect();
+                        class_icons.set(icons);
+                        // Store entity names
+                        entities.set(players.into_iter().map(|r| r.name).collect());
+                        return;
                     }
                 }
-            });
-        }
+                if attempt < 9 {
+                    gloo_timers::future::TimeoutFuture::new(300).await;
+                }
+            }
+        });
     });
 
     // Load time series data when entity or time range changes
     use_effect(move || {
-        let idx = props.encounter_idx;
+        let idx = encounter_idx_signal();
         let tr = time_range_signal.read().clone();
         let entity = selected_entity.read().clone();
 
@@ -527,7 +533,7 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
 
     // Load effect uptime data when entity or time range changes
     use_effect(move || {
-        let idx = props.encounter_idx;
+        let idx = encounter_idx_signal();
         let duration = props.duration_secs;
         let tr = time_range_signal.read().clone();
         let entity = selected_entity.read().clone();
@@ -552,7 +558,7 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
 
     // Load effect windows when selected effects or time range changes
     use_effect(move || {
-        let idx = props.encounter_idx;
+        let idx = encounter_idx_signal();
         let duration = props.duration_secs;
         let tr = time_range_signal.read().clone();
         let effects = selected_effects.read().clone();

@@ -5,6 +5,7 @@
 ### General
 
 - Individual combats can now be uploaded to parsely.io via the session page
+- Users can now set visibility and add an optional note when uploading to Parsely
 - UI positions and open elements are now preserved across tab-navigation; including the combat log scroll position
 - Tweaked combat log formatting
 - Improved handling of SWTOR combat log rotation upon character login/logout

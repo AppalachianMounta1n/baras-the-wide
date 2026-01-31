@@ -1346,6 +1346,7 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                         // Charts Panel
                         if let Some(tl) = timeline.read().as_ref() {
                             ChartsPanel {
+                                key: "{selected_encounter():?}",
                                 encounter_idx: *selected_encounter.read(),
                                 duration_secs: tl.duration_secs,
                                 time_range: time_range(),
