@@ -8,8 +8,7 @@ use wasm_bindgen_futures::spawn_local;
 use crate::api;
 use crate::components::{
     CombatLogState, DataExplorerPanel, EffectEditorPanel, EncounterEditorPanel, HistoryPanel,
-    HotkeyInput, ViewMode,
-    SettingsPanel, ToastFrame, ToastSeverity, use_toast, use_toast_provider,
+    HotkeyInput, SettingsPanel, ToastFrame, ToastSeverity, ViewMode, use_toast, use_toast_provider,
 };
 use crate::types::{
     LogFileInfo, MetricType, OverlaySettings, OverlayStatus, OverlayType, SessionInfo, UpdateInfo,
@@ -56,6 +55,7 @@ pub fn App() -> Element {
     let mut is_watching = use_signal(|| false);
     let mut is_live_tailing = use_signal(|| true);
     let mut session_info = use_signal(|| None::<SessionInfo>);
+    let mut session_ended = use_signal(|| false); // True when player logged out but data preserved
 
     // File browser state
     let mut file_browser_open = use_signal(|| false);
@@ -235,12 +235,25 @@ pub fn App() -> Element {
                 let info = api::get_session_info().await;
                 let watching = api::get_watching_status().await;
                 let tailing = api::is_live_tailing().await;
+                // Clear session_ended flag if we have new player data
+                if info.as_ref().is_some_and(|i| i.player_name.is_some()) {
+                    let _ = session_ended.try_write().map(|mut w| *w = false);
+                }
                 let _ = session_info.try_write().map(|mut w| *w = info);
                 let _ = is_watching.try_write().map(|mut w| *w = watching);
                 let _ = is_live_tailing.try_write().map(|mut w| *w = tailing);
             });
         });
         api::tauri_listen("session-updated", &closure).await;
+        closure.forget();
+    });
+
+    // Listen for session ended (player logged out, data preserved for upload)
+    use_future(move || async move {
+        let closure = Closure::new(move |_event: JsValue| {
+            let _ = session_ended.try_write().map(|mut w| *w = true);
+        });
+        api::tauri_listen("session-ended", &closure).await;
         closure.forget();
     });
 
@@ -672,11 +685,16 @@ pub fn App() -> Element {
                     if let Some(ref info) = session {
                     if has_player {
                         section {
-                            class: if live_tailing { "session-panel" } else { "session-panel historical" },
+                            class: if live_tailing && !session_ended() { "session-panel" } else { "session-panel historical" },
 
                             // Session toolbar: header + upload button
                             div { class: "session-toolbar",
-                                if live_tailing {
+                                if session_ended() {
+                                    h3 { class: "session-header historical",
+                                        i { class: "fa-solid fa-clock" }
+                                        " Prior Session. Watching for next login..."
+                                    }
+                                } else if live_tailing {
                                     h3 { class: "session-header live",
                                         i { class: "fa-solid fa-circle-play" }
                                         " Live Session"
