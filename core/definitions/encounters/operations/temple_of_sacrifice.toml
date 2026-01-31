@@ -67,8 +67,9 @@ difficulties = ["veteran"]
 [[boss.timer]]
 id = "mal_spear_fixate"
 name = "Spear Fixate"
-trigger = { type = "effect_removed", effects = [3437799197900800] }
-target = "local_player"
+trigger = { type = "effect_removed", effects = [
+  3437799197900800,
+], target = "local local_player" }
 duration_secs = 3.0
 color = [164, 29, 224, 255]
 difficulties = ["veteran"]
@@ -78,8 +79,9 @@ difficulties = ["veteran"]
 id = "mal_savagery"
 name = "Savagery"
 is_alert = true
-trigger = { type = "effect_applied", effects = [3434788425826304] }
-target = "local_player"
+trigger = { type = "effect_applied", effects = [
+  3434788425826304,
+], target = "local_player" }
 alert_text = "Savagery!"
 color = [224, 34, 33, 255]
 difficulties = ["veteran"]
@@ -457,8 +459,9 @@ difficulties = ["veteran"]
 id = "rev_corruption_alert"
 name = "Corrupted"
 is_alert = true
-trigger = { type = "effect_applied", effects = [3447359795101696] }
-target = "local_player"
+trigger = { type = "effect_applied", effects = [
+  3447359795101696,
+], target = "local_player" }
 alert_text = "Corrupted! Move out and cleanse!"
 color = [104, 33, 224, 255]
 difficulties = ["veteran"]
