@@ -27,11 +27,12 @@ impl EventProcessor {
     /// Process an incoming event.
     /// Updates the cache and returns signals for cross-cutting concerns.
     /// Returns the event back along with signals to avoid cloning.
+    /// The bool indicates whether the event was accumulated (for parquet filtering).
     pub fn process_event(
         &mut self,
         event: CombatEvent,
         cache: &mut SessionCache,
-    ) -> (Vec<GameSignal>, CombatEvent) {
+    ) -> (Vec<GameSignal>, CombatEvent, bool) {
         let mut signals = Vec::new();
 
         // ═══════════════════════════════════════════════════════════════════════
@@ -100,9 +101,10 @@ impl EventProcessor {
         // PHASE 3: Combat State Machine
         // ═══════════════════════════════════════════════════════════════════════
 
-        signals.extend(combat_state::advance_combat_state(&event, cache));
+        let (combat_signals, was_accumulated) = combat_state::advance_combat_state(&event, cache);
+        signals.extend(combat_signals);
 
-        (signals, event)
+        (signals, event, was_accumulated)
     }
 
     fn update_primary_player(&self, event: &CombatEvent, cache: &mut SessionCache) {
@@ -549,12 +551,6 @@ impl EventProcessor {
         if trigger_fired {
             if let Some(enc) = cache.current_encounter_mut() {
                 enc.victory_triggered = true;
-                let boss_name = enc.boss_definitions()[idx].name.clone();
-                tracing::info!(
-                    "Victory trigger fired for {} at {}",
-                    boss_name,
-                    event.timestamp
-                );
             }
         }
     }

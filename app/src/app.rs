@@ -73,7 +73,7 @@ pub fn App() -> Element {
 
     // UI Session State - unified state that persists across tab switches
     let mut ui_state = use_signal(UiSessionState::default);
-    
+
     // Other UI state (not part of session persistence)
     let mut settings_open = use_signal(|| false);
     let mut general_settings_open = use_signal(|| false);
@@ -459,7 +459,7 @@ pub fn App() -> Element {
                         onclick: move |e| {
                             e.prevent_default();
                             spawn(async move {
-                                api::open_url("https://github.com/baras-app/baras/wiki").await;
+                                api::open_url("https://baras-app.github.io/features/overview").await;
                             });
                         },
                         i { class: "fa-solid fa-circle-question" }

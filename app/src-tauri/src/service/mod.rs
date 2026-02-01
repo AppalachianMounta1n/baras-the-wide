@@ -1206,8 +1206,9 @@ impl CombatService {
                             
                             if incomplete_encounter_exists {
                                 // There's an incomplete encounter written to parquet
-                                // Continue with the same encounter ID (don't increment)
-                                cache.set_next_encounter_id(parse_result.encounter_count as u64);
+                                // Continue with the same encounter ID but increment next_encounter_id
+                                // so the next encounter after this one has the correct ID
+                                cache.set_next_encounter_id(parse_result.encounter_count as u64 + 1);
                                 
                                 // Don't call push_new_encounter() - we'll continue accumulating
                                 // to the existing encounter (ID 0) and it will be written with the correct ID

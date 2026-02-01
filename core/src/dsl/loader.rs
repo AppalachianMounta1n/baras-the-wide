@@ -61,13 +61,6 @@ pub fn load_bosses_from_file(path: &Path) -> Result<Vec<BossEncounterDefinition>
     // Build lookup indexes for O(1) NPC matching
     for boss in &mut bosses {
         boss.build_indexes();
-        if boss.id == "coratanni" {
-            tracing::info!(
-                "[LOADER] Loaded Coratanni: has_victory_trigger={}, victory_trigger={:?}",
-                boss.has_victory_trigger,
-                boss.victory_trigger.is_some()
-            );
-        }
     }
 
     Ok(bosses)

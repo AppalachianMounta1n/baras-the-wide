@@ -359,7 +359,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _lag = lag_sim.next_lag();
 
         // Process event
-        let (signals, _processed_event) = processor.process_event(event.clone(), &mut cache);
+        let (signals, _processed_event, _) = processor.process_event(event.clone(), &mut cache);
 
         // Detect local player
         if local_player_id == 0 {

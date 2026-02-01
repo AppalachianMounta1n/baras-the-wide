@@ -767,14 +767,17 @@ fn process_and_write_encounters(
     cache.load_boss_definitions(boss_definitions);
 
     for event in events {
-        let (signals, event) = processor.process_event(event, &mut cache);
+        let (signals, event, was_accumulated) = processor.process_event(event, &mut cache);
         
         // Track first line of current encounter (reset on combat end)
         if incomplete_encounter_first_line.is_none() {
             incomplete_encounter_first_line = Some(event.line_number);
         }
         
-        writer.append_event(&event, &cache, current_encounter_idx);
+        // Only write events that were accumulated (same filtering as live parquet)
+        if was_accumulated {
+            writer.append_event(&event, &cache, current_encounter_idx);
+        }
 
         for signal in &signals {
             if let GameSignal::CombatEnded { .. } = signal {

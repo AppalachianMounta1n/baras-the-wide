@@ -46,7 +46,9 @@ fn within_grace_window(cache: &SessionCache, timestamp: NaiveDateTime) -> bool {
 }
 
 /// Advance the combat state machine and emit CombatStarted/CombatEnded signals.
-pub fn advance_combat_state(event: &CombatEvent, cache: &mut SessionCache) -> Vec<GameSignal> {
+/// Returns (signals, was_accumulated) where was_accumulated indicates whether
+/// the event was added to accumulated_data (for parquet write filtering).
+pub fn advance_combat_state(event: &CombatEvent, cache: &mut SessionCache) -> (Vec<GameSignal>, bool) {
     // Track effect applications/removals for shield absorption
     track_encounter_effects(event, cache);
 
@@ -92,8 +94,9 @@ fn handle_not_started(
     cache: &mut SessionCache,
     effect_id: i64,
     timestamp: NaiveDateTime,
-) -> Vec<GameSignal> {
+) -> (Vec<GameSignal>, bool) {
     let mut signals = Vec::new();
+    let mut was_accumulated = false;
 
     if effect_id == effect_id::ENTERCOMBAT {
         if let Some(enc) = cache.current_encounter_mut() {
@@ -102,6 +105,7 @@ fn handle_not_started(
             enc.track_event_entities(event);
             enc.accumulate_data(event);
             enc.track_event_line(event.line_number);
+            was_accumulated = true;
 
             signals.push(GameSignal::CombatStarted {
                 timestamp,
@@ -113,10 +117,11 @@ fn handle_not_started(
         if let Some(enc) = cache.current_encounter_mut() {
             enc.accumulate_data(event);
             enc.track_event_line(event.line_number);
+            was_accumulated = true;
         }
     }
 
-    signals
+    (signals, was_accumulated)
 }
 
 fn handle_in_combat(
@@ -125,8 +130,9 @@ fn handle_in_combat(
     effect_id: i64,
     effect_type_id: i64,
     timestamp: NaiveDateTime,
-) -> Vec<GameSignal> {
+) -> (Vec<GameSignal>, bool) {
     let mut signals = Vec::new();
+    let mut was_accumulated = false;
 
     // Check for combat timeout
     if let Some(enc) = cache.current_encounter()
@@ -152,8 +158,9 @@ fn handle_in_combat(
 
             cache.push_new_encounter();
             // Re-process this event in the new encounter's state machine
-            signals.extend(advance_combat_state(event, cache));
-            return signals;
+            let (new_signals, new_accumulated) = advance_combat_state(event, cache);
+            signals.extend(new_signals);
+            return (signals, new_accumulated);
         }
     }
 
@@ -218,33 +225,12 @@ fn handle_in_combat(
 
     // Check if this is a victory-trigger encounter that hasn't triggered yet
     // If so, ignore ExitCombat events until the victory trigger fires
-    // Check ALL boss definitions for the area, not just the active one
     let should_ignore_exit_combat = cache.current_encounter().map_or(false, |enc| {
-        // If we have an active boss, check it
+        // Only check active boss - don't use fallback to avoid false positives
         if let Some(idx) = enc.active_boss_idx() {
-            let has_trigger = enc.boss_definitions()[idx].has_victory_trigger;
-            let triggered = enc.victory_triggered;
-            tracing::info!(
-                "[VICTORY-CHECK] Active boss '{}': has_trigger={}, triggered={}",
-                enc.boss_definitions()[idx].name,
-                has_trigger,
-                triggered
-            );
-            has_trigger && !triggered
+            enc.boss_definitions()[idx].has_victory_trigger && !enc.victory_triggered
         } else {
-            // No active boss yet, but check if ANY boss definition has victory trigger
-            // This handles the case where combat starts before the boss is detected
-            let has_any_trigger = enc.boss_definitions()
-                .iter()
-                .any(|def| def.has_victory_trigger);
-            let triggered = enc.victory_triggered;
-            tracing::info!(
-                "[VICTORY-CHECK] No active boss: has_any_trigger={}, triggered={}, boss_defs_count={}",
-                has_any_trigger,
-                triggered,
-                enc.boss_definitions().len()
-            );
-            has_any_trigger && !triggered
+            false
         }
     });
 
@@ -253,28 +239,17 @@ fn handle_in_combat(
         // ENTERCOMBAT only fires for local player, so this is always a rejoin scenario
     } else if should_ignore_exit_combat {
         // For victory-trigger encounters, ignore all exit conditions except all_players_dead (wipe)
-        if all_players_dead {
-            // This is a wipe - proceed to end the encounter normally
-            tracing::info!(
-                "[VICTORY-TRIGGER] All players dead, ending encounter as wipe at {}",
-                timestamp
-            );
-        } else {
+        if !all_players_dead {
             // Ignore all other exit conditions (ExitCombat, kill targets, local revive, etc.)
-            tracing::info!(
-                "[VICTORY-TRIGGER] Ignoring exit condition at {} (ExitCombat={}, all_kill_targets_dead={}, should_end_on_local_revive={})",
-                timestamp,
-                effect_id == effect_id::EXITCOMBAT,
-                all_kill_targets_dead,
-                should_end_on_local_revive
-            );
             if let Some(enc) = cache.current_encounter_mut() {
                 enc.track_event_entities(event);
                 enc.accumulate_data(event);
                 enc.track_event_line(event.line_number);
+                was_accumulated = true;
             }
-            return signals; // Don't process further
+            return (signals, was_accumulated); // Don't process further
         }
+        // If all_players_dead, fall through to normal exit handling (wipe)
     }
     
     if all_players_dead
@@ -312,11 +287,6 @@ fn handle_in_combat(
             cache.push_new_encounter();
         } else {
             // Start grace window - don't emit CombatEnded yet
-            tracing::info!(
-                "[COMBAT-STATE] Starting grace window at {} (ExitCombat={})",
-                timestamp,
-                effect_id == effect_id::EXITCOMBAT
-            );
             cache.last_combat_exit_time = Some(timestamp);
 
             if let Some(enc) = cache.current_encounter_mut() {
@@ -352,13 +322,14 @@ fn handle_in_combat(
             enc.track_event_entities(event);
             enc.accumulate_data(event);
             enc.track_event_line(event.line_number);
+            was_accumulated = true;
             if effect_id == effect_id::DAMAGE || effect_id == effect_id::HEAL {
                 enc.last_combat_activity_time = Some(timestamp);
             }
         }
     }
 
-    signals
+    (signals, was_accumulated)
 }
 
 fn handle_post_combat(
@@ -366,8 +337,9 @@ fn handle_post_combat(
     cache: &mut SessionCache,
     effect_id: i64,
     timestamp: NaiveDateTime,
-) -> Vec<GameSignal> {
+) -> (Vec<GameSignal>, bool) {
     let mut signals = Vec::new();
+    let mut was_accumulated = false;
 
     // During grace window, only respond to ENTERCOMBAT (to restore combat)
     // All other events are buffered/ignored until grace expires
@@ -384,6 +356,7 @@ fn handle_post_combat(
             }
             // Keep last_combat_exit_time set - we'll use it if another exit comes quickly
             // Don't emit any signals - combat "continues"
+            // Note: was_accumulated remains false - grace window events not accumulated
         } else {
             // Outside grace window - finalize previous encounter and start new
             finalize_pending_combat_exit(cache, &mut signals);
@@ -394,6 +367,7 @@ fn handle_post_combat(
                 enc.enter_combat_time = Some(timestamp);
                 enc.accumulate_data(event);
                 enc.track_event_line(event.line_number);
+                was_accumulated = true;
             }
 
             signals.push(GameSignal::CombatStarted {
@@ -407,10 +381,12 @@ fn handle_post_combat(
         if let Some(enc) = cache.current_encounter_mut() {
             enc.track_event_line(event.line_number);
         }
+        // was_accumulated remains false
     } else if effect_id == effect_id::DAMAGE {
         // Discard post-combat damage - start fresh encounter
         finalize_pending_combat_exit(cache, &mut signals);
         cache.push_new_encounter();
+        // was_accumulated remains false - damage discarded
     } else {
         // Non-damage event - goes to next encounter
         finalize_pending_combat_exit(cache, &mut signals);
@@ -418,10 +394,11 @@ fn handle_post_combat(
         if let Some(enc) = cache.current_encounter_mut() {
             enc.accumulate_data(event);
             enc.track_event_line(event.line_number);
+            was_accumulated = true;
         }
     }
 
-    signals
+    (signals, was_accumulated)
 }
 
 /// Finalize any pending combat exit (emit CombatEnded if grace window was active).
@@ -468,12 +445,13 @@ pub fn tick_combat_state(cache: &mut SessionCache) -> Vec<GameSignal> {
                 EncounterState::PostCombat { .. } => {
                     // Grace expired while in PostCombat - finalize the encounter
                     let encounter_id = cache.current_encounter().map(|e| e.id).unwrap_or(0);
-                    signals.push(GameSignal::CombatEnded {
-                        timestamp: exit_time,
-                        encounter_id,
-                    });
-                    cache.last_combat_exit_time = None;
-                    cache.push_new_encounter();
+            signals.push(GameSignal::CombatEnded {
+                timestamp: exit_time,
+                encounter_id,
+            });
+
+            cache.last_combat_exit_time = None;
+            cache.push_new_encounter();
                 }
                 EncounterState::InCombat => {
                     // Grace expired while back in InCombat - Kephess case
