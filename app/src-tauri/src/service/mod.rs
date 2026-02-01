@@ -85,11 +85,12 @@ struct ParseWorkerOutput {
 }
 
 /// Fallback to streaming parse if subprocess fails.
+/// Returns true if the session is in combat after parsing.
 async fn fallback_streaming_parse(
     reader: &Reader,
     session: &Arc<RwLock<ParsingSession>>,
     encounters_dir: PathBuf,
-) {
+) -> bool {
     let timer = std::time::Instant::now();
     let mut session_guard = session.write().await;
     let session_date = session_guard.game_session_date.unwrap_or_default();
@@ -106,12 +107,29 @@ async fn fallback_streaming_parse(
 
         session_guard.finalize_session();
         session_guard.sync_timer_context();
+        
+        // Check if we're mid-combat
+        let in_combat = if let Some(cache) = &session_guard.session_cache {
+            if let Some(enc) = cache.current_encounter() {
+                use baras_core::encounter::EncounterState;
+                enc.state == EncounterState::InCombat
+            } else {
+                false
+            }
+        } else {
+            false
+        };
 
         info!(
             event_count,
             elapsed_ms = timer.elapsed().as_millis() as u64,
+            in_combat,
             "Fallback streaming parse completed"
         );
+        
+        in_combat
+    } else {
+        false
     }
 }
 
@@ -1010,7 +1028,7 @@ impl CombatService {
         let handler = CombatSignalHandler::new(
             self.shared.clone(),
             trigger_tx.clone(),
-            session_event_tx,
+            session_event_tx.clone(),
             self.overlay_tx.clone(),
         );
         session.add_signal_handler(Box::new(handler));
@@ -1130,9 +1148,25 @@ impl CombatService {
 
                         // Import encounter summaries and session metadata from subprocess
                         if let Some(cache) = &mut session_guard.session_cache {
+                            // Count generation before consuming encounters
+                            let generation_count = parse_result.encounters.iter()
+                                .filter(|e| e.is_phase_start)
+                                .count() as u64;
+                            
+                            // Import all encounters
                             for summary in parse_result.encounters {
                                 cache.encounter_history.add(summary);
                             }
+                            
+                            // Restore encounter_history.current_generation to prevent raid splitting
+                            // Use restore_generation instead of check_area_change to avoid resetting pull counts
+                            if generation_count > 0 {
+                                cache.encounter_history.restore_generation(generation_count);
+                            }
+                            
+                            // Rebuild pull counts from imported encounter names
+                            // This ensures live encounters continue with correct numbering
+                            cache.encounter_history.rebuild_pull_counts();
 
                             // Import player info (only mark initialized if we actually have player data)
                             cache.player.name =
@@ -1150,6 +1184,7 @@ impl CombatService {
                                 area_id = parse_result.area.area_id,
                                 area_name = %parse_result.area.area_name,
                                 difficulty_id = parse_result.area.difficulty_id,
+                                generation = generation_count,
                                 "Importing area from subprocess"
                             );
                             cache.current_area.area_name = parse_result.area.area_name.clone();
@@ -1157,15 +1192,52 @@ impl CombatService {
                             cache.current_area.difficulty_id = parse_result.area.difficulty_id;
                             cache.current_area.difficulty_name =
                                 parse_result.area.difficulty_name.clone();
+                            // Restore generation counter to prevent raid splitting
+                            cache.current_area.generation = generation_count;
 
-                            // Sync next_encounter_id to continue from where subprocess left off
-                            // (fixes off-by-one bug where live encounters would have IDs that
-                            // collide with subprocess parquet files)
-                            cache.set_next_encounter_id(parse_result.encounter_count as u64);
-
-                            // Create fresh encounter with correct area context
-                            // (the initial encounter was created before we had area info from subprocess)
-                            cache.push_new_encounter();
+                            // Check if there's an incomplete encounter (parquet file exists but no summary)
+                            // If so, we'll continue with that encounter ID instead of creating a new one
+                            let incomplete_encounter_exists = {
+                                let incomplete_parquet = encounters_dir.join(
+                                    baras_core::storage::encounter_filename(parse_result.encounter_count as u32)
+                                );
+                                incomplete_parquet.exists()
+                            };
+                            
+                            if incomplete_encounter_exists {
+                                // There's an incomplete encounter written to parquet
+                                // Continue with the same encounter ID (don't increment)
+                                cache.set_next_encounter_id(parse_result.encounter_count as u64);
+                                
+                                // Don't call push_new_encounter() - we'll continue accumulating
+                                // to the existing encounter (ID 0) and it will be written with the correct ID
+                                // Update the current encounter's area context
+                                use baras_core::game_data::Difficulty;
+                                let difficulty = Difficulty::from_difficulty_id(cache.current_area.difficulty_id);
+                                let area_id = if cache.current_area.area_id != 0 {
+                                    Some(cache.current_area.area_id)
+                                } else {
+                                    None
+                                };
+                                let area_name = if cache.current_area.area_name.is_empty() {
+                                    None
+                                } else {
+                                    Some(cache.current_area.area_name.clone())
+                                };
+                                
+                                if let Some(enc) = cache.current_encounter_mut() {
+                                    enc.id = parse_result.encounter_count as u64;
+                                    enc.set_difficulty(difficulty);
+                                    enc.set_area(area_id, area_name);
+                                }
+                            } else {
+                                // All encounters were finalized
+                                // Set next ID to continue from where subprocess left off
+                                cache.set_next_encounter_id(parse_result.encounter_count as u64);
+                                
+                                // Create fresh encounter with correct area context
+                                cache.push_new_encounter();
+                            }
 
                             // Import player disciplines from subprocess
                             for disc in &parse_result.player_disciplines {
@@ -1204,6 +1276,28 @@ impl CombatService {
 
                         session_guard.finalize_session();
                         session_guard.sync_timer_context();
+                        
+                        // Check if we're starting mid-encounter
+                        // This enables overlays to display data immediately when app starts during combat
+                        let mid_combat_startup = if let Some(cache) = &session_guard.session_cache {
+                            if let Some(enc) = cache.current_encounter() {
+                                use baras_core::encounter::EncounterState;
+                                if enc.state == EncounterState::InCombat {
+                                    info!(
+                                        encounter_id = enc.id,
+                                        "Detected mid-combat startup - will enable overlays"
+                                    );
+                                    true
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+                        
                         drop(session_guard);
 
                         info!(
@@ -1213,12 +1307,26 @@ impl CombatService {
                             "Subprocess parse completed"
                         );
 
-                        // Notify frontend to refresh session info
+                        // If we detected mid-combat startup, set in_combat BEFORE emitting event
+                        // This ensures frontend gets correct state when it fetches session info
+                        if mid_combat_startup {
+                            self.shared.in_combat.store(true, std::sync::atomic::Ordering::SeqCst);
+                            let _ = trigger_tx.try_send(MetricsTrigger::CombatStarted);
+                            let _ = session_event_tx.send(SessionEvent::CombatStarted);
+                        }
+                        
+                        // Notify frontend to refresh session info (after in_combat is set)
                         let _ = self.app_handle.emit("session-updated", "FileLoaded");
                     }
                     Err(e) => {
                         error!(error = %e, "Subprocess output parse failed");
-                        fallback_streaming_parse(&reader, &session, encounters_dir.clone()).await;
+                        let in_combat = fallback_streaming_parse(&reader, &session, encounters_dir.clone()).await;
+                        if in_combat {
+                            self.shared.in_combat.store(true, std::sync::atomic::Ordering::SeqCst);
+                            let _ = trigger_tx.try_send(MetricsTrigger::CombatStarted);
+                            let _ = session_event_tx.send(SessionEvent::CombatStarted);
+                            info!("Detected mid-combat startup (fallback parse)");
+                        }
                     }
                 }
             }
@@ -1228,12 +1336,24 @@ impl CombatService {
                     "Subprocess failed"
                 );
                 // Fallback to streaming parse in main process
-                fallback_streaming_parse(&reader, &session, encounters_dir.clone()).await;
+                let in_combat = fallback_streaming_parse(&reader, &session, encounters_dir.clone()).await;
+                if in_combat {
+                    self.shared.in_combat.store(true, std::sync::atomic::Ordering::SeqCst);
+                    let _ = trigger_tx.try_send(MetricsTrigger::CombatStarted);
+                    let _ = session_event_tx.send(SessionEvent::CombatStarted);
+                    info!("Detected mid-combat startup (fallback parse)");
+                }
             }
             Err(e) => {
                 error!(error = %e, "Failed to spawn subprocess");
                 // Fallback to streaming parse in main process
-                fallback_streaming_parse(&reader, &session, encounters_dir.clone()).await;
+                let in_combat = fallback_streaming_parse(&reader, &session, encounters_dir.clone()).await;
+                if in_combat {
+                    self.shared.in_combat.store(true, std::sync::atomic::Ordering::SeqCst);
+                    let _ = trigger_tx.try_send(MetricsTrigger::CombatStarted);
+                    let _ = session_event_tx.send(SessionEvent::CombatStarted);
+                    info!("Detected mid-combat startup (fallback parse)");
+                }
             }
         }
 

@@ -71,6 +71,8 @@ struct AreaInfoOutput {
 #[derive(Debug, Serialize)]
 struct ParseOutput {
     /// Final byte position in the file (for tailing).
+    /// If there's an incomplete encounter, this is the byte position where it started.
+    /// Otherwise, this is the end of the file.
     end_pos: u64,
     /// Number of events parsed.
     event_count: usize,
@@ -699,11 +701,25 @@ fn parse_file(
     let event_count = events.len();
 
     // Process events and write encounters
-    let (encounters, player, area, player_disciplines) =
+    let (encounters, player, area, player_disciplines, incomplete_line) =
         process_and_write_encounters(events, output_dir, boss_definitions)?;
 
+    // If there's an incomplete encounter, set end_pos to the byte position of its first line
+    // Otherwise, use the end of file
+    let final_end_pos = if let Some(line_num) = incomplete_line {
+        // line_num is 1-based, line_ranges is 0-based
+        let line_idx = (line_num - 1) as usize;
+        if line_idx < line_ranges.len() {
+            line_ranges[line_idx].0 as u64
+        } else {
+            end_pos
+        }
+    } else {
+        end_pos
+    };
+
     Ok(ParseOutput {
-        end_pos,
+        end_pos: final_end_pos,
         event_count,
         encounter_count: encounters.len(),
         encounters,
@@ -724,6 +740,7 @@ fn process_and_write_encounters(
         PlayerInfo,
         AreaInfoOutput,
         Vec<PlayerDisciplineEntry>,
+        Option<u64>, // First line of incomplete encounter (if any)
     ),
     String,
 > {
@@ -743,11 +760,20 @@ fn process_and_write_encounters(
     let mut current_encounter_idx: u32 = 0;
     let mut pending_write = false;
     let output_dir = output_dir.to_path_buf();
+    
+    // Track the first line number of the current incomplete encounter
+    let mut incomplete_encounter_first_line: Option<u64> = None;
 
     cache.load_boss_definitions(boss_definitions);
 
     for event in events {
         let (signals, event) = processor.process_event(event, &mut cache);
+        
+        // Track first line of current encounter (reset on combat end)
+        if incomplete_encounter_first_line.is_none() {
+            incomplete_encounter_first_line = Some(event.line_number);
+        }
+        
         writer.append_event(&event, &cache, current_encounter_idx);
 
         for signal in &signals {
@@ -764,14 +790,20 @@ fn process_and_write_encounters(
                 current_encounter_idx += 1;
             }
             pending_write = false;
+            // Reset for next encounter
+            incomplete_encounter_first_line = None;
         }
     }
 
-    // Send any remaining events (final incomplete encounter)
+    // Write any remaining events (final incomplete encounter) to parquet
+    // The main process will handle this correctly by continuing with the same encounter ID
     if let Some(batch) = writer.take_batch() {
         let filename = encounter_filename(current_encounter_idx);
         let path = output_dir.join(&filename);
         let _ = tx.send((batch, path));
+    } else {
+        // No incomplete encounter, so clear the tracking
+        incomplete_encounter_first_line = None;
     }
 
     // Close channel and wait for writer thread to finish
@@ -808,5 +840,5 @@ fn process_and_write_encounters(
         })
         .collect();
 
-    Ok((encounter_summaries, player, area, player_disciplines))
+    Ok((encounter_summaries, player, area, player_disciplines, incomplete_encounter_first_line))
 }

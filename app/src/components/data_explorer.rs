@@ -328,7 +328,8 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
     let mut encounters = use_signal(Vec::<EncounterSummary>::new);
     
     // Extract persisted state fields into local signals for easier access
-    let mut selected_encounter = use_signal(|| props.state.read().data_explorer.selected_encounter);
+    // Always start with live encounter (None) instead of persisting selection
+    let mut selected_encounter = use_signal(|| None::<u32>);
     let mut view_mode = use_signal(|| props.state.read().data_explorer.view_mode);
     let mut selected_source = use_signal(|| props.state.read().data_explorer.selected_source.clone());
     let mut breakdown_mode = use_signal(|| props.state.read().data_explorer.breakdown_mode);
@@ -345,7 +346,8 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
     let mut time_range = use_signal(|| props.state.read().data_explorer.time_range);
     
     // Track previous encounter to detect actual changes vs. initial mount
-    let mut prev_encounter = use_signal(|| props.state.read().data_explorer.selected_encounter);
+    // Start with None to trigger initial load
+    let mut prev_encounter = use_signal(|| None::<u32>);
     
     // Sync local signals back to unified state when they change
     // Read all values first to create subscriptions, then write to parent state
@@ -617,10 +619,7 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
         let _ = timeline_state.try_write().map(|mut w| *w = LoadState::Idle);
         let _ = content_state.try_write().map(|mut w| *w = LoadState::Idle);
 
-        let Some(idx) = idx else {
-            return; // No encounter selected
-        };
-
+        // Load timeline for selected encounter (None = live encounter)
         let _ = timeline_state
             .try_write()
             .map(|mut w| *w = LoadState::Loading);
@@ -635,7 +634,7 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                 return; // Stale request, discard
             }
 
-            match api::query_encounter_timeline(Some(idx)).await {
+            match api::query_encounter_timeline(idx).await {
                 Some(tl) => {
                     // Double-check generation before applying
                     if *load_generation.peek() != generation {

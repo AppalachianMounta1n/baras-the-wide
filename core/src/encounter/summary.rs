@@ -105,6 +105,57 @@ impl EncounterHistory {
         }
         changed
     }
+    
+    /// Restore the generation counter without resetting pull counts.
+    /// Used when importing encounter history from subprocess - the pull counts
+    /// are already reflected in the imported encounter names.
+    pub fn restore_generation(&mut self, generation: u64) {
+        self.current_generation = Some(generation);
+    }
+    
+    /// Rebuild pull counts from imported encounter summaries.
+    /// This extracts the counts from encounter names like "Boss - 3" or "Raid Trash 5".
+    /// Call this after importing encounters to ensure live encounters continue with correct numbering.
+    /// 
+    /// Only counts encounters from the CURRENT phase (after the last is_phase_start).
+    /// When you enter a new area, pull counts reset, so we shouldn't carry over counts from previous areas.
+    pub fn rebuild_pull_counts(&mut self) {
+        self.trash_pull_count = 0;
+        self.boss_pull_counts.clear();
+        
+        // Find the index of the last phase start (area change)
+        let last_phase_start_idx = self.summaries.iter()
+            .enumerate()
+            .rev()
+            .find(|(_, s)| s.is_phase_start)
+            .map(|(idx, _)| idx);
+        
+        // Only count encounters from the current phase onwards
+        let encounters_to_count = if let Some(start_idx) = last_phase_start_idx {
+            &self.summaries[start_idx..]
+        } else {
+            &self.summaries[..]
+        };
+        
+        for summary in encounters_to_count {
+            if let Some(ref boss_name) = summary.boss_name {
+                // Extract count from "Boss Name - N" format
+                if let Some(count_str) = summary.display_name.rsplit(" - ").next() {
+                    if let Ok(count) = count_str.parse::<u32>() {
+                        let current = self.boss_pull_counts.get(boss_name).copied().unwrap_or(0);
+                        self.boss_pull_counts.insert(boss_name.clone(), current.max(count));
+                    }
+                }
+            } else {
+                // Trash encounter - extract count from "Type N" format
+                if let Some(count_str) = summary.display_name.rsplit(' ').next() {
+                    if let Ok(count) = count_str.parse::<u32>() {
+                        self.trash_pull_count = self.trash_pull_count.max(count);
+                    }
+                }
+            }
+        }
+    }
 
     /// Generate a human-readable name for an encounter based on its type and boss
     pub fn generate_name(&mut self, encounter_type: PhaseType, boss_name: Option<&str>) -> String {

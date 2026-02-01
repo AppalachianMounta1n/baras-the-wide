@@ -74,26 +74,6 @@ pub fn App() -> Element {
     // UI Session State - unified state that persists across tab switches
     let mut ui_state = use_signal(UiSessionState::default);
     
-    // Convenience signal for components that need individual fields (bidirectional sync)
-    // This allows HistoryPanel to receive show_only_bosses as a Signal<bool>
-    let mut show_only_bosses = use_signal(|| false);
-    
-    // Sync: ui_state -> show_only_bosses
-    use_effect(move || {
-        let val = ui_state.read().data_explorer.show_only_bosses;
-        if *show_only_bosses.read() != val {
-            show_only_bosses.set(val);
-        }
-    });
-    
-    // Sync: show_only_bosses -> ui_state
-    use_effect(move || {
-        let val = *show_only_bosses.read();
-        if ui_state.read().data_explorer.show_only_bosses != val {
-            ui_state.write().data_explorer.show_only_bosses = val;
-        }
-    });
-    
     // Other UI state (not part of session persistence)
     let mut settings_open = use_signal(|| false);
     let mut general_settings_open = use_signal(|| false);
@@ -903,7 +883,7 @@ pub fn App() -> Element {
                     // Player stats for GCD/timing calculations
                     PlayerStatsBar {}
 
-                    div { class: "history-container-large", HistoryPanel { show_only_bosses } }
+                    div { class: "history-container-large", HistoryPanel { state: ui_state } }
                 }
 
                 // ─────────────────────────────────────────────────────────────

@@ -143,16 +143,27 @@ fn group_by_area(
 
 #[derive(Props, Clone, PartialEq)]
 pub struct HistoryPanelProps {
-    pub show_only_bosses: Signal<bool>,
+    pub state: Signal<crate::types::UiSessionState>,
 }
 
 #[component]
-pub fn HistoryPanel(props: HistoryPanelProps) -> Element {
+pub fn HistoryPanel(mut props: HistoryPanelProps) -> Element {
     let mut encounters = use_signal(Vec::<EncounterSummary>::new);
     let mut expanded_id = use_signal(|| None::<u64>);
     let mut collapsed_sections = use_signal(HashSet::<String>::new);
     let mut loading = use_signal(|| true);
-    let mut show_only_bosses = props.show_only_bosses;
+    
+    // Create local signal from ui_state (same pattern as DataExplorer)
+    let mut show_only_bosses = use_signal(|| props.state.read().data_explorer.show_only_bosses);
+    
+    // Sync local signal back to ui_state when it changes
+    use_effect(move || {
+        let bosses = *show_only_bosses.read();
+        if let Ok(mut state) = props.state.try_write() {
+            state.data_explorer.show_only_bosses = bosses;
+        }
+    });
+    
     // Track upload state per encounter_id
     let mut upload_states = use_signal(HashMap::<u64, UploadState>::new);
     // Get parsely upload manager for event handlers
@@ -257,30 +268,30 @@ pub fn HistoryPanel(props: HistoryPanelProps) -> Element {
                     " Encounter History"
                 }
                 div { class: "history-controls",
-                    label { class: "boss-filter-toggle",
-                        input {
-                            r#type: "checkbox",
-                            checked: bosses_only,
-                            onchange: move |e| {
-                                let checked = e.checked();
-                                show_only_bosses.set(checked);
-                                let mut toast = use_toast();
-                                spawn(async move {
-                                    if let Some(mut cfg) = api::get_config().await {
-                                        cfg.show_only_bosses = checked;
-                                        if let Err(err) = api::update_config(&cfg).await {
-                                            toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
-                                        }
+                label { class: "boss-filter-toggle",
+                    input {
+                        r#type: "checkbox",
+                        checked: *show_only_bosses.read(),
+                        onchange: move |e| {
+                            let checked = e.checked();
+                            show_only_bosses.set(checked);
+                            let mut toast = use_toast();
+                            spawn(async move {
+                                if let Some(mut cfg) = api::get_config().await {
+                                    cfg.show_only_bosses = checked;
+                                    if let Err(err) = api::update_config(&cfg).await {
+                                        toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
                                     }
-                                });
-                            }
+                                }
+                            });
                         }
-                        span { "Bosses only" }
                     }
-                    span { class: "encounter-count",
-                        "{filtered_history.len()}"
-                        if bosses_only { " / {history.len()}" }
-                    }
+                    span { "Bosses only" }
+                }
+                span { class: "encounter-count",
+                    "{filtered_history.len()}"
+                    if *show_only_bosses.read() { " / {history.len()}" }
+                }
                 }
             }
 

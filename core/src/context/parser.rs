@@ -353,7 +353,17 @@ impl ParsingSession {
         if let Some(cache) = &mut self.session_cache {
             let signals = crate::signal_processor::tick_combat_state(cache);
             if !signals.is_empty() {
+                // Check if combat ended - need to flush parquet
+                let should_flush = signals
+                    .iter()
+                    .any(|s| matches!(s, GameSignal::CombatEnded { .. }));
+                
                 self.dispatch_signals(&signals);
+                
+                // Flush parquet on combat end (same as event-driven path)
+                if should_flush {
+                    self.flush_encounter_parquet();
+                }
             }
         }
 
