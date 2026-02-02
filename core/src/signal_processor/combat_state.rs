@@ -331,6 +331,35 @@ fn handle_in_combat(
         // Normal case: battle rez rejoin - ignore this EnterCombat
         // ENTERCOMBAT only fires for local player, so this is always a rejoin scenario
         return (signals, was_accumulated);
+    } else if effect_type_id == effect_type_id::AREAENTERED {
+        // AreaEntered ALWAYS ends the encounter - player left the combat area
+        // This takes priority over victory-trigger logic (can't continue a fight you left)
+        let encounter_id = cache.current_encounter().map(|e| e.id).unwrap_or(0);
+        tracing::info!("[ENCOUNTER] AREAENTERED at {}, ending encounter {}", timestamp, encounter_id);
+        if let Some(enc) = cache.current_encounter_mut() {
+            // For victory-trigger encounters, exiting area without victory trigger = wipe
+            // (player medcentered, left group, or got disconnected)
+            if let Some(idx) = enc.active_boss_idx() {
+                if enc.boss_definitions()[idx].has_victory_trigger && !enc.victory_triggered {
+                    enc.all_players_dead = true;
+                }
+            }
+
+            enc.exit_combat_time = Some(timestamp);
+            enc.state = EncounterState::PostCombat {
+                exit_time: timestamp,
+            };
+            let duration = enc.duration_seconds().unwrap_or(0) as f32;
+            enc.challenge_tracker.finalize(timestamp, duration);
+        }
+
+        signals.push(GameSignal::CombatEnded {
+            timestamp,
+            encounter_id,
+        });
+
+        cache.push_new_encounter();
+        return (signals, was_accumulated);
     } else if should_ignore_exit_combat {
         // For victory-trigger encounters, ignore all exit conditions except all_players_dead (wipe)
         if !all_players_dead {
@@ -394,24 +423,6 @@ fn handle_in_combat(
             }
             // Note: Don't emit CombatEnded or push_new_encounter yet
         }
-    } else if effect_type_id == effect_type_id::AREAENTERED {
-        let encounter_id = cache.current_encounter().map(|e| e.id).unwrap_or(0);
-        tracing::info!("[ENCOUNTER] AREAENTERED at {}, ending encounter {}", timestamp, encounter_id);
-        if let Some(enc) = cache.current_encounter_mut() {
-            enc.exit_combat_time = Some(timestamp);
-            enc.state = EncounterState::PostCombat {
-                exit_time: timestamp,
-            };
-            let duration = enc.duration_seconds().unwrap_or(0) as f32;
-            enc.challenge_tracker.finalize(timestamp, duration);
-        }
-
-        signals.push(GameSignal::CombatEnded {
-            timestamp,
-            encounter_id,
-        });
-
-        cache.push_new_encounter();
     } else {
         // Normal combat event
         if let Some(enc) = cache.current_encounter_mut() {

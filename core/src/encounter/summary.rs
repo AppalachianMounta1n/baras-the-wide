@@ -260,11 +260,25 @@ pub fn determine_success(encounter: &CombatEncounter) -> bool {
     // Check if the ACTIVE boss requires a victory trigger
     // Only check the specific boss being fought, not all bosses in the area
     if let Some(idx) = encounter.active_boss_idx() {
-        if encounter.boss_definitions()[idx].has_victory_trigger {
+        let def = &encounter.boss_definitions()[idx];
+        tracing::info!(
+            "[DETERMINE_SUCCESS] active_boss_idx={}, has_victory_trigger={}, victory_triggered={}, all_players_dead={}",
+            idx,
+            def.has_victory_trigger,
+            encounter.victory_triggered,
+            encounter.all_players_dead
+        );
+        if def.has_victory_trigger {
             // Hard requirement: victory trigger must have fired for success
             // If the trigger never fired, it's always a wipe
             return encounter.victory_triggered;
         }
+    } else {
+        tracing::info!(
+            "[DETERMINE_SUCCESS] active_boss_idx=None, boss_definitions={}, all_players_dead={}",
+            encounter.boss_definitions().len(),
+            encounter.all_players_dead
+        );
     }
     
     // Standard encounters: use is_likely_wipe()
@@ -400,7 +414,7 @@ pub fn create_encounter_summary(
             .enter_combat_time
             .map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string()),
         end_time: encounter
-            .exit_combat_time
+            .effective_end_time()
             .map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string()),
         duration_seconds: encounter.duration_seconds().unwrap_or(0),
         success: determine_success(encounter),

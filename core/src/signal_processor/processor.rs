@@ -579,6 +579,7 @@ impl EventProcessor {
         if trigger_fired {
             if let Some(enc) = cache.current_encounter_mut() {
                 enc.victory_triggered = true;
+                enc.victory_triggered_at = Some(event.timestamp);
             }
         }
     }

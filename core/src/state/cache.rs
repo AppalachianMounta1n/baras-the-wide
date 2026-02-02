@@ -239,8 +239,13 @@ impl SessionCache {
         self.boss_definitions = Arc::clone(&definitions);
 
         // Share definitions with current encounter (Arc clone is cheap)
+        // BUT only if the encounter doesn't already have definitions loaded
+        // (e.g., when player dies and revives in another area before encounter finalizes,
+        // we don't want to clobber the mid-fight definitions)
         if let Some(enc) = self.current_encounter_mut() {
-            enc.load_boss_definitions(definitions);
+            if enc.boss_definitions().is_empty() {
+                enc.load_boss_definitions(definitions);
+            }
         }
     }
 

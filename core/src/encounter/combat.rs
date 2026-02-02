@@ -116,6 +116,8 @@ pub struct CombatEncounter {
     /// Whether the victory trigger has fired (for has_victory_trigger encounters).
     /// Once true, ExitCombat events will be honored.
     pub victory_triggered: bool,
+    /// Timestamp when the victory trigger fired (used as encounter end time)
+    pub victory_triggered_at: Option<NaiveDateTime>,
     /// Timestamp when local player received RECENTLY_REVIVED effect (medcenter/probe revive)
     /// Used to trigger soft-timeout wipe detection for boss encounters
     pub local_player_revive_immunity_time: Option<NaiveDateTime>,
@@ -174,6 +176,7 @@ impl CombatEncounter {
             npcs: HashMap::new(),
             all_players_dead: false,
             victory_triggered: false,
+            victory_triggered_at: None,
             local_player_revive_immunity_time: None,
 
             // Effects
@@ -495,13 +498,21 @@ impl CombatEncounter {
         Some(self.duration_ms()? / 1000)
     }
 
+    /// Get the effective end time of the encounter.
+    /// For victory-trigger encounters, this is when the victory trigger fired.
+    /// Otherwise, it's the exit_combat_time.
+    pub fn effective_end_time(&self) -> Option<NaiveDateTime> {
+        // Victory trigger time takes precedence (that's when the boss actually died)
+        self.victory_triggered_at.or(self.exit_combat_time)
+    }
+
     /// Get combat duration in milliseconds
     pub fn duration_ms(&self) -> Option<i64> {
         use chrono::TimeDelta;
 
         let enter = self.enter_combat_time?;
         let terminal = self
-            .exit_combat_time
+            .effective_end_time()
             .unwrap_or_else(|| chrono::offset::Local::now().naive_local());
 
         let mut duration = terminal.signed_duration_since(enter);
