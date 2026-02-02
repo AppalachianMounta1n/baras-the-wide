@@ -394,17 +394,6 @@ impl ParsingSession {
         }
     }
 
-    /// Enable/disable live mode for effect tracking.
-    /// Call with `true` after initial file load to start tracking effects.
-    /// No-op in Historical mode (session has no effect tracker).
-    pub fn set_effect_live_mode(&self, enabled: bool) {
-        if let Some(tracker) = &self.effect_tracker {
-            if let Ok(mut tracker) = tracker.lock() {
-                tracker.set_live_mode(enabled);
-            }
-        }
-    }
-
     /// Set player alacrity for effect duration calculations.
     /// No-op in Historical mode (session has no effect tracker).
     pub fn set_effect_alacrity(&self, alacrity_percent: f32) {
@@ -421,17 +410,6 @@ impl ParsingSession {
         if let Some(tracker) = &self.effect_tracker {
             if let Ok(mut tracker) = tracker.lock() {
                 tracker.set_latency(latency_ms);
-            }
-        }
-    }
-
-    /// Enable/disable live mode for timer tracking.
-    /// Call with `true` after initial file load to filter stale events.
-    /// No-op in Historical mode (session has no timer manager).
-    pub fn set_timer_live_mode(&self, enabled: bool) {
-        if let Some(timer_mgr) = &self.timer_manager {
-            if let Ok(mut timer_mgr) = timer_mgr.lock() {
-                timer_mgr.set_live_mode(enabled);
             }
         }
     }

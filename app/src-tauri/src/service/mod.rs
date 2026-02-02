@@ -1366,12 +1366,9 @@ impl CombatService {
         // Trigger initial metrics send after file processing
         let _ = trigger_tx.try_send(MetricsTrigger::InitialLoad);
 
-        // Enable live mode for effect/timer tracking (skip historical events)
-        // Also set alacrity/latency from config for duration calculations
+        // Set alacrity/latency from config for duration calculations
         {
             let session_guard = session.read().await;
-            session_guard.set_effect_live_mode(true);
-            session_guard.set_timer_live_mode(true);
             let config = self.shared.config.read().await;
             session_guard.set_effect_alacrity(config.alacrity_percent);
             session_guard.set_effect_latency(config.latency_ms);

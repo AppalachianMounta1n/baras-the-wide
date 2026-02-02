@@ -20,11 +20,6 @@ use super::matching::{is_definition_active, matches_source_target_filters};
 use super::signal_handlers;
 use super::{ActiveTimer, TimerDefinition, TimerKey, TimerPreferences, TimerTrigger};
 
-/// Maximum age (in minutes) for events to be processed by timers in live mode.
-/// Events older than this are skipped since timers are only useful for recent/live events.
-/// This is only checked when `live_mode` is true (after initial batch load).
-const TIMER_RECENCY_THRESHOLD_MINS: i64 = 5;
-
 // EncounterContext removed: context now read directly from CombatEncounter
 
 /// A fired alert (ephemeral notification, not a countdown timer)
@@ -75,9 +70,6 @@ pub struct TimerManager {
     /// Last known game timestamp
     last_timestamp: Option<NaiveDateTime>,
 
-    /// When true, apply recency threshold to skip old events.
-    live_mode: bool,
-
     // ─── Entity Filter State ─────────────────────────────────────────────────
     /// Local player's entity ID (for LocalPlayer filter)
     pub(super) local_player_id: Option<i64>,
@@ -113,7 +105,6 @@ impl TimerManager {
             in_combat: false,
             combat_start_time: None,
             last_timestamp: None,
-            live_mode: true, // Default: apply recency threshold (skip old events)
             local_player_id: None,
             current_target_id: None,
             boss_entity_ids: HashSet::new(),
@@ -257,12 +248,6 @@ impl TimerManager {
 
         // Validate timer chain references
         self.validate_timer_chains();
-    }
-
-    /// Enable live mode (apply recency threshold to skip old events).
-    /// Call this after the initial batch load to prevent stale log events from triggering timers.
-    pub fn set_live_mode(&mut self, enabled: bool) {
-        self.live_mode = enabled;
     }
 
     /// Set the local player's entity ID (for LocalPlayer filter matching).
@@ -814,16 +799,7 @@ impl SignalHandler for TimerManager {
             return;
         }
 
-        // In live mode, skip old events - timers only matter for recent/live events.
-        // In historical mode (validation), process all events regardless of age.
         let ts = signal.timestamp();
-        if self.live_mode {
-            let now = Local::now().naive_local();
-            let age_mins = (now - ts).num_minutes();
-            if age_mins > TIMER_RECENCY_THRESHOLD_MINS {
-                return;
-            }
-        }
         self.last_timestamp = Some(ts);
 
         // Clear tick-tracking vectors at the start of each signal processing.

@@ -168,10 +168,6 @@ pub struct EffectTracker {
     /// Current game time (latest timestamp from signals)
     current_game_time: Option<NaiveDateTime>,
 
-    /// Whether we're in live mode (tracking effects) vs historical mode (skip)
-    /// Defaults to false - must be enabled after initial file load
-    live_mode: bool,
-
     /// Local player ID (set from session cache during signal dispatch)
     local_player_id: Option<i64>,
 
@@ -217,7 +213,6 @@ impl EffectTracker {
             definitions,
             active_effects: HashMap::new(),
             current_game_time: None,
-            live_mode: false, // Start in historical mode
             local_player_id: None,
             alacrity_percent: 0.0,
             latency_ms: 0,
@@ -277,12 +272,6 @@ impl EffectTracker {
     ) {
         self.local_player_id = local_player_id;
         self.handle_signals(signals, encounter);
-    }
-
-    /// Enable live mode (start tracking effects)
-    /// Call this after initial file load is complete
-    pub fn set_live_mode(&mut self, enabled: bool) {
-        self.live_mode = enabled;
     }
 
     /// Update definitions (e.g., after config reload)
@@ -468,11 +457,6 @@ impl EffectTracker {
         self.active_effects
             .retain(|_, effect| !effect.should_remove());
 
-        // Skip effect tracking when processing historical data (initial file load)
-        if !self.live_mode {
-            return;
-        }
-
         let local_player_id = self.local_player_id;
 
         // Build entity info for filter matching
@@ -622,11 +606,6 @@ impl EffectTracker {
         timestamp: NaiveDateTime,
         encounter: Option<&crate::encounter::CombatEncounter>,
     ) {
-        // Skip when not in live mode
-        if !self.live_mode {
-            return;
-        }
-
         // For AoE abilities (target_id == 0), we can't reliably detect which targets
         // were actually hit. Damage events from ongoing DOTs on other targets look
         // identical to first ticks from the new cast. Rather than risk false refreshes
@@ -882,11 +861,6 @@ impl EffectTracker {
         timestamp: NaiveDateTime,
         encounter: Option<&crate::encounter::CombatEncounter>,
     ) {
-        // Skip when not in live mode
-        if !self.live_mode {
-            return;
-        }
-
         let local_player_id = self.local_player_id;
         let ability_name_str = crate::context::resolve(ability_name);
 
@@ -1022,11 +996,6 @@ impl EffectTracker {
     ) {
         self.current_game_time = Some(timestamp);
         let local_player_id = self.local_player_id;
-
-        // Skip when processing historical data
-        if !self.live_mode {
-            return;
-        }
 
         // Build entity info for filter matching
         let source_info = EntityInfo {
@@ -1428,7 +1397,7 @@ impl SignalHandler for EffectTracker {
                 ..
             } => {
                 // Only process for local player's damage
-                if self.local_player_id == Some(*source_id) && self.live_mode {
+                if self.local_player_id == Some(*source_id) {
                     let current_target = encounter.and_then(|e| e.get_current_target(*source_id));
                     self.handle_damage_for_aoe_refresh(
                         *ability_id,
