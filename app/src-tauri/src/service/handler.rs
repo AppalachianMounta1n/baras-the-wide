@@ -1088,7 +1088,9 @@ impl ServiceHandle {
                 .shared
                 .boss_health_overlay_active
                 .store(active, Ordering::SeqCst),
-            "timers" => self
+            // Support both legacy "timers" and new "timers_a"/"timers_b" keys
+            // All map to the same flag since the service loop checks one flag for both overlays
+            "timers" | "timers_a" | "timers_b" => self
                 .shared
                 .timer_overlay_active
                 .store(active, Ordering::SeqCst),

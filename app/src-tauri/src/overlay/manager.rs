@@ -425,13 +425,21 @@ impl OverlayManager {
         service.update_config(config).await?;
 
         // Remove and shutdown if running
-        let handle = {
+        let (handle, other_timer_running) = {
             let mut s = state.lock().map_err(|e| e.to_string())?;
             if matches!(kind, OverlayType::Raid) {
                 s.rearrange_mode = false;
                 service.set_rearrange_mode(false);
             }
-            s.remove(kind)
+            
+            // Check if the other timer overlay is still running (for edge case handling)
+            let other_timer_running = match kind {
+                OverlayType::TimersA => s.is_running(OverlayType::TimersB),
+                OverlayType::TimersB => s.is_running(OverlayType::TimersA),
+                _ => false,
+            };
+            
+            (s.remove(kind), other_timer_running)
         };
 
         if let Some(h) = handle {
@@ -439,7 +447,12 @@ impl OverlayManager {
         }
 
         // Update overlay status flag for effects loop optimization
-        service.set_overlay_active(kind.config_key(), false);
+        // For timer overlays, only set to false if the other timer is also not running
+        if matches!(kind, OverlayType::TimersA | OverlayType::TimersB) && other_timer_running {
+            // Keep timer_overlay_active true since the other timer overlay is still running
+        } else {
+            service.set_overlay_active(kind.config_key(), false);
+        }
 
         Ok(true)
     }
