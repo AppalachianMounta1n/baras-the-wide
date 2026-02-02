@@ -1494,14 +1494,18 @@ impl CombatService {
                         let effect_count: usize = data.frames.iter().map(|f| f.effects.len()).sum();
                         // Always send in rearrange mode, otherwise only when effects exist/changed
                         if rearranging || effect_count > 0 || last_raid_effect_count > 0 {
-                            let _ = overlay_tx.try_send(OverlayUpdate::EffectsUpdated(data));
+                            if overlay_tx.try_send(OverlayUpdate::EffectsUpdated(data)).is_err() {
+                                warn!("Overlay channel full, dropped raid effects update");
+                            }
                         }
                         last_raid_effect_count = effect_count;
                     } else if rearranging {
                         // In rearrange mode, send empty data to keep overlay rendering
-                        let _ = overlay_tx.try_send(OverlayUpdate::EffectsUpdated(
+                        if overlay_tx.try_send(OverlayUpdate::EffectsUpdated(
                             baras_overlay::RaidFrameData { frames: vec![] },
-                        ));
+                        )).is_err() {
+                            warn!("Overlay channel full, dropped raid effects clear");
+                        }
                         last_raid_effect_count = 0;
                     } else {
                         last_raid_effect_count = 0;
@@ -1512,14 +1516,17 @@ impl CombatService {
                     if let Some(data) = build_effects_a_data(&shared, icon_cache.as_ref()).await {
                         let count = data.effects.len();
                         if count > 0 || last_effects_a_count > 0 {
-                            let _ = overlay_tx.try_send(OverlayUpdate::EffectsAUpdated(data));
+                            if overlay_tx.try_send(OverlayUpdate::EffectsAUpdated(data)).is_err() {
+                                warn!("Overlay channel full, dropped effects A update");
+                            }
                         }
                         last_effects_a_count = count;
                     } else if last_effects_a_count > 0 {
-                        let _ =
-                            overlay_tx.try_send(OverlayUpdate::EffectsAUpdated(EffectsABData {
-                                effects: vec![],
-                            }));
+                        if overlay_tx.try_send(OverlayUpdate::EffectsAUpdated(EffectsABData {
+                            effects: vec![],
+                        })).is_err() {
+                            warn!("Overlay channel full, dropped effects A clear");
+                        }
                         last_effects_a_count = 0;
                     }
                 }
@@ -1529,14 +1536,17 @@ impl CombatService {
                     if let Some(data) = build_effects_b_data(&shared, icon_cache.as_ref()).await {
                         let count = data.effects.len();
                         if count > 0 || last_effects_b_count > 0 {
-                            let _ = overlay_tx.try_send(OverlayUpdate::EffectsBUpdated(data));
+                            if overlay_tx.try_send(OverlayUpdate::EffectsBUpdated(data)).is_err() {
+                                warn!("Overlay channel full, dropped effects B update");
+                            }
                         }
                         last_effects_b_count = count;
                     } else if last_effects_b_count > 0 {
-                        let _ =
-                            overlay_tx.try_send(OverlayUpdate::EffectsBUpdated(EffectsABData {
-                                effects: vec![],
-                            }));
+                        if overlay_tx.try_send(OverlayUpdate::EffectsBUpdated(EffectsABData {
+                            effects: vec![],
+                        })).is_err() {
+                            warn!("Overlay channel full, dropped effects B clear");
+                        }
                         last_effects_b_count = 0;
                     }
                 }
@@ -1546,14 +1556,17 @@ impl CombatService {
                     if let Some(data) = build_cooldowns_data(&shared, icon_cache.as_ref()).await {
                         let count = data.entries.len();
                         if count > 0 || last_cooldowns_count > 0 {
-                            let _ = overlay_tx.try_send(OverlayUpdate::CooldownsUpdated(data));
+                            if overlay_tx.try_send(OverlayUpdate::CooldownsUpdated(data)).is_err() {
+                                warn!("Overlay channel full, dropped cooldowns update");
+                            }
                         }
                         last_cooldowns_count = count;
                     } else if last_cooldowns_count > 0 {
-                        let _ =
-                            overlay_tx.try_send(OverlayUpdate::CooldownsUpdated(CooldownData {
-                                entries: vec![],
-                            }));
+                        if overlay_tx.try_send(OverlayUpdate::CooldownsUpdated(CooldownData {
+                            entries: vec![],
+                        })).is_err() {
+                            warn!("Overlay channel full, dropped cooldowns clear");
+                        }
                         last_cooldowns_count = 0;
                     }
                 }
@@ -1563,14 +1576,17 @@ impl CombatService {
                     if let Some(data) = build_dot_tracker_data(&shared, icon_cache.as_ref()).await {
                         let count = data.targets.len();
                         if count > 0 || last_dot_tracker_count > 0 {
-                            let _ = overlay_tx.try_send(OverlayUpdate::DotTrackerUpdated(data));
+                            if overlay_tx.try_send(OverlayUpdate::DotTrackerUpdated(data)).is_err() {
+                                warn!("Overlay channel full, dropped DOT tracker update");
+                            }
                         }
                         last_dot_tracker_count = count;
                     } else if last_dot_tracker_count > 0 {
-                        let _ =
-                            overlay_tx.try_send(OverlayUpdate::DotTrackerUpdated(DotTrackerData {
-                                targets: vec![],
-                            }));
+                        if overlay_tx.try_send(OverlayUpdate::DotTrackerUpdated(DotTrackerData {
+                            targets: vec![],
+                        })).is_err() {
+                            warn!("Overlay channel full, dropped DOT tracker clear");
+                        }
                         last_dot_tracker_count = 0;
                     }
                 }
@@ -1593,8 +1609,10 @@ impl CombatService {
                     }
                     // Send text alerts to overlay
                     if !effect_audio.text_alerts.is_empty() {
-                        let _ = overlay_tx
-                            .try_send(OverlayUpdate::AlertsFired(effect_audio.text_alerts));
+                        if overlay_tx
+                            .try_send(OverlayUpdate::AlertsFired(effect_audio.text_alerts)).is_err() {
+                            warn!("Overlay channel full, dropped effect alerts");
+                        }
                     }
                 }
 
@@ -1603,7 +1621,9 @@ impl CombatService {
                     && in_combat
                     && let Some(data) = build_boss_health_data(&shared).await
                 {
-                    let _ = overlay_tx.try_send(OverlayUpdate::BossHealthUpdated(data));
+                    if overlay_tx.try_send(OverlayUpdate::BossHealthUpdated(data)).is_err() {
+                        warn!("Overlay channel full, dropped boss health update");
+                    }
                 }
 
                 // Timers + Audio: always poll when in live mode (alerts can fire at combat end)
@@ -1614,8 +1634,12 @@ impl CombatService {
                     {
                         // Send timer overlay data (only when in combat)
                         if in_combat && timer_active {
-                            let _ = overlay_tx.try_send(OverlayUpdate::TimersAUpdated(timers_a));
-                            let _ = overlay_tx.try_send(OverlayUpdate::TimersBUpdated(timers_b));
+                            if overlay_tx.try_send(OverlayUpdate::TimersAUpdated(timers_a)).is_err() {
+                                warn!("Overlay channel full, dropped timers A update");
+                            }
+                            if overlay_tx.try_send(OverlayUpdate::TimersBUpdated(timers_b)).is_err() {
+                                warn!("Overlay channel full, dropped timers B update");
+                            }
                         }
 
                         // Send countdown audio events (only when in combat)
@@ -1631,7 +1655,9 @@ impl CombatService {
 
                         // Send alerts to overlay (before audio consumes them)
                         if !alerts.is_empty() {
-                            let _ = overlay_tx.try_send(OverlayUpdate::AlertsFired(alerts.clone()));
+                            if overlay_tx.try_send(OverlayUpdate::AlertsFired(alerts.clone())).is_err() {
+                                warn!("Overlay channel full, dropped timer alerts");
+                            }
                         }
 
                         // Send alert audio events (only if audio_enabled for that alert)
