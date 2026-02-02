@@ -670,6 +670,11 @@ difficulties = ["veteran", "master"]
 id = "the_terror_from_beyond"
 name = "The Terror From Beyond"
 difficulties = ["story", "veteran", "master"]
+has_victory_trigger = true
+victory_trigger = { type = "any_of", conditions = [
+  { type = "ability_cast", abilities = [3019211685232640] },
+  { type = "boss_hp_below", hp_percent = 4.0, selector = ["Terror (P2)"] }
+]}
 
 # ─── Phases ─────────────────────────────────────────────────────────────────────
 
@@ -706,12 +711,11 @@ is_boss = true
 show_on_hp_overlay = false
 triggers_encounter = true
 
-# Phase 2 - the kill target
+# Phase 2 - triggers victory at ~4% HP but doesn't actually die
 [[boss.entities]]
 name = "Terror (P2)"
 ids = [3025233229381632]
 is_boss = true
-is_kill_target = true
 
 [[boss.entities]]
 name = "Grasping Tentacle"

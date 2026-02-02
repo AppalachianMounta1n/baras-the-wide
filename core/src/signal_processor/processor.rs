@@ -57,10 +57,7 @@ impl EventProcessor {
         // 1f. Boss HP tracking and phase transitions
         signals.extend(self.handle_boss_hp_and_phases(&event, cache));
 
-        // 1g. Victory trigger detection (for special encounters like Coratanni)
-        self.handle_victory_trigger(&event, cache);
-
-        // 1h. NPC Target Tracking
+        // 1g. NPC Target Tracking
         signals.extend(self.handle_target_changed(&event, cache));
 
         // ═══════════════════════════════════════════════════════════════════════
@@ -93,6 +90,10 @@ impl EventProcessor {
 
         // Update combat time and check for TimeElapsed phase transitions
         signals.extend(phase::check_time_phase_transitions(cache, event.timestamp));
+
+        // Victory trigger detection (for special encounters like Coratanni)
+        // Must happen after signals are emitted to support HP-based victory triggers
+        self.handle_victory_trigger(&event, &signals, cache);
 
         // Process challenge metrics (accumulates values, polled with combat data)
         challenge::process_challenge_events(&event, cache);
@@ -545,9 +546,15 @@ impl EventProcessor {
         signals
     }
 
-    /// Check for victory trigger on special encounters (e.g., Coratanni).
+    /// Check for victory trigger on special encounters (e.g., Coratanni, Terror from Beyond).
     /// Updates encounter.victory_triggered when the trigger fires.
-    fn handle_victory_trigger(&self, event: &CombatEvent, cache: &mut SessionCache) {
+    /// Supports all trigger types including ability casts, HP thresholds, and composite triggers.
+    fn handle_victory_trigger(
+        &self,
+        event: &CombatEvent,
+        signals: &[GameSignal],
+        cache: &mut SessionCache,
+    ) {
         let Some(enc) = cache.current_encounter() else {
             return;
         };
@@ -562,7 +569,7 @@ impl EventProcessor {
 
         // Check if trigger matches (needs immutable borrow)
         let trigger_fired = if let Some(ref trigger) = boss_def.victory_trigger {
-            phase::check_ability_trigger(trigger, event)
+            check_victory_trigger(trigger, event, signals, &boss_def.entities)
         } else {
             false
         };
@@ -745,5 +752,106 @@ impl EventProcessor {
             target_npc_id: event.target_entity.class_id,
             timestamp: event.timestamp,
         }]
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Victory Trigger Checking
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Check if a victory trigger is satisfied by the current event and signals.
+/// Supports event-based triggers (ability casts, effects), signal-based triggers
+/// (HP thresholds, entity deaths), and composite triggers (AnyOf).
+fn check_victory_trigger(
+    trigger: &crate::dsl::Trigger,
+    event: &crate::combat_log::CombatEvent,
+    signals: &[GameSignal],
+    entities: &[crate::dsl::EntityDefinition],
+) -> bool {
+    use crate::dsl::Trigger;
+
+    match trigger {
+        // Event-based triggers (ability casts, effects)
+        Trigger::AbilityCast { .. }
+        | Trigger::EffectApplied { .. }
+        | Trigger::EffectRemoved { .. } => phase::check_ability_trigger(trigger, event),
+
+        // Signal-based triggers: HP thresholds
+        Trigger::BossHpBelow { .. } => signals.iter().any(|s| {
+            if let GameSignal::BossHpChanged {
+                npc_id,
+                entity_name,
+                old_hp_percent,
+                new_hp_percent,
+                ..
+            } = s
+            {
+                trigger.matches_boss_hp_below(
+                    entities,
+                    *npc_id,
+                    entity_name,
+                    *old_hp_percent,
+                    *new_hp_percent,
+                )
+            } else {
+                false
+            }
+        }),
+
+        Trigger::BossHpAbove { .. } => signals.iter().any(|s| {
+            if let GameSignal::BossHpChanged {
+                npc_id,
+                entity_name,
+                old_hp_percent,
+                new_hp_percent,
+                ..
+            } = s
+            {
+                trigger.matches_boss_hp_above(
+                    entities,
+                    *npc_id,
+                    entity_name,
+                    *old_hp_percent,
+                    *new_hp_percent,
+                )
+            } else {
+                false
+            }
+        }),
+
+        // Signal-based triggers: Entity lifecycle
+        Trigger::NpcAppears { .. } => signals.iter().any(|s| {
+            if let GameSignal::NpcFirstSeen {
+                npc_id,
+                entity_name,
+                ..
+            } = s
+            {
+                trigger.matches_npc_appears(entities, *npc_id, entity_name)
+            } else {
+                false
+            }
+        }),
+
+        Trigger::EntityDeath { .. } => signals.iter().any(|s| {
+            if let GameSignal::EntityDeath {
+                npc_id,
+                entity_name,
+                ..
+            } = s
+            {
+                trigger.matches_entity_death(entities, *npc_id, entity_name)
+            } else {
+                false
+            }
+        }),
+
+        // Composition: AnyOf
+        Trigger::AnyOf { conditions } => conditions
+            .iter()
+            .any(|c| check_victory_trigger(c, event, signals, entities)),
+
+        // Other triggers not supported for victory conditions
+        _ => false,
     }
 }

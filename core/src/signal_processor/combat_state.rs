@@ -140,13 +140,16 @@ fn handle_in_combat(
     let mut was_accumulated = false;
 
     // Check for combat timeout
-    // Skip timeout for victory-trigger encounters (e.g., Coratanni has long phases with no activity)
-    let has_victory_trigger = cache.current_encounter().map_or(false, |enc| {
+    // Skip timeout only for victory-trigger encounters that haven't triggered yet
+    // Once victory_triggered is set, allow normal timeout behavior
+    let awaiting_victory_trigger = cache.current_encounter().map_or(false, |enc| {
         enc.active_boss_idx()
-            .map_or(false, |idx| enc.boss_definitions()[idx].has_victory_trigger)
+            .map_or(false, |idx| {
+                enc.boss_definitions()[idx].has_victory_trigger && !enc.victory_triggered
+            })
     });
     
-    if !has_victory_trigger
+    if !awaiting_victory_trigger
         && let Some(enc) = cache.current_encounter()
         && let Some(last_activity) = enc.last_combat_activity_time
     {
