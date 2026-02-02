@@ -309,12 +309,12 @@ pub fn ParselyUploadModal() -> Element {
                                 match result {
                                     Ok(resp) if resp.success => {
                                         if let Some(link) = resp.link {
-                                            toast.show(
+                                            toast.show_persistent(
                                                 format!("Uploaded to Parsely: {}", link),
                                                 ToastSeverity::Success
                                             );
                                         } else {
-                                            toast.show("Uploaded to Parsely", ToastSeverity::Success);
+                                            toast.show_persistent("Uploaded to Parsely", ToastSeverity::Success);
                                         }
                                     }
                                     Ok(resp) => {
