@@ -257,16 +257,14 @@ pub fn classify_encounter(
 /// Returns false (wipe) if all players died or kill targets are still alive
 /// For victory-trigger encounters, success requires the trigger to have fired
 pub fn determine_success(encounter: &CombatEncounter) -> bool {
-    // Check if any boss in this encounter requires a victory trigger
-    // This is more robust than relying on active_boss_idx which might be None
-    let requires_victory_trigger = encounter.boss_definitions()
-        .iter()
-        .any(|def| def.has_victory_trigger);
-    
-    if requires_victory_trigger {
-        // Hard requirement: victory trigger must have fired for success
-        // If the trigger never fired, it's always a wipe
-        return encounter.victory_triggered;
+    // Check if the ACTIVE boss requires a victory trigger
+    // Only check the specific boss being fought, not all bosses in the area
+    if let Some(idx) = encounter.active_boss_idx() {
+        if encounter.boss_definitions()[idx].has_victory_trigger {
+            // Hard requirement: victory trigger must have fired for success
+            // If the trigger never fired, it's always a wipe
+            return encounter.victory_triggered;
+        }
     }
     
     // Standard encounters: use is_likely_wipe()
