@@ -66,6 +66,10 @@ pub struct CombatEncounter {
     pub area_id: Option<i64>,
     /// Area name from game (for display/logging)
     pub area_name: Option<String>,
+    /// Difficulty ID from game (for encounter classification)
+    pub difficulty_id: Option<i64>,
+    /// Difficulty name from game (for display)
+    pub difficulty_name: Option<String>,
 
     // ─── Boss Definitions (loaded on area enter) ────────────────────────────
     /// Boss definitions for current area (Arc for zero-copy sharing)
@@ -109,6 +113,9 @@ pub struct CombatEncounter {
     /// Whether the victory trigger has fired (for has_victory_trigger encounters).
     /// Once true, ExitCombat events will be honored.
     pub victory_triggered: bool,
+    /// Timestamp when local player received RECENTLY_REVIVED effect (medcenter/probe revive)
+    /// Used to trigger soft-timeout wipe detection for boss encounters
+    pub local_player_revive_immunity_time: Option<NaiveDateTime>,
 
     // ─── Effect Instances (for shield attribution) ──────────────────────────
     /// Active effects by target ID
@@ -136,6 +143,8 @@ impl CombatEncounter {
             difficulty: None,
             area_id: None,
             area_name: None,
+            difficulty_id: None,
+            difficulty_name: None,
 
             // Boss definitions
             boss_definitions: Arc::new(Vec::new()),
@@ -161,6 +170,7 @@ impl CombatEncounter {
             npcs: HashMap::new(),
             all_players_dead: false,
             victory_triggered: false,
+            local_player_revive_immunity_time: None,
 
             // Effects
             effects: HashMap::new(),
@@ -230,6 +240,18 @@ impl CombatEncounter {
     /// Set the encounter difficulty
     pub fn set_difficulty(&mut self, difficulty: Option<Difficulty>) {
         self.difficulty = difficulty;
+    }
+
+    /// Set the encounter difficulty with full info (ID, name, parsed enum)
+    pub fn set_difficulty_info(
+        &mut self,
+        difficulty: Option<Difficulty>,
+        difficulty_id: Option<i64>,
+        difficulty_name: Option<String>,
+    ) {
+        self.difficulty = difficulty;
+        self.difficulty_id = difficulty_id;
+        self.difficulty_name = difficulty_name;
     }
 
     /// Set the area context for this encounter
@@ -539,14 +561,11 @@ impl CombatEncounter {
     }
 
     pub fn set_player_revive_immunity(&mut self, entity_id: i64) {
-        self.players
-            .entry(entity_id)
-            .and_modify(|p| p.received_revive_immunity = true)
-            .or_insert_with(|| PlayerInfo {
-                id: entity_id,
-                received_revive_immunity: true,
-                ..Default::default()
-            });
+        // Only set revive immunity if player is already tracked
+        // Don't create incomplete player entries (missing name, etc.)
+        if let Some(player) = self.players.get_mut(&entity_id) {
+            player.received_revive_immunity = true;
+        }
     }
 
     pub fn check_all_players_dead(&mut self) {
@@ -572,6 +591,40 @@ impl CombatEncounter {
 
         self.all_players_dead =
             !dominated_players.is_empty() && dominated_players.iter().all(|p| p.is_dead);
+    }
+
+    /// Check if this encounter is likely a wipe.
+    /// For boss encounters with kill targets: if any kill target is still alive, it's a wipe.
+    /// Falls back to all_players_dead for encounters without kill targets.
+    pub fn is_likely_wipe(&self) -> bool {
+        // If all_players_dead is set, it's definitely a wipe
+        if self.all_players_dead {
+            return true;
+        }
+        
+        // For boss encounters with kill targets defined
+        if let Some(def_idx) = self.active_boss_idx() {
+            let def = &self.boss_definitions()[def_idx];
+            let kill_target_ids: HashSet<i64> = def.kill_targets()
+                .flat_map(|e| e.ids.iter().copied())
+                .collect();
+            
+            if !kill_target_ids.is_empty() {
+                // Find all NPC instances that match kill target class IDs
+                let kill_target_instances: Vec<_> = self.npcs.values()
+                    .filter(|npc| kill_target_ids.contains(&npc.class_id))
+                    .collect();
+                
+                // If we've seen kill targets and any are still alive, it's a wipe
+                if !kill_target_instances.is_empty() {
+                    let all_kill_targets_dead = kill_target_instances.iter().all(|npc| npc.is_dead);
+                    return !all_kill_targets_dead;
+                }
+            }
+        }
+        
+        // Fall back to all_players_dead for non-boss encounters
+        false
     }
 
     pub fn track_event_entities(&mut self, event: &CombatEvent) {

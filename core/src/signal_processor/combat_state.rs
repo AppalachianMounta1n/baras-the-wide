@@ -26,6 +26,11 @@ const BOSS_COMBAT_EXIT_GRACE_SECS: i64 = 3;
 /// Grace period for non-boss encounters before finalizing combat end (seconds).
 const TRASH_COMBAT_EXIT_GRACE_SECS: i64 = 1;
 
+/// Soft-timeout for wipe detection after local player receives revive immunity (seconds).
+/// If local player receives RECENTLY_REVIVED during a boss encounter and kill targets
+/// aren't dead after this timeout, mark the encounter as a wipe and end it.
+const REVIVE_IMMUNITY_WIPE_TIMEOUT_SECS: i64 = 5;
+
 /// Check if we're within the grace window after a combat exit.
 /// Returns the grace duration if within window, None otherwise.
 fn within_grace_window(cache: &SessionCache, timestamp: NaiveDateTime) -> bool {
@@ -518,6 +523,52 @@ pub fn tick_combat_state(cache: &mut SessionCache) -> Vec<GameSignal> {
         .current_encounter()
         .map(|e| e.state.clone())
         .unwrap_or_default();
+
+    // Check for revive immunity soft-timeout (boss encounters only)
+    // If local player received RECENTLY_REVIVED and kill targets aren't dead,
+    // end encounter after 5 seconds and mark as wipe
+    if let Some(enc) = cache.current_encounter() {
+        if enc.state == EncounterState::InCombat 
+            && enc.active_boss_idx().is_some()  // Only for boss encounters
+        {
+            if let Some(revive_time) = enc.local_player_revive_immunity_time {
+                let elapsed = now.signed_duration_since(revive_time).num_seconds();
+                if elapsed >= REVIVE_IMMUNITY_WIPE_TIMEOUT_SECS {
+                    // Check if kill targets are dead
+                    let is_wipe = enc.is_likely_wipe();
+                    if is_wipe {
+                        let encounter_id = enc.id;
+                        
+                        tracing::info!(
+                            "[ENCOUNTER] Revive immunity soft-timeout at {}, ending encounter {} (wipe)",
+                            now,
+                            encounter_id
+                        );
+                        
+                        // End encounter and mark as wipe
+                        if let Some(enc) = cache.current_encounter_mut() {
+                            enc.all_players_dead = true;  // Force wipe flag
+                            enc.exit_combat_time = Some(revive_time);
+                            enc.state = EncounterState::PostCombat {
+                                exit_time: revive_time,
+                            };
+                            let duration = enc.duration_seconds().unwrap_or(0) as f32;
+                            enc.challenge_tracker.finalize(revive_time, duration);
+                        }
+                        
+                        cache.last_combat_exit_time = None;
+                        signals.push(GameSignal::CombatEnded {
+                            timestamp: revive_time,
+                            encounter_id,
+                        });
+                        cache.push_new_encounter();
+                        
+                        return signals;
+                    }
+                }
+            }
+        }
+    }
 
     // Check for grace window expiration
     if let Some(exit_time) = cache.last_combat_exit_time {

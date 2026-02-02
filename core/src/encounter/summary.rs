@@ -206,7 +206,8 @@ impl EncounterHistory {
 /// Uses difficulty ID for phase classification, with training dummy override
 pub fn classify_encounter(
     encounter: &CombatEncounter,
-    area: &AreaInfo,
+    area_id: i64,
+    difficulty_id: i64,
 ) -> (PhaseType, Option<&'static BossInfo>) {
     // 1. Find boss info if present (sorted by first_seen_at for primary boss)
     let boss_info = if encounter.npcs.values().any(|v| v.is_boss) {
@@ -234,12 +235,12 @@ pub fn classify_encounter(
     }
 
     // 3. Check PvP area
-    if is_pvp_area(area.area_id) {
+    if is_pvp_area(area_id) {
         return (PhaseType::PvP, boss_info);
     }
 
     // 4. Classify by difficulty ID
-    let phase = if let Some(difficulty) = Difficulty::from_difficulty_id(area.difficulty_id) {
+    let phase = if let Some(difficulty) = Difficulty::from_difficulty_id(difficulty_id) {
         match difficulty.group_size() {
             8 | 16 => PhaseType::Raid,
             4 => PhaseType::Flashpoint,
@@ -253,7 +254,7 @@ pub fn classify_encounter(
 }
 
 /// Determine if an encounter was successful (not a wipe)
-/// Returns false (wipe) if all players died
+/// Returns false (wipe) if all players died or kill targets are still alive
 /// For victory-trigger encounters, success requires the trigger to have fired
 pub fn determine_success(encounter: &CombatEncounter) -> bool {
     // For victory-trigger encounters (e.g., Coratanni), check if victory trigger fired
@@ -262,8 +263,8 @@ pub fn determine_success(encounter: &CombatEncounter) -> bool {
             return encounter.victory_triggered;
         }
     }
-    // Default: not a wipe = success
-    !encounter.all_players_dead
+    // Use is_likely_wipe() which checks kill targets for boss encounters
+    !encounter.is_likely_wipe()
 }
 
 /// Create an EncounterSummary from a completed CombatEncounter
@@ -302,11 +303,25 @@ pub fn create_encounter_summary(
         player_states.join(", ")
     );
 
-    // Check if this is a new phase (area change)
-    let is_phase_start = history.check_area_change(area.generation);
+    // Use encounter's stored area/difficulty info (falls back to cache if not set)
+    // This ensures we use the area where the fight took place, not where player ended up
+    let area_id_for_classification = encounter.area_id.unwrap_or(area.area_id);
+    let difficulty_id_for_classification = encounter.difficulty_id.unwrap_or(area.difficulty_id);
+    let encounter_area_name = encounter.area_name.clone().unwrap_or_else(|| area.area_name.clone());
 
-    // Classify using area info
-    let (encounter_type, boss_info) = classify_encounter(encounter, area);
+    // Check if this is a new phase (area change)
+    // Compare encounter's area_name with the last summary's area_name
+    // This prevents creating new sections when player temporarily leaves and returns to same area
+    let is_phase_start = history.summaries().last()
+        .map(|last| last.area_name != encounter_area_name)
+        .unwrap_or(true);  // First encounter is always a phase start
+    
+    // Classify using encounter's area info
+    let (encounter_type, boss_info) = classify_encounter(
+        encounter,
+        area_id_for_classification,
+        difficulty_id_for_classification,
+    );
 
     // Get boss name: prefer active definition, fall back to detected boss NPC
     // This allows non-boss trigger entities to classify the encounter
@@ -343,12 +358,15 @@ pub fn create_encounter_summary(
         .map(|m| m.to_player_metrics())
         .collect();
 
-    // Use area difficulty directly from AreaEntered event
-    let difficulty = if area.difficulty_name.is_empty() {
-        None
-    } else {
-        Some(area.difficulty_name.clone())
-    };
+    // Use encounter's stored difficulty (falls back to cache if not set)
+    let difficulty = encounter.difficulty_name.clone()
+        .or_else(|| {
+            if area.difficulty_name.is_empty() {
+                None
+            } else {
+                Some(area.difficulty_name.clone())
+            }
+        });
 
     // Collect NPC names with counts (show count only if > 1)
     // Filter out companions - they're friendly NPCs, not enemies
@@ -382,7 +400,7 @@ pub fn create_encounter_summary(
             .map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string()),
         duration_seconds: encounter.duration_seconds().unwrap_or(0),
         success: determine_success(encounter),
-        area_name: area.area_name.clone(),
+        area_name: encounter_area_name,
         difficulty,
         boss_name,
         player_metrics,

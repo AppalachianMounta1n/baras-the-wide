@@ -115,9 +115,19 @@ impl SessionCache {
         };
 
         // Set context from current area (use ID for language independence)
-        encounter.set_difficulty(Difficulty::from_difficulty_id(
-            self.current_area.difficulty_id,
-        ));
+        let difficulty = Difficulty::from_difficulty_id(self.current_area.difficulty_id);
+        let difficulty_id = if self.current_area.difficulty_id != 0 {
+            Some(self.current_area.difficulty_id)
+        } else {
+            None
+        };
+        let difficulty_name = if !self.current_area.difficulty_name.is_empty() {
+            Some(self.current_area.difficulty_name.clone())
+        } else {
+            None
+        };
+        encounter.set_difficulty_info(difficulty, difficulty_id, difficulty_name);
+
         let area_id = if self.current_area.area_id != 0 {
             Some(self.current_area.area_id)
         } else {

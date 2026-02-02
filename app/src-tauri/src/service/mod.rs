@@ -1727,7 +1727,10 @@ async fn calculate_combat_data(shared: &Arc<SharedState>) -> Option<CombatData> 
         let encounter_time_secs = encounter.duration_seconds().unwrap_or(0) as u64;
 
         // Classify the encounter to get phase type and boss info
-        let (encounter_type, boss_info) = classify_encounter(encounter, &cache.current_area);
+        // Use encounter's stored area/difficulty info (falls back to cache if not set)
+        let area_id_for_classification = encounter.area_id.unwrap_or(cache.current_area.area_id);
+        let difficulty_id_for_classification = encounter.difficulty_id.unwrap_or(cache.current_area.difficulty_id);
+        let (encounter_type, boss_info) = classify_encounter(encounter, area_id_for_classification, difficulty_id_for_classification);
 
         // Generate encounter name with pull count
         // Priority: definition name > hardcoded boss name > phase type

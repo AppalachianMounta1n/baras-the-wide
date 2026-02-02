@@ -259,14 +259,20 @@ impl EventProcessor {
         {
             // Player received the revive immunity buff (medcenter/probe revive)
             // Mark them as permanently dead for this encounter
-            tracing::info!(
+            let is_local_player = event.source_entity.log_id == cache.player.id;
+            tracing::debug!(
                 "[ENCOUNTER] RECENTLY_REVIVED at {} - player_id: {}, is_local_player: {}",
                 event.timestamp,
                 event.source_entity.log_id,
-                event.source_entity.log_id == cache.player.id
+                is_local_player
             );
             if let Some(enc) = cache.current_encounter_mut() {
                 enc.set_player_revive_immunity(event.source_entity.log_id);
+
+                // Track timestamp for local player (soft-timeout wipe detection)
+                if is_local_player {
+                    enc.local_player_revive_immunity_time = Some(event.timestamp);
+                }
             }
         }
 
@@ -286,23 +292,31 @@ impl EventProcessor {
         self.update_area_from_event(event, cache);
 
         // Also update the current encounter's area/difficulty
-        // (fixes timers with difficulty filters when AreaEntered fires mid-session)
+        // BUT only if the encounter hasn't started combat yet.
+        // If combat is active, the encounter should keep its original area info
+        // (e.g., when player uses ReturnToMedCenter, we don't want to overwrite
+        // the raid area with the medcenter/fleet area)
         if let Some(enc) = cache.current_encounter_mut() {
-            // Use difficulty_id (language-independent) instead of parsing localized strings
-            // Note: Game sends two AreaEntered events - first with difficulty_id=0, then with real value
-            // Only update difficulty if we get a valid ID (non-zero)
-            if event.effect.difficulty_id != 0 {
-                enc.set_difficulty(crate::game_data::Difficulty::from_difficulty_id(
-                    event.effect.difficulty_id,
-                ));
+            if enc.state == EncounterState::NotStarted {
+                // Use difficulty_id (language-independent) instead of parsing localized strings
+                // Note: Game sends two AreaEntered events - first with difficulty_id=0, then with real value
+                // Only update difficulty if we get a valid ID (non-zero)
+                if event.effect.difficulty_id != 0 {
+                    let difficulty = crate::game_data::Difficulty::from_difficulty_id(
+                        event.effect.difficulty_id,
+                    );
+                    let difficulty_id = Some(event.effect.difficulty_id);
+                    let difficulty_name = Some(resolve(event.effect.difficulty_name).to_string());
+                    enc.set_difficulty_info(difficulty, difficulty_id, difficulty_name);
+                }
+                let area_id = if event.effect.effect_id != 0 {
+                    Some(event.effect.effect_id)
+                } else {
+                    None
+                };
+                let area_name = Some(resolve(event.effect.effect_name).to_string());
+                enc.set_area(area_id, area_name);
             }
-            let area_id = if event.effect.effect_id != 0 {
-                Some(event.effect.effect_id)
-            } else {
-                None
-            };
-            let area_name = Some(resolve(event.effect.effect_name).to_string());
-            enc.set_area(area_id, area_name);
         }
 
         vec![GameSignal::AreaEntered {
