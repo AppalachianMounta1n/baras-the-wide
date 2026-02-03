@@ -119,6 +119,8 @@ async fn try_portal_shortcuts(
     // Spawn a dedicated task to listen for activation signals
     // This is critical - the stream must be polled in a separate task
     tauri::async_runtime::spawn(async move {
+        // Keep session alive for the lifetime of this task - dropping it closes the portal session
+        let _session = session;
         match portal.receive_activated().await {
             Ok(mut activated) => {
                 while let Some(activation) = activated.next().await {
