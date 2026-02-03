@@ -334,7 +334,9 @@ impl CombatEncounter {
         let mut entries: Vec<OverlayHealthEntry> = self
             .npcs
             .values()
-            .filter(|npc| entity_class_ids.contains(&npc.class_id))
+            // Only show NPCs that have taken damage (under 100% HP) to avoid
+            // cluttering the overlay with spawned-but-inactive enemies
+            .filter(|npc| entity_class_ids.contains(&npc.class_id) && npc.current_hp < npc.max_hp)
             .map(|npc| OverlayHealthEntry {
                 name: crate::context::resolve(npc.name).to_string(),
                 target_name: self
