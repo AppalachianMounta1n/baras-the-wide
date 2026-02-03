@@ -261,14 +261,8 @@ impl CombatEncounter {
         self.difficulty_name = difficulty_name;
     }
 
-    /// Set the area context for this encounter
-    pub fn set_area(&mut self, area_id: Option<i64>, area_name: Option<String>) {
-        self.area_id = area_id;
-        self.area_name = area_name;
-    }
-
-    /// Set the area context with AreaEntered line number for this encounter
-    pub fn set_area_with_line(
+    /// Set the area context for this encounter (including AreaEntered line number)
+    pub fn set_area(
         &mut self,
         area_id: Option<i64>,
         area_name: Option<String>,

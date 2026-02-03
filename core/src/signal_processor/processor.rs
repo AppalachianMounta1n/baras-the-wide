@@ -322,7 +322,7 @@ impl EventProcessor {
                 };
                 let area_name = Some(resolve(event.effect.effect_name).to_string());
                 let area_entered_line = Some(event.line_number);
-                enc.set_area_with_line(area_id, area_name, area_entered_line);
+                enc.set_area(area_id, area_name, area_entered_line);
             }
         }
 

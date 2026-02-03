@@ -65,6 +65,7 @@ struct AreaInfoOutput {
     area_id: i64,
     difficulty_id: i64,
     difficulty_name: String,
+    entered_at_line: Option<u64>,
 }
 
 /// Output sent to main process via stdout.
@@ -853,6 +854,7 @@ fn process_and_write_encounters(
         area_id: cache.current_area.area_id,
         difficulty_id: cache.current_area.difficulty_id,
         difficulty_name: cache.current_area.difficulty_name.clone(),
+        entered_at_line: cache.current_area.entered_at_line,
     };
 
     // Extract player disciplines for all players in session
