@@ -58,6 +58,7 @@ struct WorkerAreaInfo {
     area_id: i64,
     difficulty_id: i64,
     difficulty_name: String,
+    entered_at_line: Option<u64>,
 }
 
 /// Player discipline entry from parse worker subprocess.
@@ -1192,6 +1193,7 @@ impl CombatService {
                             cache.current_area.difficulty_id = parse_result.area.difficulty_id;
                             cache.current_area.difficulty_name =
                                 parse_result.area.difficulty_name.clone();
+                            cache.current_area.entered_at_line = parse_result.area.entered_at_line;
                             // Restore generation counter to prevent raid splitting
                             cache.current_area.generation = generation_count;
 
@@ -1225,11 +1227,12 @@ impl CombatService {
                                 } else {
                                     Some(cache.current_area.area_name.clone())
                                 };
+                                let area_entered_line = cache.current_area.entered_at_line;
                                 
                                 if let Some(enc) = cache.current_encounter_mut() {
                                     enc.id = parse_result.encounter_count as u64;
                                     enc.set_difficulty(difficulty);
-                                    enc.set_area(area_id, area_name);
+                                    enc.set_area(area_id, area_name, area_entered_line);
                                 }
                             } else {
                                 // All encounters were finalized
