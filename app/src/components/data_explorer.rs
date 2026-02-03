@@ -378,6 +378,15 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
             state.combat_log = combat;
         }
     });
+    
+    // Sync show_only_bosses from parent state when it changes (e.g., config loaded at startup)
+    // This handles the race condition where the component mounts before async config loading completes
+    use_effect(move || {
+        let parent_bosses = props.state.read().data_explorer.show_only_bosses;
+        if *show_only_bosses.read() != parent_bosses {
+            show_only_bosses.set(parent_bosses);
+        }
+    });
 
     // Query result state (not persisted)
     let mut abilities = use_signal(Vec::<AbilityBreakdown>::new);

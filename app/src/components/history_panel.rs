@@ -164,6 +164,15 @@ pub fn HistoryPanel(mut props: HistoryPanelProps) -> Element {
         }
     });
     
+    // Sync show_only_bosses from parent state when it changes (e.g., config loaded at startup)
+    // This handles the race condition where the component mounts before async config loading completes
+    use_effect(move || {
+        let parent_bosses = props.state.read().data_explorer.show_only_bosses;
+        if *show_only_bosses.read() != parent_bosses {
+            show_only_bosses.set(parent_bosses);
+        }
+    });
+    
     // Track upload state per encounter_id
     let mut upload_states = use_signal(HashMap::<u64, UploadState>::new);
     // Get parsely upload manager for event handlers
