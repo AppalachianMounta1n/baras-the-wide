@@ -156,6 +156,7 @@ pub fn App() -> Element {
             audio_alerts_enabled.set(config.audio.alerts_enabled);
             // UI preferences - now in unified state
             ui_state.write().data_explorer.show_only_bosses = config.show_only_bosses;
+            ui_state.write().combat_log.show_ids = config.show_log_ids;
         }
 
         app_version.set(api::get_app_version().await);
@@ -297,8 +298,9 @@ pub fn App() -> Element {
     // Listen for new session started (reset UI state for fresh start)
     use_future(move || async move {
         let closure = Closure::new(move |_event: JsValue| {
-            // Reset UI state to default when a new non-empty file starts being parsed
-            let _ = ui_state.try_write().map(|mut w| *w = UiSessionState::default());
+            // Reset session-specific state when a new file starts being parsed.
+            // Preserves user preferences like show_only_bosses, show_ids, etc.
+            let _ = ui_state.try_write().map(|mut w| w.reset_session());
         });
         api::tauri_listen("new-session-started", &closure).await;
         closure.forget();

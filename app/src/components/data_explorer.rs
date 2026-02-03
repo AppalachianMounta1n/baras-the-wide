@@ -351,13 +351,14 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
     
     // Sync local signals back to unified state when they change
     // Read all values first to create subscriptions, then write to parent state
+    // NOTE: show_only_bosses is NOT synced here to avoid bidirectional sync loop.
+    // It's synced in the onchange handler instead.
     use_effect(move || {
         let enc = *selected_encounter.read();
         let vm = *view_mode.read();
         let src = selected_source.read().clone();
         let bm = *breakdown_mode.read();
         let players = *show_players_only.read();
-        let bosses = *show_only_bosses.read();
         let col = *sort_column.read();
         let dir = *sort_direction.read();
         let sections = collapsed_sections.read().clone();
@@ -370,7 +371,6 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
             state.data_explorer.selected_source = src;
             state.data_explorer.breakdown_mode = bm;
             state.data_explorer.show_players_only = players;
-            state.data_explorer.show_only_bosses = bosses;
             state.data_explorer.sort_column = col;
             state.data_explorer.sort_direction = dir;
             state.data_explorer.collapsed_sections = sections;
@@ -381,10 +381,20 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
     
     // Sync show_only_bosses from parent state when it changes (e.g., config loaded at startup)
     // This handles the race condition where the component mounts before async config loading completes
+    // NOTE: We only sync parent→local here. Local→parent sync happens in the onchange handler
+    // to avoid a bidirectional sync loop that causes "sticky" toggle behavior.
     use_effect(move || {
         let parent_bosses = props.state.read().data_explorer.show_only_bosses;
         if *show_only_bosses.read() != parent_bosses {
             show_only_bosses.set(parent_bosses);
+        }
+    });
+    
+    // Sync show_ids from parent state when it changes (e.g., config loaded at startup)
+    use_effect(move || {
+        let parent_show_ids = props.state.read().combat_log.show_ids;
+        if combat_log_state.read().show_ids != parent_show_ids {
+            combat_log_state.write().show_ids = parent_show_ids;
         }
     });
 
@@ -1166,6 +1176,10 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                 onchange: move |e| {
                                     let checked = e.checked();
                                     show_only_bosses.set(checked);
+                                    // Update parent state immediately (avoids bidirectional sync loop)
+                                    if let Ok(mut state) = props.state.try_write() {
+                                        state.data_explorer.show_only_bosses = checked;
+                                    }
                                     let mut toast = use_toast();
                                     spawn(async move {
                                         if let Some(mut cfg) = api::get_config().await {

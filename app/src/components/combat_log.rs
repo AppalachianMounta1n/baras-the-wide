@@ -750,7 +750,17 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                     input {
                         r#type: "checkbox",
                         checked: show_ids_val,
-                        onchange: move |e| show_ids.set(e.checked()),
+                        onchange: move |e| {
+                            let checked = e.checked();
+                            show_ids.set(checked);
+                            // Persist to config
+                            spawn(async move {
+                                if let Some(mut cfg) = api::get_config().await {
+                                    cfg.show_log_ids = checked;
+                                    let _ = api::update_config(&cfg).await;
+                                }
+                            });
+                        },
                     }
                     "Show IDs"
                 }

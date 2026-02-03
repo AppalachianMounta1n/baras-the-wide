@@ -1654,6 +1654,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub show_only_bosses: bool,
 
+    /// Show ability/entity IDs in the combat log.
+    #[serde(default)]
+    pub show_log_ids: bool,
+
     /// Hide log files smaller than 1MB in the file browser (enabled by default).
     #[serde(default = "default_true")]
     pub hide_small_log_files: bool,
@@ -1703,6 +1707,7 @@ impl AppConfig {
             parsely: ParselySettings::default(),
             audio: AudioSettings::default(),
             show_only_bosses: false,
+            show_log_ids: false,
             hide_small_log_files: true,
             alacrity_percent: 0.0,
             latency_ms: 0,
@@ -1913,6 +1918,17 @@ impl Default for UiSessionState {
     }
 }
 
+impl UiSessionState {
+    /// Reset session-specific state when opening a new file.
+    /// Preserves user preferences like show_only_bosses, show_ids, view modes, etc.
+    pub fn reset_session(&mut self) {
+        self.data_explorer.reset_session();
+        self.combat_log.reset_session();
+        // Note: encounter_builder and effects_editor are not reset since they
+        // contain user configuration, not session-specific data
+    }
+}
+
 /// Main application tabs
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -2037,6 +2053,18 @@ impl Default for DataExplorerState {
     }
 }
 
+impl DataExplorerState {
+    /// Reset session-specific state (encounter selection, time range, etc.)
+    /// while preserving user preferences (show_only_bosses, view_mode, sort settings).
+    pub fn reset_session(&mut self) {
+        self.selected_encounter = None;
+        self.selected_source = None;
+        self.time_range = TimeRange::default();
+        // Preserve: show_only_bosses, view_mode, breakdown_mode, show_players_only,
+        // sort_column, sort_direction, collapsed_sections
+    }
+}
+
 /// Combat Log session state (filters, scroll position, etc.)
 #[derive(Debug, Clone, PartialEq)]
 pub struct CombatLogSessionState {
@@ -2075,6 +2103,20 @@ impl Default for CombatLogSessionState {
             show_ids: false,
             scroll_offset: 0.0,
         }
+    }
+}
+
+impl CombatLogSessionState {
+    /// Reset session-specific state (encounter, filters, scroll position)
+    /// while preserving user preferences (show_ids, filter toggles).
+    pub fn reset_session(&mut self) {
+        self.encounter_idx = None;
+        self.source_filter = None;
+        self.target_filter = None;
+        self.search_text = String::new();
+        self.scroll_offset = 0.0;
+        // Preserve: show_ids, filter_damage, filter_healing, filter_actions,
+        // filter_effects, filter_simplified
     }
 }
 

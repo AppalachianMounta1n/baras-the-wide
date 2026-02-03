@@ -156,16 +156,10 @@ pub fn HistoryPanel(mut props: HistoryPanelProps) -> Element {
     // Create local signal from ui_state (same pattern as DataExplorer)
     let mut show_only_bosses = use_signal(|| props.state.read().data_explorer.show_only_bosses);
     
-    // Sync local signal back to ui_state when it changes
-    use_effect(move || {
-        let bosses = *show_only_bosses.read();
-        if let Ok(mut state) = props.state.try_write() {
-            state.data_explorer.show_only_bosses = bosses;
-        }
-    });
-    
     // Sync show_only_bosses from parent state when it changes (e.g., config loaded at startup)
     // This handles the race condition where the component mounts before async config loading completes
+    // NOTE: We only sync parent→local here. Local→parent sync happens in the onchange handler
+    // to avoid a bidirectional sync loop that causes "sticky" toggle behavior.
     use_effect(move || {
         let parent_bosses = props.state.read().data_explorer.show_only_bosses;
         if *show_only_bosses.read() != parent_bosses {
@@ -284,6 +278,10 @@ pub fn HistoryPanel(mut props: HistoryPanelProps) -> Element {
                         onchange: move |e| {
                             let checked = e.checked();
                             show_only_bosses.set(checked);
+                            // Update parent state immediately (avoids bidirectional sync loop)
+                            if let Ok(mut state) = props.state.try_write() {
+                                state.data_explorer.show_only_bosses = checked;
+                            }
                             let mut toast = use_toast();
                             spawn(async move {
                                 if let Some(mut cfg) = api::get_config().await {
