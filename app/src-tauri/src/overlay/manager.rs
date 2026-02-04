@@ -784,6 +784,7 @@ impl OverlayManager {
                 {
                     let _ = handle.tx.try_send(OverlayCommand::Shutdown);
                 }
+                service.set_overlay_active(key, false);
             } else if !running && enabled && globally_visible {
                 // Start if not running but enabled (only if global visibility is on)
                 if let Ok(result) = Self::spawn(overlay_type, settings)
@@ -791,6 +792,7 @@ impl OverlayManager {
                 {
                     s.insert(result.handle);
                 }
+                service.set_overlay_active(key, true);
             }
         }
 
@@ -819,8 +821,9 @@ impl OverlayManager {
             false
         };
 
-        // Send current raid frame data to the newly spawned overlay
+        // Update overlay status flag and send current data to newly spawned raid overlay
         if raid_respawned {
+            service.set_overlay_active("raid", true);
             service.refresh_raid_frames().await;
         }
 

@@ -211,6 +211,8 @@ pub struct CombatLogRow {
     pub row_idx: u64,
     /// Combat time in seconds from start
     pub time_secs: f32,
+    /// Raw timestamp in milliseconds (from log file)
+    pub timestamp_ms: i64,
     /// Source entity name
     pub source_name: String,
     /// Source entity type (Player, Companion, NPC)
@@ -262,8 +264,17 @@ pub struct CombatLogFilters {
     pub actions: bool,
     /// Show effect events (buff/debuff gained/lost)
     pub effects: bool,
-    /// Hide Spend/Restore (energy) events
-    pub simplified: bool,
+    /// Show other events (TargetSet, Death, EnterCombat, etc.)
+    pub other: bool,
+}
+
+/// Entity names grouped by type for combat log filter dropdowns.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GroupedEntityNames {
+    /// Players and companions
+    pub friendly: Vec<String>,
+    /// NPCs/enemies
+    pub npcs: Vec<String>,
 }
 
 /// A match result from the combat log find feature.
@@ -2081,7 +2092,7 @@ pub struct CombatLogSessionState {
     pub filter_healing: bool,
     pub filter_actions: bool,
     pub filter_effects: bool,
-    pub filter_simplified: bool,
+    pub filter_other: bool,
     /// Show IDs toggle (IMPORTANT: now persisted!)
     pub show_ids: bool,
     /// Scroll position
@@ -2099,8 +2110,8 @@ impl Default for CombatLogSessionState {
             filter_healing: true,
             filter_actions: true,
             filter_effects: true,
-            filter_simplified: false,
-            show_ids: false,
+            filter_other: true,
+            show_ids: true,
             scroll_offset: 0.0,
         }
     }
@@ -2116,7 +2127,7 @@ impl CombatLogSessionState {
         self.search_text = String::new();
         self.scroll_offset = 0.0;
         // Preserve: show_ids, filter_damage, filter_healing, filter_actions,
-        // filter_effects, filter_simplified
+        // filter_effects, filter_other
     }
 }
 

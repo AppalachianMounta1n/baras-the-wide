@@ -1,19 +1,19 @@
 {
-  "version": "2026.2.3",
+  "version": "2025.2.4",
   "notes": "What's New",
-  "pub_date": "2026-02-03T07:04:46Z",
+  "pub_date": "2026-02-04T10:55:21Z",
   "platforms": {
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTY0pJZnZRK3YyNGdmTzV1TlVKS3AwQmdhRGNJdTU4UUFuSnJLMWRSbGdWMU43QWZBWmdJc2cxYUJNV0QzTWNDa2V3byt4b2VVZWdnWlhxYjFJRDlYVWhIWko5VzNUeVFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcwMTAxNzQxCWZpbGU6QkFSQVNfMjAyNi4yLjNfYW1kNjQuQXBwSW1hZ2UKNzl4Zk5xWGdxSnZjQkFTaUhlL2pjdG5MTjIyYlRmRmw5a3JLZDdKZVNidHRYSlFMMmVEMzlWNkJ1bWQ0dzBzNWpQT0ZJQ0JYd0E1V2hwaHVBK1I0Q0E9PQo=",
-      "url": "https://github.com/baras-app/baras/releases/download/v2026.2.3/BARAS_2026.2.3_amd64.AppImage"
+      "signature": "Not Found",
+      "url": "https://github.com/baras-app/baras/releases/download/v2025.2.4/BARAS_2025.2.4_amd64.AppImage"
     },
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTY0pJZnZRK3YyNHVTR1hvcUxJc2V0eTdtWnBPSUpld2dQN3E1Ykx4QUMzN0owR2VjdUdGTTNBV21vQ2Vzbkl6azVtc0RPanhzMWlSUW9DVnZLZjlDenNId1NaVmxVS2dVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcwMTAyMTE4CWZpbGU6QkFSQVNfMjAyNi4yLjNfeDY0LXNldHVwLmV4ZQp5Nm1rUUNoWndGRU1ualhtNnQ2YVB0eExqUjA2ZlMxbEJ0ckEyZ1c4RGdrNTdaK1lLaW1FK3E2eTI5TUxvWktLVGUzaTdlRUxVQ2R2dHdhZXA0dnFCZz09Cg==",
-      "url": "https://github.com/baras-app/baras/releases/download/v2026.2.3/BARAS_2026.2.3_x64-setup.exe"
+      "signature": "Not Found",
+      "url": "https://github.com/baras-app/baras/releases/download/v2025.2.4/BARAS_2025.2.4_x64-setup.exe"
     },
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTY0pJZnZRK3YyNG5TaDZ0WmN3WjZkTmZKQkp3THBuTFRXdGxvVXoxekRZakg2KzBHQXB6TE1ubUdIS3IzQk5TZDdlTGtFWjhBYzgydW9ERkNzSXZrVS8wdzc1TzdMRHdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcwMTAyMjU4CWZpbGU6QkFSQVMuYXBwLnRhci5negp0RFlUQmtjSGRScEpra1kvUW0wNUFmZnBXdmpaaUZUL0l4aFQ3QitoZndueWNQaDFXbWxBNjF1UkVwWVJEUUNsVmxsQ3B0SzFUMjdRYkd1UU5aOU9EQT09Cg==",
-      "url": "https://github.com/baras-app/baras/releases/download/v2026.2.3/BARAS_aarch64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTY0pJZnZRK3YyNHZ4K2p0eDJzWEM4NnVndGtRcDgwN2ovYnBaaXVtNy9hN3pwSFpYVGlwVVFuWSthUmhxRkxjVnBsVTlybFZKYXVIbXhhVHRxOHhvQnZ2ZVhxKzNkWFFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcwMjAxMTQyCWZpbGU6QkFSQVMuYXBwLnRhci5negpVZmdyUFZSRVZsKzBJUnd4Z0h2T0FCdW5RajdxenBIckZyQ1NhaHNtZDJpTWE4Wjk0OHhBN1Z5Q0NkQW9lN2dBUUQ1TEkvbWMyMVRXWExTN0hYak9Cdz09Cg==",
+      "url": "https://github.com/baras-app/baras/releases/download/v2025.2.4/BARAS_aarch64.app.tar.gz"
     }
   }
 }
