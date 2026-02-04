@@ -30,9 +30,5 @@ difficulties = ["veteran"]
 id = "eyeless_crush"
 name = "Crush"
 duration_secs = 35.0
-trigger = { type = "ability_cast", abilities = [
-  3328277531852800,
-], source = { selector = [
-  "The Eyeless",
-] } }
+trigger = { type = "ability_cast", abilities = [3328277531852800], source = { selector = ["The Eyeless"] } }
 difficulties = ["veteran"]
