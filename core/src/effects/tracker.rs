@@ -275,14 +275,56 @@ impl EffectTracker {
     }
 
     /// Update definitions (e.g., after config reload)
-    /// Also updates display properties on any active effects that match
+    /// Also updates display properties on any active effects that match.
+    /// Removes active effects whose definitions are now disabled or deleted.
     pub fn set_definitions(&mut self, definitions: DefinitionSet) {
+        // Remove active effects whose definitions are now disabled or deleted
+        self.active_effects.retain(|_, effect| {
+            definitions
+                .effects
+                .get(&effect.definition_id)
+                .map(|def| def.enabled)
+                .unwrap_or(false) // Remove if definition doesn't exist
+        });
+
         // Update active effects with new display properties from their definitions
         for effect in self.active_effects.values_mut() {
             if let Some(def) = definitions.effects.get(&effect.definition_id) {
+                // Track if alert_on_expire is changing to true (to prevent unexpected alerts)
+                let old_alert_on_expire = effect.alert_on_expire;
+                let new_alert_on_expire = matches!(def.alert_on, AlertTrigger::OnExpire);
+
+                // Display properties
+                effect.name = def.name.clone();
+                effect.display_text = def.display_text.clone().unwrap_or_else(|| def.name.clone());
                 effect.color = def.effective_color();
+                effect.display_target = def.display_target;
+                effect.icon_ability_id = def.icon_ability_id.unwrap_or(effect.game_effect_id);
+                effect.show_at_secs = def.show_at_secs;
+                effect.show_icon = def.show_icon;
+                effect.display_source = def.display_source;
+                effect.cooldown_ready_secs = def.cooldown_ready_secs;
+
+                // Alert properties
+                effect.alert_text = def.alert_text.clone();
+                effect.alert_on_expire = new_alert_on_expire;
+
+                // If alert_on_expire just became true, mark as already fired to prevent
+                // unexpected alerts on already-active effects
+                if new_alert_on_expire && !old_alert_on_expire {
+                    effect.on_end_alert_fired = true;
+                }
+
+                // Audio properties
+                effect.countdown_start = def.audio.countdown_start;
+                effect.countdown_voice =
+                    def.audio.countdown_voice.clone().unwrap_or_default();
+                effect.audio_file = def.audio.file.clone();
+                effect.audio_offset = def.audio.offset;
+                effect.audio_enabled = def.audio.enabled;
             }
         }
+
         self.definitions = definitions;
     }
 
