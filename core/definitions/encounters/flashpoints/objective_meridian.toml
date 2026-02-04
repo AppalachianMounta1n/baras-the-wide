@@ -64,7 +64,16 @@ is_kill_target = true
 # ═══════════════════════════════════════════════════════════════════════════════
 # Imperial Boss 3: Tau Idair
 # ═══════════════════════════════════════════════════════════════════════════════
+[[boss]]
+id = "tau_idair"
+name = "Tau Idair"
+difficulties = ["story", "veteran", "master"]
 
+[[boss.entities]]
+name = "Tau Idair"
+ids = [4257463641571328]
+is_boss = true
+is_kill_target = true
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Imperial Bonus Boss: Commander Rasha
