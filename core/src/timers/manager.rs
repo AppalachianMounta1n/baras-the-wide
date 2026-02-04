@@ -156,6 +156,12 @@ impl TimerManager {
         self.boss_npc_class_ids.clear();
     }
 
+    /// Clear the definitions fingerprint, forcing the next load to actually reload.
+    /// Call this before load_boss_definitions when user explicitly triggers a reload.
+    pub fn invalidate_definitions_cache(&mut self) {
+        self.definitions_fingerprint = 0;
+    }
+
     /// Compute a fingerprint for a set of boss definitions.
     /// Used to detect if definitions actually changed vs. redundant reloads.
     fn compute_boss_fingerprint(bosses: &[BossEncounterDefinition]) -> u64 {

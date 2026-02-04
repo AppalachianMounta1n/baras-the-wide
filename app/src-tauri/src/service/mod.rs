@@ -713,18 +713,34 @@ impl CombatService {
         }
     }
 
-    /// Reload timer and boss definitions from disk and update the active session
+    /// Reload timer and boss definitions from disk and update the active session.
+    /// Invalidates the timer cache first to ensure definitions actually reload.
     async fn reload_timer_definitions(&mut self) {
         self.area_index = Arc::new(Self::build_area_index(&self.app_handle));
 
         let current_area = self.shared.current_area_id.load(Ordering::SeqCst);
-        if current_area != 0
-            && let Some(bosses) = self.load_area_definitions(current_area)
-            && let Some(session) = self.shared.session.read().await.as_ref()
-        {
-            let mut session = session.write().await;
-            session.load_boss_definitions(bosses);
+        if current_area == 0 {
+            return;
         }
+        
+        let Some(bosses) = self.load_area_definitions(current_area) else {
+            return;
+        };
+        
+        let session_guard = self.shared.session.read().await;
+        let Some(session) = session_guard.as_ref() else {
+            return;
+        };
+        
+        let mut session = session.write().await;
+        // Invalidate timer cache to ensure definitions actually reload
+        // (bypasses fingerprint optimization for user-triggered reloads)
+        if let Some(timer_mgr) = session.timer_manager() {
+            if let Ok(mut mgr) = timer_mgr.lock() {
+                mgr.invalidate_definitions_cache();
+            }
+        }
+        session.load_boss_definitions(bosses);
     }
 
     async fn on_directory_changed(&mut self) {
@@ -1134,6 +1150,11 @@ impl CombatService {
                                 generation = generation_count,
                                 "Imported state from subprocess"
                             );
+                            
+                            // Sync current_area_id from subprocess so timer definition reloads work
+                            if parse_result.area.area_id != 0 {
+                                self.shared.current_area_id.store(parse_result.area.area_id, Ordering::SeqCst);
+                            }
 
                             // Check if there's an incomplete encounter (parquet file exists but no summary)
                             // If so, we'll continue with that encounter ID instead of creating a new one
