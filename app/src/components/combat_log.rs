@@ -1002,7 +1002,7 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                             resize_start_width.set(*col_target.read());
                         },
                     }
-                    div { class: "log-cell log-ability", style: "width: {col_ability}px; min-width: {col_ability}px;", "Ability" }
+                    div { class: "log-cell log-ability", style: "width: {col_ability}px; min-width: {col_ability}px;", "Ability/Effect" }
                     div {
                         class: "log-resize-handle",
                         onmousedown: move |e| {
