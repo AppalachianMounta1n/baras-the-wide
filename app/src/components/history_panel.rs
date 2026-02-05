@@ -486,7 +486,11 @@ pub fn HistoryPanel(mut props: HistoryPanelProps) -> Element {
                                                         if is_expanded {
                                                             tr { class: "detail-row",
                                                                 td { colspan: "5",
-                                                                    EncounterDetail { encounter: (*enc).clone() }
+                                                                    EncounterDetail {
+                                                                        encounter: (*enc).clone(),
+                                                                        state: props.state,
+                                                                        encounter_idx: enc_id as u32,
+                                                                    }
                                                                 }
                                                             }
                                                         }
@@ -568,7 +572,11 @@ fn sort_metrics(metrics: &mut [PlayerMetrics], column: SortColumn, ascending: bo
 }
 
 #[component]
-fn EncounterDetail(encounter: EncounterSummary) -> Element {
+fn EncounterDetail(
+    encounter: EncounterSummary,
+    state: Signal<crate::types::UiSessionState>,
+    encounter_idx: u32,
+) -> Element {
     let mut sort_column = use_signal(|| SortColumn::Dps);
     let mut sort_ascending = use_signal(|| false); // Default descending for metrics
 
@@ -614,6 +622,17 @@ fn EncounterDetail(encounter: EncounterSummary) -> Element {
                         i { class: "fa-solid fa-flag-checkered" }
                         " {end_time}"
                     }
+                }
+                button {
+                    class: "btn btn-view-explorer",
+                    title: "View detailed breakdown in Data Explorer",
+                    onclick: move |_| {
+                        let mut s = state.write();
+                        s.active_tab = crate::types::MainTab::DataExplorer;
+                        s.data_explorer.selected_encounter = Some(encounter_idx);
+                    },
+                    i { class: "fa-solid fa-magnifying-glass-chart" }
+                    " View in Explorer"
                 }
                 if !npc_list.is_empty() {
                     span { class: "detail-item npc-list",

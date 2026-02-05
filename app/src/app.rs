@@ -707,7 +707,7 @@ pub fn App() -> Element {
                 button {
                     class: if ui_state.read().active_tab == MainTab::EncounterBuilder { "tab-btn active" } else { "tab-btn" },
                     onclick: move |_| ui_state.write().active_tab = MainTab::EncounterBuilder,
-                    i { class: "fa-solid fa-skull" }
+                    i { class: "fa-solid fa-hammer" }
                     " Encounter Builder"
                 }
                 button {

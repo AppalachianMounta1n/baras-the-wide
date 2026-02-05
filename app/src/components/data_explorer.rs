@@ -328,8 +328,8 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
     let mut encounters = use_signal(Vec::<EncounterSummary>::new);
     
     // Extract persisted state fields into local signals for easier access
-    // Always start with live encounter (None) instead of persisting selection
-    let mut selected_encounter = use_signal(|| None::<u32>);
+    // Initialize from parent state to support navigation from other components (e.g., HistoryPanel)
+    let mut selected_encounter = use_signal(|| props.state.read().data_explorer.selected_encounter);
     let mut view_mode = use_signal(|| props.state.read().data_explorer.view_mode);
     let mut selected_source = use_signal(|| props.state.read().data_explorer.selected_source.clone());
     let mut breakdown_mode = use_signal(|| props.state.read().data_explorer.breakdown_mode);
@@ -387,6 +387,15 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
         let parent_bosses = props.state.read().data_explorer.show_only_bosses;
         if *show_only_bosses.read() != parent_bosses {
             show_only_bosses.set(parent_bosses);
+        }
+    });
+    
+    // Sync selected_encounter from parent state when it changes
+    // This allows other components (e.g., HistoryPanel) to navigate to a specific encounter
+    use_effect(move || {
+        let parent_encounter = props.state.read().data_explorer.selected_encounter;
+        if *selected_encounter.read() != parent_encounter {
+            selected_encounter.set(parent_encounter);
         }
     });
     
