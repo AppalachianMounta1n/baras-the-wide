@@ -836,15 +836,13 @@ button:active {
 .overlay-controls {
   margin: 0;
   width: 100%;
-  max-width: 70%;
-  align-self: center;
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: var(--gradient-panel);
   border-radius: var(--radius-xl);
-  padding: 1vh 1.5vw;
+  padding: 1em;
   border: 1px solid var(--border-accent);
 }
 
@@ -881,7 +879,7 @@ button:active {
   flex-shrink: 0;
 }
 
-/* Overlay toggle buttons grid */
+/* Overlay toggle buttons grid (legacy) */
 .overlay-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -889,6 +887,46 @@ button:active {
   margin: 0.2vh 0 0.3vh 0;
   width: 100%;
   flex-shrink: 0;
+}
+
+/* Overlay categories - horizontal column layout */
+.overlay-categories {
+  display: flex;
+  flex-direction: row;
+  gap: 1.5em;
+  padding: 1em;
+  background: linear-gradient(
+    180deg,
+    rgba(30, 60, 100, 0.25) 0%,
+    rgba(20, 45, 80, 0.2) 100%
+  );
+  border-radius: var(--radius-md);
+  border: 1px solid var(--blue-alpha-15);
+  margin-bottom: 1em;
+}
+
+.overlay-category {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.overlay-category .category-title {
+  font-size: 0.85em;
+  color: var(--swtor-blue);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  margin: 0 0 0.5em 0;
+  padding-bottom: 0.4em;
+  border-bottom: 1px solid var(--blue-alpha-20);
+}
+
+.overlay-category .category-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
 }
 
 .overlay-toggles {
@@ -2211,7 +2249,7 @@ details[open] .collapsible-summary::before {
   border-bottom: 1px solid var(--blue-alpha-15);
 }
 
-/* Customize button - distinct blue styling */
+/* Customize button - prominent gold styling */
 .btn-customize {
   display: flex;
   align-items: center;
@@ -2219,31 +2257,34 @@ details[open] .collapsible-summary::before {
   padding: 0.6em 1.2em;
   background: linear-gradient(
     180deg,
-    var(--blue-alpha-20) 0%,
-    rgba(45, 90, 140, 0.15) 100%
+    rgba(180, 140, 50, 0.25) 0%,
+    rgba(140, 100, 30, 0.15) 100%
   );
-  border: 1px solid var(--swtor-blue);
+  border: 1px solid #d4a849;
   border-radius: var(--radius-lg);
-  color: var(--swtor-blue);
+  color: #f0c860;
   font-size: 0.9em;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  box-shadow: 0 0 10px rgba(212, 168, 73, 0.3);
 }
 
 .btn-customize:hover {
   background: linear-gradient(
     180deg,
-    var(--border-accent-strong) 0%,
-    rgba(55, 100, 155, 0.2) 100%
+    rgba(200, 160, 60, 0.35) 0%,
+    rgba(160, 120, 40, 0.25) 100%
   );
-  box-shadow: 0 0 15px var(--blue-alpha-25);
+  box-shadow: 0 0 20px rgba(212, 168, 73, 0.5);
+  color: #ffe080;
 }
 
 .btn-customize i {
   font-size: 0.95em;
+  color: #d4a849;
 }
 
 .profile-selector {

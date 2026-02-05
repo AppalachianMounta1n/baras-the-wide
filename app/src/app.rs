@@ -935,7 +935,7 @@ pub fn App() -> Element {
                                 title: "Open overlay appearance and behavior settings",
                                 onclick: move |_| settings_open.set(!settings_open()),
                                 i { class: "fa-solid fa-screwdriver-wrench" }
-                                span { " Settings" }
+                                span { " Customize" }
                             }
                             div { class: "profile-selector",
                                 if profile_names().is_empty() {
@@ -1070,150 +1070,161 @@ pub fn App() -> Element {
                             }
                         }
 
-                        // General overlays
-                        h4 { class: "subsection-title", "General" }
-                        div { class: "overlay-grid",
-                            button {
-                                class: if personal_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Shows your personal combat statistics",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::Personal, personal_on).await {
-                                        personal_enabled.set(!personal_on);
+                        // Overlay categories in columns
+                        div { class: "overlay-categories",
+                            // General column
+                            div { class: "overlay-category",
+                                h4 { class: "category-title", "General" }
+                                div { class: "category-buttons",
+                                    button {
+                                        class: if personal_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Shows your personal combat statistics",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::Personal, personal_on).await {
+                                                personal_enabled.set(!personal_on);
+                                            }
+                                        }); },
+                                        "Personal Stats"
                                     }
-                                }); },
-                                "Personal Stats"
-                            }
-                            button {
-                                class: if raid_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Displays party/raid member health bars with effect tracking",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::Raid, raid_on).await {
-                                        raid_enabled.set(!raid_on);
-                                        if raid_on { rearrange_mode.set(false); }
+                                    button {
+                                        class: if raid_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Displays party/raid member health bars with effect tracking",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::Raid, raid_on).await {
+                                                raid_enabled.set(!raid_on);
+                                                if raid_on { rearrange_mode.set(false); }
+                                            }
+                                        }); },
+                                        "Raid Frames"
                                     }
-                                }); },
-                                "Raid Frames"
-                            }
-                            button {
-                                class: if alerts_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Shows combat alerts and notifications",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::Alerts, alerts_on).await {
-                                        alerts_enabled.set(!alerts_on);
+                                    button {
+                                        class: if alerts_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Shows combat alerts and notifications",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::Alerts, alerts_on).await {
+                                                alerts_enabled.set(!alerts_on);
+                                            }
+                                        }); },
+                                        "Alerts"
                                     }
-                                }); },
-                                "Alerts"
+                                }
                             }
-                        }
 
-                        // Encounter overlays
-                        h4 { class: "subsection-title", "Encounter" }
-                        div { class: "overlay-grid",
-                            button {
-                                class: if boss_health_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Shows boss health bars and cast timers",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::BossHealth, boss_health_on).await {
-                                        boss_health_enabled.set(!boss_health_on);
+                            // Encounter column
+                            div { class: "overlay-category",
+                                h4 { class: "category-title", "Encounter" }
+                                div { class: "category-buttons",
+                                    button {
+                                        class: if boss_health_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Shows boss health bars and cast timers",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::BossHealth, boss_health_on).await {
+                                                boss_health_enabled.set(!boss_health_on);
+                                            }
+                                        }); },
+                                        "Boss Health"
                                     }
-                                }); },
-                                "Boss Health"
-                            }
-                            button {
-                                class: if challenges_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Tracks raid challenge objectives and progress",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::Challenges, challenges_on).await {
-                                        challenges_enabled.set(!challenges_on);
+                                    button {
+                                        class: if challenges_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Tracks raid challenge objectives and progress",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::Challenges, challenges_on).await {
+                                                challenges_enabled.set(!challenges_on);
+                                            }
+                                        }); },
+                                        "Challenges"
                                     }
-                                }); },
-                                "Challenges"
-                            }
-                            button {
-                                class: if timers_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Displays encounter-specific timers and phase markers (Group A)",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::TimersA, timers_on).await {
-                                        timers_enabled.set(!timers_on);
+                                    button {
+                                        class: if timers_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Displays encounter-specific timers and phase markers (Group A)",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::TimersA, timers_on).await {
+                                                timers_enabled.set(!timers_on);
+                                            }
+                                        }); },
+                                        "Timers A"
                                     }
-                                }); },
-                                "Timers A"
-                            }
-                            button {
-                                class: if timers_b_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Displays encounter-specific timers and phase markers (Group B)",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::TimersB, timers_b_on).await {
-                                        timers_b_enabled.set(!timers_b_on);
+                                    button {
+                                        class: if timers_b_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Displays encounter-specific timers and phase markers (Group B)",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::TimersB, timers_b_on).await {
+                                                timers_b_enabled.set(!timers_b_on);
+                                            }
+                                        }); },
+                                        "Timers B"
                                     }
-                                }); },
-                                "Timers B"
+                                }
                             }
-                        }
 
-                        // Effects overlays
-                        h4 { class: "subsection-title", "Effects" }
-                        div { class: "overlay-grid",
-                            button {
-                                class: if effects_a_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Displays tracked buffs and effects (Group A)",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::EffectsA, effects_a_on).await {
-                                        effects_a_enabled.set(!effects_a_on);
+                            // Effects column
+                            div { class: "overlay-category",
+                                h4 { class: "category-title", "Effects" }
+                                div { class: "category-buttons",
+                                    button {
+                                        class: if effects_a_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Displays tracked buffs and effects (Group A)",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::EffectsA, effects_a_on).await {
+                                                effects_a_enabled.set(!effects_a_on);
+                                            }
+                                        }); },
+                                        "Effects A"
                                     }
-                                }); },
-                                "Effects A"
-                            }
-                            button {
-                                class: if effects_b_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Displays tracked buffs and effects (Group B)",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::EffectsB, effects_b_on).await {
-                                        effects_b_enabled.set(!effects_b_on);
+                                    button {
+                                        class: if effects_b_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Displays tracked buffs and effects (Group B)",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::EffectsB, effects_b_on).await {
+                                                effects_b_enabled.set(!effects_b_on);
+                                            }
+                                        }); },
+                                        "Effects B"
                                     }
-                                }); },
-                                "Effects B"
-                            }
-                            button {
-                                class: if cooldowns_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Tracks ability cooldowns",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::Cooldowns, cooldowns_on).await {
-                                        cooldowns_enabled.set(!cooldowns_on);
+                                    button {
+                                        class: if cooldowns_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Tracks ability cooldowns",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::Cooldowns, cooldowns_on).await {
+                                                cooldowns_enabled.set(!cooldowns_on);
+                                            }
+                                        }); },
+                                        "Cooldowns"
                                     }
-                                }); },
-                                "Cooldowns"
-                            }
-                            button {
-                                class: if dot_tracker_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Tracks damage-over-time effects on targets",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::DotTracker, dot_tracker_on).await {
-                                        dot_tracker_enabled.set(!dot_tracker_on);
+                                    button {
+                                        class: if dot_tracker_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Tracks damage-over-time effects on targets",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::DotTracker, dot_tracker_on).await {
+                                                dot_tracker_enabled.set(!dot_tracker_on);
+                                            }
+                                        }); },
+                                        "DOT Tracker"
                                     }
-                                }); },
-                                "DOT Tracker"
+                                }
                             }
-                        }
 
-                        // Metric overlays
-                        h4 { class: "subsection-title", "Metrics" }
-                        div { class: "overlay-grid",
-                            for mt in MetricType::all() {
-                                {
-                                    let ot = *mt;
-                                    let is_on = enabled_map.get(&ot).copied().unwrap_or(false);
-                                    rsx! {
-                                        button {
-                                            class: if is_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                            onclick: move |_| { spawn(async move {
-                                                if api::toggle_overlay(OverlayType::Metric(ot), is_on).await {
-                                                    let mut map = metric_overlays_enabled();
-                                                    map.insert(ot, !is_on);
-                                                    metric_overlays_enabled.set(map);
+                            // Metrics column
+                            div { class: "overlay-category",
+                                h4 { class: "category-title", "Metrics" }
+                                div { class: "category-buttons",
+                                    for mt in MetricType::all() {
+                                        {
+                                            let ot = *mt;
+                                            let is_on = enabled_map.get(&ot).copied().unwrap_or(false);
+                                            rsx! {
+                                                button {
+                                                    class: if is_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                                    onclick: move |_| { spawn(async move {
+                                                        if api::toggle_overlay(OverlayType::Metric(ot), is_on).await {
+                                                            let mut map = metric_overlays_enabled();
+                                                            map.insert(ot, !is_on);
+                                                            metric_overlays_enabled.set(map);
+                                                        }
+                                                    }); },
+                                                    "{ot.label()}"
                                                 }
-                                            }); },
-                                            "{ot.label()}"
+                                            }
                                         }
                                     }
                                 }
