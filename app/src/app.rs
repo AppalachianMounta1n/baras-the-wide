@@ -790,53 +790,59 @@ pub fn App() -> Element {
                                     }
                                 }
 
-                                // Parsely upload button
-                                if !current_file.is_empty() {
-                                    {
-                                        let path = current_file.clone();
-                                        let upload_result = upload_status().get(&path).cloned();
-                                        rsx! {
-                                            div { class: "session-upload-group",
-                                                button {
-                                                    class: "btn btn-session-upload",
-                                                    title: "Upload to Parsely",
-                                                    onclick: {
-                                                        let p = path.clone();
-                                                        move |_| {
-                                                            // Extract filename from path
-                                                            let filename = p.split('/').last()
-                                                                .or_else(|| p.split('\\').last())
-                                                                .unwrap_or("combat.txt")
-                                                                .to_string();
-                                                            parsely_upload.open_file(p.clone(), filename);
-                                                        }
-                                                    },
-                                                    i { class: "fa-solid fa-cloud-arrow-up" }
-                                                    " Parsely"
-                                                }
-                                                // Show upload result inline
-                                                if let Some((success, ref msg)) = upload_result {
-                                                    if success {
-                                                        button {
-                                                            class: "btn btn-session-upload-result",
-                                                            title: "Open in browser",
-                                                            onclick: {
-                                                                let url = msg.clone();
-                                                                move |_| {
-                                                                    let u = url.clone();
-                                                                    spawn(async move { api::open_url(&u).await; });
-                                                                }
-                                                            },
-                                                            i { class: "fa-solid fa-external-link-alt" }
-                                                        }
-                                                    } else {
-                                                        span { class: "upload-error", title: "{msg}",
-                                                            i { class: "fa-solid fa-triangle-exclamation" }
-                                                        }
+                                // Right side: player stats + Parsely upload
+                                div { class: "session-toolbar-right",
+                                    // Player stats for effect duration calculations
+                                    PlayerStatsBar {}
+
+                                    // Parsely upload button
+                                    if !current_file.is_empty() {
+                                        {
+                                            let path = current_file.clone();
+                                            let upload_result = upload_status().get(&path).cloned();
+                                            rsx! {
+                                                div { class: "session-upload-group",
+                                                    button {
+                                                        class: "btn btn-session-upload",
+                                                        title: "Upload to Parsely",
+                                                        onclick: {
+                                                            let p = path.clone();
+                                                            move |_| {
+                                                                // Extract filename from path
+                                                                let filename = p.split('/').last()
+                                                                    .or_else(|| p.split('\\').last())
+                                                                    .unwrap_or("combat.txt")
+                                                                    .to_string();
+                                                                parsely_upload.open_file(p.clone(), filename);
+                                                            }
+                                                        },
+                                                        i { class: "fa-solid fa-cloud-arrow-up" }
+                                                        " Parsely"
                                                     }
+                                                    // Show upload result inline
+                                                    if let Some((success, ref msg)) = upload_result {
+                                                        if success {
+                                                            button {
+                                                                class: "btn btn-session-upload-result",
+                                                                title: "Open in browser",
+                                                                onclick: {
+                                                                    let url = msg.clone();
+                                                                    move |_| {
+                                                                        let u = url.clone();
+                                                                        spawn(async move { api::open_url(&u).await; });
+                                                                    }
+                                                                },
+                                                                i { class: "fa-solid fa-external-link-alt" }
+                                                            }
+                                                        } else {
+                                                            span { class: "upload-error", title: "{msg}",
+                                                                i { class: "fa-solid fa-triangle-exclamation" }
+                                                            }
+                                                        }
                                                 }
                                             }
                                         }
+                                    }
                                     }
                                 }
                             }
@@ -916,9 +922,6 @@ pub fn App() -> Element {
                         }
                     }
                     }
-
-                    // Player stats for GCD/timing calculations
-                    PlayerStatsBar {}
 
                     div { class: "history-container-large", HistoryPanel { state: ui_state } }
                 }
@@ -2018,6 +2021,11 @@ fn PlayerStatsBar() -> Element {
                         }
                     }
                 }
+            }
+            span {
+                class: "stats-help-icon",
+                title: "Alacrity and Latency affect duration of certain HoTs and effects",
+                i { class: "fa-solid fa-circle-question" }
             }
         }
     }
