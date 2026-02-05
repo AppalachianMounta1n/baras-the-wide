@@ -221,6 +221,38 @@ pub async fn refresh_log_index() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Boss Notes Selection
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Boss info for notes selector
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct BossNotesInfo {
+    pub id: String,
+    pub name: String,
+    pub has_notes: bool,
+}
+
+/// Get list of bosses with notes status for the current area
+pub async fn get_area_bosses_for_notes() -> Vec<BossNotesInfo> {
+    let result = invoke("get_area_bosses_for_notes", JsValue::NULL).await;
+    from_js(result).unwrap_or_default()
+}
+
+/// Send notes for a specific boss to the overlay
+pub async fn select_boss_notes(boss_id: &str) -> Result<(), String> {
+    let args = js_sys::Object::new();
+    js_set(&args, "bossId", &JsValue::from_str(boss_id));
+    let result = invoke("select_boss_notes", args.into()).await;
+    if result.is_null() || result.is_undefined() {
+        Ok(())
+    } else if let Some(err) = result.as_string() {
+        Err(err)
+    } else {
+        Ok(())
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Log Management Commands
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -470,6 +502,23 @@ pub async fn create_area(area: &NewAreaRequest) -> Result<String, String> {
     let args = build_args("area", area);
     let result = try_invoke("create_area", args).await?;
     from_js(result).ok_or_else(|| "Failed to parse area response".to_string())
+}
+
+/// Update boss notes
+pub async fn update_boss_notes(
+    boss_id: &str,
+    file_path: &str,
+    notes: Option<String>,
+) -> Result<(), String> {
+    let obj = js_sys::Object::new();
+    js_set(&obj, "bossId", &JsValue::from_str(boss_id));
+    js_set(&obj, "filePath", &JsValue::from_str(file_path));
+    match notes {
+        Some(ref n) => js_set(&obj, "notes", &JsValue::from_str(n)),
+        None => js_set(&obj, "notes", &JsValue::NULL),
+    }
+    try_invoke("update_boss_notes", obj.into()).await?;
+    Ok(())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

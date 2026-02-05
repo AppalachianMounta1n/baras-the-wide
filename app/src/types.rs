@@ -34,6 +34,7 @@ pub use baras_types::{
     EntityFilter,
     EntitySelector,
     MainTab,
+    NotesOverlayConfig,
     OverlayAppearanceConfig,
     OverlaySettings,
     PersonalOverlayConfig,
@@ -102,6 +103,8 @@ pub struct OverlayStatus {
     pub cooldowns_enabled: bool,
     pub dot_tracker_running: bool,
     pub dot_tracker_enabled: bool,
+    pub notes_running: bool,
+    pub notes_enabled: bool,
     pub overlays_visible: bool,
     pub move_mode: bool,
     pub rearrange_mode: bool,
@@ -216,6 +219,7 @@ pub enum OverlayType {
     EffectsB,
     Cooldowns,
     DotTracker,
+    Notes,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -282,6 +286,9 @@ pub struct BossEncounterDefinition {
     pub timers: Vec<BossTimerDefinition>,
     #[serde(default)]
     pub challenges: Vec<ChallengeDefinition>,
+    /// User notes for this encounter (Markdown formatted)
+    #[serde(default)]
+    pub notes: Option<String>,
 }
 
 fn default_enabled() -> bool {

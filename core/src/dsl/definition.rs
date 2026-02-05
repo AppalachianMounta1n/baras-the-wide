@@ -201,6 +201,12 @@ pub struct BossEncounterDefinition {
     #[serde(default, alias = "challenge", skip_serializing_if = "Vec::is_empty")]
     pub challenges: Vec<ChallengeDefinition>,
 
+    // ─── Notes ────────────────────────────────────────────────────────────────
+    /// User notes for this encounter (Markdown formatted)
+    /// Displayed on the Notes overlay when this encounter is active
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+
     // ─── Victory Trigger (for special encounters) ────────────────────────────
     /// Whether this boss requires an explicit victory trigger before ExitCombat is honored.
     /// Used for encounters like Coratanni where the boss doesn't die but an ability signals victory.

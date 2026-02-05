@@ -905,3 +905,70 @@ pub async fn create_boss(
     let _ = service.reload_timer_definitions().await;
     Ok(boss)
 }
+
+/// Update boss notes
+#[tauri::command]
+pub async fn update_boss_notes(
+    service: State<'_, ServiceHandle>,
+    boss_id: String,
+    file_path: String,
+    notes: Option<String>,
+) -> Result<(), String> {
+    let file_path_buf = PathBuf::from(&file_path);
+
+    if !file_path_buf.exists() {
+        return Err(format!("Area file not found: {}", file_path));
+    }
+
+    // Load existing bosses
+    let mut bosses = load_bosses_from_file(&file_path_buf)?;
+
+    // Find and update the boss
+    let boss = bosses
+        .iter_mut()
+        .find(|b| b.id == boss_id)
+        .ok_or_else(|| format!("Boss '{}' not found", boss_id))?;
+
+    boss.notes = notes;
+
+    // Save back to file
+    save_bosses_to_file(&bosses, &file_path_buf)?;
+
+    // Trigger definition reload
+    let _ = service.reload_timer_definitions().await;
+
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Boss Notes Selector (for Session tab)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// A boss with notes info for the selector dropdown
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BossNotesInfo {
+    /// Boss definition ID
+    pub id: String,
+    /// Boss display name
+    pub name: String,
+    /// Whether this boss has notes
+    pub has_notes: bool,
+}
+
+/// Get list of bosses with notes status for the current area
+/// Returns empty list if no area is loaded
+#[tauri::command]
+pub async fn get_area_bosses_for_notes(
+    service: State<'_, ServiceHandle>,
+) -> Result<Vec<BossNotesInfo>, String> {
+    service.get_area_bosses_for_notes().await
+}
+
+/// Send notes for a specific boss to the overlay
+#[tauri::command]
+pub async fn select_boss_notes(
+    service: State<'_, ServiceHandle>,
+    boss_id: String,
+) -> Result<(), String> {
+    service.select_boss_notes(&boss_id).await
+}

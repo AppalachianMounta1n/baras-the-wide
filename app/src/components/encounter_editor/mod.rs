@@ -8,6 +8,7 @@ mod conditions;
 mod counters;
 mod entities;
 mod new_forms;
+mod notes;
 mod phases;
 mod tabs;
 mod timers;

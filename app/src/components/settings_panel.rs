@@ -12,8 +12,8 @@ use crate::components::{ToastSeverity, use_toast};
 use crate::types::{
     AlertsOverlayConfig, BossHealthConfig, ChallengeLayout, CooldownTrackerConfig,
     DotTrackerConfig, EffectsAConfig, EffectsBConfig, MAX_PROFILES, MetricType,
-    OverlayAppearanceConfig, OverlaySettings, PersonalOverlayConfig, PersonalStat,
-    RaidOverlaySettings, TimerOverlayConfig,
+    NotesOverlayConfig, OverlayAppearanceConfig, OverlaySettings, PersonalOverlayConfig,
+    PersonalStat, RaidOverlaySettings, TimerOverlayConfig,
 };
 use crate::utils::{color_to_hex, parse_hex_color};
 
@@ -109,6 +109,8 @@ pub fn SettingsPanel(
                     new_settings.cooldown_tracker_opacity;
                 config.overlay_settings.dot_tracker = new_settings.dot_tracker.clone();
                 config.overlay_settings.dot_tracker_opacity = new_settings.dot_tracker_opacity;
+                config.overlay_settings.notes_overlay = new_settings.notes_overlay.clone();
+                config.overlay_settings.notes_opacity = new_settings.notes_opacity;
                 config.overlay_settings.positions = existing_positions;
                 config.overlay_settings.enabled = existing_enabled;
 
@@ -342,6 +344,7 @@ pub fn SettingsPanel(
                         TabButton { label: "Timers A", tab_key: "timers_a", selected_tab: selected_tab }
                         TabButton { label: "Timers B", tab_key: "timers_b", selected_tab: selected_tab }
                         TabButton { label: "Challenges", tab_key: "challenges", selected_tab: selected_tab }
+                        TabButton { label: "Notes", tab_key: "notes", selected_tab: selected_tab }
                     }
                 }
                 div { class: "tab-group",
@@ -1109,6 +1112,69 @@ pub fn SettingsPanel(
                                 let mut new_settings = draft_settings();
                                 new_settings.dot_tracker = DotTrackerConfig::default();
                                 new_settings.dot_tracker_opacity = 180;
+                                update_draft(new_settings);
+                            },
+                            i { class: "fa-solid fa-rotate-left" }
+                            span { " Reset to Defaults" }
+                        }
+                    }
+                }
+            } else if tab == "notes" {
+                // Notes Overlay Settings
+                div { class: "settings-section",
+                    h4 { "Appearance" }
+
+                    OpacitySlider {
+                        label: "Background Opacity",
+                        value: current_settings.notes_opacity,
+                        on_change: move |val| {
+                            let mut new_settings = draft_settings();
+                            new_settings.notes_opacity = val;
+                            update_draft(new_settings);
+                        },
+                    }
+
+                    div { class: "setting-row",
+                        label { "Font Size" }
+                        input {
+                            r#type: "range",
+                            min: "10",
+                            max: "24",
+                            value: "{current_settings.notes_overlay.font_size}",
+                            oninput: move |e| {
+                                if let Ok(val) = e.value().parse::<u8>() {
+                                    let mut new_settings = draft_settings();
+                                    new_settings.notes_overlay.font_size = val.clamp(10, 24);
+                                    update_draft(new_settings);
+                                }
+                            }
+                        }
+                        span { class: "value", "{current_settings.notes_overlay.font_size}px" }
+                    }
+
+                    div { class: "setting-row",
+                        label { "Font Color" }
+                        input {
+                            r#type: "color",
+                            value: "{color_to_hex(&current_settings.notes_overlay.font_color)}",
+                            class: "color-picker",
+                            oninput: move |e: Event<FormData>| {
+                                if let Some(color) = parse_hex_color(&e.value()) {
+                                    let mut new_settings = draft_settings();
+                                    new_settings.notes_overlay.font_color = color;
+                                    update_draft(new_settings);
+                                }
+                            }
+                        }
+                    }
+
+                    div { class: "setting-row reset-row",
+                        button {
+                            class: "btn btn-reset",
+                            onclick: move |_| {
+                                let mut new_settings = draft_settings();
+                                new_settings.notes_overlay = Default::default();
+                                new_settings.notes_opacity = 180;
                                 update_draft(new_settings);
                             },
                             i { class: "fa-solid fa-rotate-left" }

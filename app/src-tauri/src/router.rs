@@ -332,6 +332,21 @@ async fn process_overlay_update(
                     .await;
             }
         }
+        OverlayUpdate::NotesUpdated(notes_data) => {
+            let tx = {
+                let state = match overlay_state.lock() {
+                    Ok(s) => s,
+                    Err(_) => return,
+                };
+                state.get_notes_tx().cloned()
+            };
+
+            if let Some(tx) = tx {
+                let _ = tx
+                    .send(OverlayCommand::UpdateData(OverlayData::Notes(notes_data)))
+                    .await;
+            }
+        }
         OverlayUpdate::CombatStarted => {
             // Could show overlay or clear entries
         }
@@ -443,6 +458,11 @@ async fn process_overlay_update(
                 // DOT tracker overlay
                 if let Some(tx) = state.get_dot_tracker_tx() {
                     channels.push((tx.clone(), OverlayData::DotTracker(Default::default())));
+                }
+
+                // Notes overlay
+                if let Some(tx) = state.get_notes_tx() {
+                    channels.push((tx.clone(), OverlayData::Notes(Default::default())));
                 }
 
                 channels

@@ -29,8 +29,8 @@ use baras_core::{
 };
 use baras_overlay::{
     BossHealthData, ChallengeData, ChallengeEntry, Color, CooldownData, CooldownEntry, DotEntry,
-    DotTarget, DotTrackerData, EffectABEntry, EffectsABData, PersonalStats, PlayerContribution,
-    PlayerRole, RaidEffect, RaidFrame, RaidFrameData, TimerData, TimerEntry,
+    DotTarget, DotTrackerData, EffectABEntry, EffectsABData, NotesData, PersonalStats,
+    PlayerContribution, PlayerRole, RaidEffect, RaidFrame, RaidFrameData, TimerData, TimerEntry,
 };
 
 use crate::audio::{AudioEvent, AudioSender, AudioService};
@@ -117,6 +117,8 @@ pub enum ServiceCommand {
     ResumeLiveTailing,
     /// Trigger immediate raid frame data refresh (after registry changes)
     RefreshRaidFrames,
+    /// Send specific boss notes to the overlay
+    SendNotesToOverlay(NotesData),
 }
 
 /// Updates sent to the overlay system
@@ -144,6 +146,8 @@ pub enum OverlayUpdate {
     CooldownsUpdated(CooldownData),
     /// DOTs on enemy targets
     DotTrackerUpdated(DotTrackerData),
+    /// Encounter notes (sent when entering an area with boss definitions)
+    NotesUpdated(NotesData),
     /// Clear all overlay data (sent when switching files)
     ClearAllData,
     /// Local player entered conversation - temporarily hide overlays
@@ -269,6 +273,26 @@ impl SignalHandler for CombatSignalHandler {
                         .current_area_id
                         .store(*area_id, Ordering::SeqCst);
                     let _ = self.session_event_tx.send(SessionEvent::AreaChanged);
+                }
+            }
+            GameSignal::BossEncounterDetected {
+                definition_idx,
+                boss_name,
+                ..
+            } => {
+                // Send notes for this specific boss to the overlay
+                if let Some(enc) = _encounter {
+                    if let Some(def) = enc.boss_definitions().get(*definition_idx) {
+                        if let Some(notes) = &def.notes {
+                            if !notes.is_empty() {
+                                let notes_data = NotesData {
+                                    text: notes.clone(),
+                                    boss_name: boss_name.clone(),
+                                };
+                                let _ = self.overlay_tx.try_send(OverlayUpdate::NotesUpdated(notes_data));
+                            }
+                        }
+                    }
                 }
             }
             _ => {}
@@ -699,6 +723,10 @@ impl CombatService {
                         .overlay_tx
                         .try_send(OverlayUpdate::EffectsUpdated(data));
                 }
+                ServiceCommand::SendNotesToOverlay(notes_data) => {
+                    // Send specific boss notes to the overlay
+                    let _ = self.overlay_tx.try_send(OverlayUpdate::NotesUpdated(notes_data));
+                }
             }
         }
     }
@@ -727,6 +755,9 @@ impl CombatService {
             return;
         };
         
+        // Send notes from boss definitions to overlay (first boss with notes)
+        self.send_notes_from_bosses(&bosses);
+        
         let session_guard = self.shared.session.read().await;
         let Some(session) = session_guard.as_ref() else {
             return;
@@ -741,6 +772,32 @@ impl CombatService {
             }
         }
         session.load_boss_definitions(bosses);
+    }
+
+    /// Send notes from boss definitions to the notes overlay (only in live mode)
+    fn send_notes_from_bosses(&self, bosses: &[BossEncounterDefinition]) {
+        // Only send notes in live tailing mode (not for historical files)
+        if !self.shared.is_live_tailing.load(Ordering::SeqCst) {
+            return;
+        }
+        
+        // Find the first boss with notes (or aggregate all notes)
+        // For now, send notes from first boss that has them
+        for boss in bosses {
+            if let Some(notes) = &boss.notes {
+                if !notes.is_empty() {
+                    let notes_data = NotesData {
+                        text: notes.clone(),
+                        boss_name: boss.name.clone(),
+                    };
+                    let _ = self.overlay_tx.try_send(OverlayUpdate::NotesUpdated(notes_data));
+                    return;
+                }
+            }
+        }
+        
+        // No notes found - send empty to clear the overlay
+        let _ = self.overlay_tx.try_send(OverlayUpdate::NotesUpdated(NotesData::default()));
     }
 
     async fn on_directory_changed(&mut self) {
@@ -1212,6 +1269,8 @@ impl CombatService {
                         // Load boss definitions for initial area (before releasing lock)
                         if parse_result.area.area_id != 0 {
                             if let Some(bosses) = self.load_area_definitions(parse_result.area.area_id) {
+                                // Send notes to overlay
+                                self.send_notes_from_bosses(&bosses);
                                 session_guard.load_boss_definitions(bosses);
                             }
                         }

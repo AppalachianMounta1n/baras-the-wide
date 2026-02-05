@@ -206,6 +206,9 @@ pub fn run() {
             commands::create_encounter_item,
             commands::update_encounter_item,
             commands::delete_encounter_item,
+            commands::update_boss_notes,
+            commands::get_area_bosses_for_notes,
+            commands::select_boss_notes,
             // Effect editor commands
             commands::get_effect_definitions,
             commands::update_effect_definition,

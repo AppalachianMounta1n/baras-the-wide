@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use cosmic_text::{
-    Attrs, Buffer, Color as CosmicColor, Family, FontSystem, LayoutGlyph, Metrics, Shaping,
-    SwashCache,
+    Attrs, Buffer, Color as CosmicColor, Family, FontSystem, LayoutGlyph, Metrics, Shaping, Style,
+    SwashCache, Weight,
 };
 use tiny_skia::{
     Color, FillRule, LineCap, LineJoin, Paint, PathBuilder, PixmapMut, Rect, Stroke, StrokeDash,
@@ -49,8 +49,8 @@ struct CachedText {
     last_used: u64,
 }
 
-/// Key for text cache: (text content, font size rounded to tenths)
-type TextCacheKey = (String, u32);
+/// Key for text cache: (text content, font size rounded to tenths, is_bold, is_italic)
+type TextCacheKey = (String, u32, bool, bool);
 
 /// A software renderer for overlay content
 pub struct Renderer {
@@ -106,23 +106,45 @@ impl Renderer {
 
     /// Find cached entry by borrowed key (avoids String allocation on hit)
     fn find_cached(&mut self, text: &str, font_size_key: u32) -> Option<&mut CachedText> {
+        self.find_cached_styled(text, font_size_key, false, false)
+    }
+
+    /// Find cached entry with style options
+    fn find_cached_styled(
+        &mut self,
+        text: &str,
+        font_size_key: u32,
+        bold: bool,
+        italic: bool,
+    ) -> Option<&mut CachedText> {
         // Linear search through cache - faster than allocation for small cache hits
         // Most overlays have <20 unique text strings, so this is efficient
         self.text_cache
             .iter_mut()
-            .find(|(k, _)| k.0 == text && k.1 == font_size_key)
+            .find(|(k, _)| k.0 == text && k.1 == font_size_key && k.2 == bold && k.3 == italic)
             .map(|(_, v)| v)
     }
 
     /// Ensure text is cached, shaping if needed. Returns (width, height).
     fn ensure_cached(&mut self, text: &str, font_size: f32) -> (f32, f32) {
+        self.ensure_cached_styled(text, font_size, false, false)
+    }
+
+    /// Ensure text is cached with styling options. Returns (width, height).
+    fn ensure_cached_styled(
+        &mut self,
+        text: &str,
+        font_size: f32,
+        bold: bool,
+        italic: bool,
+    ) -> (f32, f32) {
         let font_size_key = (font_size * 10.0).round() as u32;
 
         self.cache_access_counter += 1;
         let current_access = self.cache_access_counter;
 
         // Fast path: check cache without allocation
-        if let Some(cached) = self.find_cached(text, font_size_key) {
+        if let Some(cached) = self.find_cached_styled(text, font_size_key, bold, italic) {
             cached.last_used = current_access;
             return (cached.width, cached.height);
         }
@@ -131,7 +153,13 @@ impl Renderer {
         let metrics = Metrics::new(font_size, font_size * 1.2);
         let mut text_buffer = Buffer::new(&mut self.font_system, metrics);
 
-        let attrs = Attrs::new().family(Family::Name("Noto Sans"));
+        let mut attrs = Attrs::new().family(Family::Name("Noto Sans"));
+        if bold {
+            attrs = attrs.weight(Weight::BOLD);
+        }
+        if italic {
+            attrs = attrs.style(Style::Italic);
+        }
         text_buffer.set_text(&mut self.font_system, text, &attrs, Shaping::Advanced, None);
         text_buffer.shape_until_scroll(&mut self.font_system, false);
 
@@ -157,7 +185,7 @@ impl Renderer {
         };
 
         // Store in cache (only allocate String here on miss)
-        let cache_key = (text.to_string(), font_size_key);
+        let cache_key = (text.to_string(), font_size_key, bold, italic);
         self.text_cache.insert(cache_key, cached);
         self.evict_lru_if_needed();
 
@@ -166,8 +194,18 @@ impl Renderer {
 
     /// Get cached glyphs for drawing. Must call ensure_cached first.
     fn get_cached_glyphs(&mut self, text: &str, font_size: f32) -> Vec<LayoutGlyph> {
+        self.get_cached_glyphs_styled(text, font_size, false, false)
+    }
+
+    fn get_cached_glyphs_styled(
+        &mut self,
+        text: &str,
+        font_size: f32,
+        bold: bool,
+        italic: bool,
+    ) -> Vec<LayoutGlyph> {
         let font_size_key = (font_size * 10.0).round() as u32;
-        self.find_cached(text, font_size_key)
+        self.find_cached_styled(text, font_size_key, bold, italic)
             .map(|c| c.glyphs.clone())
             .unwrap_or_default()
     }
@@ -335,15 +373,34 @@ impl Renderer {
         font_size: f32,
         color: Color,
     ) {
+        self.draw_text_styled(
+            buffer, buf_width, buf_height, text, x, y, font_size, color, false, false,
+        );
+    }
+
+    /// Draw text at the specified position with bold/italic styling
+    pub fn draw_text_styled(
+        &mut self,
+        buffer: &mut [u8],
+        buf_width: u32,
+        buf_height: u32,
+        text: &str,
+        x: f32,
+        y: f32,
+        font_size: f32,
+        color: Color,
+        bold: bool,
+        italic: bool,
+    ) {
         let Some(mut pixmap) = PixmapMut::from_bytes(buffer, buf_width, buf_height) else {
             return;
         };
 
         // Ensure text is cached (shapes if needed)
-        let _ = self.ensure_cached(text, font_size);
+        let _ = self.ensure_cached_styled(text, font_size, bold, italic);
 
         // Get glyphs (still need clone due to borrow checker - swash_cache needs &mut self)
-        let glyphs = self.get_cached_glyphs(text, font_size);
+        let glyphs = self.get_cached_glyphs_styled(text, font_size, bold, italic);
 
         let text_color = CosmicColor::rgba(
             (color.red() * 255.0) as u8,
@@ -379,6 +436,17 @@ impl Renderer {
     /// Measure text dimensions (uses shaping cache, no glyph clone)
     pub fn measure_text(&mut self, text: &str, font_size: f32) -> (f32, f32) {
         self.ensure_cached(text, font_size)
+    }
+
+    /// Measure text dimensions with style options (bold text is wider)
+    pub fn measure_text_styled(
+        &mut self,
+        text: &str,
+        font_size: f32,
+        bold: bool,
+        italic: bool,
+    ) -> (f32, f32) {
+        self.ensure_cached_styled(text, font_size, bold, italic)
     }
 
     /// Draw an RGBA image at the specified position with scaling

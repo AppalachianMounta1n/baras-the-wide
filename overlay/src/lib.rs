@@ -83,6 +83,10 @@ pub use overlays::{
     InteractionMode,
     MetricEntry,
     MetricOverlay,
+    // Notes overlay
+    NotesConfig,
+    NotesData,
+    NotesOverlay,
     Overlay,
     OverlayConfigUpdate,
     OverlayData,

@@ -17,6 +17,7 @@ mod dot_tracker;
 mod effects;
 mod effects_ab;
 mod metric;
+mod notes;
 mod personal;
 mod raid;
 mod timers;
@@ -26,6 +27,7 @@ pub use boss_health::{BossHealthData, BossHealthOverlay};
 pub use challenges::{ChallengeData, ChallengeEntry, ChallengeOverlay, PlayerContribution};
 pub use cooldowns::{CooldownConfig, CooldownData, CooldownEntry, CooldownOverlay};
 pub use dot_tracker::{DotEntry, DotTarget, DotTrackerConfig, DotTrackerData, DotTrackerOverlay};
+pub use notes::{NotesConfig, NotesData, NotesOverlay};
 pub use effects::{EffectEntry, EffectsData, EffectsOverlay};
 pub use effects_ab::{
     EffectABEntry, EffectsABConfig, EffectsABData, EffectsABOverlay, EffectsLayout,
@@ -105,6 +107,8 @@ pub enum OverlayData {
     Cooldowns(CooldownData),
     /// DOTs on enemy targets
     DotTracker(DotTrackerData),
+    /// Encounter notes (Markdown text)
+    Notes(NotesData),
 }
 
 /// Configuration updates that can be sent to overlays
@@ -136,6 +140,8 @@ pub enum OverlayConfigUpdate {
     Cooldowns(CooldownConfig, u8),
     /// Config for DOT tracker overlay (+ background alpha)
     DotTracker(DotTrackerConfig, u8),
+    /// Config for notes overlay (+ background alpha)
+    Notes(NotesConfig, u8),
 }
 
 /// Position information for an overlay

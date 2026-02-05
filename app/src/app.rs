@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 
-use crate::api;
+use crate::api::{self, BossNotesInfo};
 use crate::components::{
     DataExplorerPanel, EffectEditorPanel, EncounterEditorPanel, HistoryPanel,
     HotkeyInput, ParselyUploadModal, SettingsPanel, ToastFrame, ToastSeverity, use_parsely_upload,
@@ -52,6 +52,7 @@ pub fn App() -> Element {
     let mut effects_b_enabled = use_signal(|| false);
     let mut cooldowns_enabled = use_signal(|| false);
     let mut dot_tracker_enabled = use_signal(|| false);
+    let mut notes_enabled = use_signal(|| false);
     let mut overlays_visible = use_signal(|| true);
     let mut move_mode = use_signal(|| false);
     let mut rearrange_mode = use_signal(|| false);
@@ -63,6 +64,10 @@ pub fn App() -> Element {
     let mut is_live_tailing = use_signal(|| true);
     let mut session_info = use_signal(|| None::<SessionInfo>);
     let mut session_ended = use_signal(|| false); // True when player logged out but data preserved
+
+    // Boss notes selector state
+    let mut area_bosses = use_signal(Vec::<BossNotesInfo>::new);
+    let mut selected_boss_id = use_signal(|| None::<String>);
 
     // File browser state
     let mut file_browser_open = use_signal(|| false);
@@ -189,6 +194,7 @@ pub fn App() -> Element {
                 &mut effects_b_enabled,
                 &mut cooldowns_enabled,
                 &mut dot_tracker_enabled,
+                &mut notes_enabled,
                 &mut overlays_visible,
                 &mut move_mode,
                 &mut rearrange_mode,
@@ -233,6 +239,8 @@ pub fn App() -> Element {
         session_info.set(api::get_session_info().await);
         is_watching.set(api::get_watching_status().await);
         is_live_tailing.set(api::is_live_tailing().await);
+        // Also fetch initial boss list for current area
+        area_bosses.set(api::get_area_bosses_for_notes().await);
 
         // Listen for updates (no more polling!)
         let closure = Closure::new(move |_event: JsValue| {
@@ -248,6 +256,9 @@ pub fn App() -> Element {
                 let _ = session_info.try_write().map(|mut w| *w = info);
                 let _ = is_watching.try_write().map(|mut w| *w = watching);
                 let _ = is_live_tailing.try_write().map(|mut w| *w = tailing);
+                // Refresh boss list for current area (in case area changed)
+                let bosses = api::get_area_bosses_for_notes().await;
+                let _ = area_bosses.try_write().map(|mut w| *w = bosses);
             });
         });
         api::tauri_listen("session-updated", &closure).await;
@@ -399,6 +410,7 @@ pub fn App() -> Element {
     let effects_b_on = effects_b_enabled();
     let cooldowns_on = cooldowns_enabled();
     let dot_tracker_on = dot_tracker_enabled();
+    let notes_on = notes_enabled();
     let any_enabled = enabled_map.values().any(|&v| v)
         || personal_on
         || raid_on
@@ -410,7 +422,8 @@ pub fn App() -> Element {
         || effects_a_on
         || effects_b_on
         || cooldowns_on
-        || dot_tracker_on;
+        || dot_tracker_on
+        || notes_on;
     let is_visible = overlays_visible();
     let is_move_mode = move_mode();
     let is_rearrange = rearrange_mode();
@@ -600,7 +613,7 @@ pub fn App() -> Element {
                                                     &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
                                                     &mut timers_b_enabled, &mut challenges_enabled, &mut alerts_enabled,
                                                     &mut effects_a_enabled, &mut effects_b_enabled,
-                                                    &mut cooldowns_enabled, &mut dot_tracker_enabled,
+                                                    &mut cooldowns_enabled, &mut dot_tracker_enabled, &mut notes_enabled,
                                                     &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
                                             }
                                         }
@@ -919,6 +932,43 @@ pub fn App() -> Element {
                                     }
                                 }
                             }
+
+                            // Boss notes selector (only show if there are bosses with notes in current area)
+                            {
+                                let bosses_with_notes: Vec<_> = area_bosses().iter()
+                                    .filter(|b| b.has_notes)
+                                    .cloned()
+                                    .collect();
+                                if !bosses_with_notes.is_empty() {
+                                    rsx! {
+                                        div { class: "session-notes-selector",
+                                            span { class: "label", "Notes:" }
+                                            select {
+                                                class: "notes-boss-select",
+                                                onchange: move |evt| {
+                                                    let boss_id = evt.value();
+                                                    if !boss_id.is_empty() {
+                                                        selected_boss_id.set(Some(boss_id.clone()));
+                                                        spawn(async move {
+                                                            let _ = api::select_boss_notes(&boss_id).await;
+                                                        });
+                                                    }
+                                                },
+                                                option { value: "", "Select boss..." }
+                                                for boss in bosses_with_notes.iter() {
+                                                    option {
+                                                        value: "{boss.id}",
+                                                        selected: selected_boss_id().as_ref() == Some(&boss.id),
+                                                        "{boss.name}"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    rsx! {}
+                                }
+                            }
                         }
                     }
                     }
@@ -993,7 +1043,7 @@ pub fn App() -> Element {
                                                                 &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
                                                                 &mut timers_b_enabled, &mut challenges_enabled, &mut alerts_enabled,
                                                                 &mut effects_a_enabled, &mut effects_b_enabled,
-                                                                &mut cooldowns_enabled, &mut dot_tracker_enabled,
+                                                                &mut cooldowns_enabled, &mut dot_tracker_enabled, &mut notes_enabled,
                                                                 &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
                                                         }
                                                     }
@@ -1156,6 +1206,16 @@ pub fn App() -> Element {
                                             }
                                         }); },
                                         "Timers B"
+                                    }
+                                    button {
+                                        class: if notes_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Displays encounter notes written in the Encounter Editor",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::Notes, notes_on).await {
+                                                notes_enabled.set(!notes_on);
+                                            }
+                                        }); },
+                                        "Notes"
                                     }
                                 }
                             }
@@ -2050,6 +2110,7 @@ fn apply_status(
     effects_b_enabled: &mut Signal<bool>,
     cooldowns_enabled: &mut Signal<bool>,
     dot_tracker_enabled: &mut Signal<bool>,
+    notes_enabled: &mut Signal<bool>,
     overlays_visible: &mut Signal<bool>,
     move_mode: &mut Signal<bool>,
     rearrange_mode: &mut Signal<bool>,
@@ -2070,6 +2131,7 @@ fn apply_status(
     effects_b_enabled.set(status.effects_b_enabled);
     cooldowns_enabled.set(status.cooldowns_enabled);
     dot_tracker_enabled.set(status.dot_tracker_enabled);
+    notes_enabled.set(status.notes_enabled);
     overlays_visible.set(status.overlays_visible);
     move_mode.set(status.move_mode);
     rearrange_mode.set(status.rearrange_mode);

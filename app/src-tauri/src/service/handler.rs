@@ -1126,4 +1126,78 @@ impl ServiceHandle {
     pub fn emit_overlay_status_changed(&self) {
         let _ = self.app_handle.emit("overlay-status-changed", ());
     }
+
+    /// Get current notes data from loaded boss definitions
+    /// Returns the first boss with notes, or None if no notes are available
+    pub async fn get_current_notes(&self) -> Option<baras_overlay::NotesData> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref()?;
+        let session = session.read().await;
+        let cache = session.session_cache.as_ref()?;
+        
+        // Get boss definitions from cache via public accessor
+        let definitions = cache.boss_definitions();
+        
+        // Find first boss with notes
+        for boss in definitions.iter() {
+            if let Some(notes) = &boss.notes {
+                if !notes.is_empty() {
+                    return Some(baras_overlay::NotesData {
+                        text: notes.clone(),
+                        boss_name: boss.name.clone(),
+                    });
+                }
+            }
+        }
+        
+        None
+    }
+
+    /// Get list of bosses with notes status for the current area
+    pub async fn get_area_bosses_for_notes(&self) -> Result<Vec<crate::commands::BossNotesInfo>, String> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref().ok_or("No active session")?;
+        let session = session.read().await;
+        let cache = session.session_cache.as_ref().ok_or("No session cache")?;
+        
+        let definitions = cache.boss_definitions();
+        
+        let bosses: Vec<crate::commands::BossNotesInfo> = definitions
+            .iter()
+            .map(|boss| crate::commands::BossNotesInfo {
+                id: boss.id.clone(),
+                name: boss.name.clone(),
+                has_notes: boss.notes.as_ref().is_some_and(|n| !n.is_empty()),
+            })
+            .collect();
+        
+        Ok(bosses)
+    }
+
+    /// Send notes for a specific boss to the overlay
+    pub async fn select_boss_notes(&self, boss_id: &str) -> Result<(), String> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref().ok_or("No active session")?;
+        let session = session.read().await;
+        let cache = session.session_cache.as_ref().ok_or("No session cache")?;
+        
+        let definitions = cache.boss_definitions();
+        
+        // Find the boss by ID
+        let boss = definitions
+            .iter()
+            .find(|b| b.id == boss_id)
+            .ok_or_else(|| format!("Boss '{}' not found", boss_id))?;
+        
+        // Send notes to overlay (even if empty, to allow clearing)
+        let notes_data = baras_overlay::NotesData {
+            text: boss.notes.clone().unwrap_or_default(),
+            boss_name: boss.name.clone(),
+        };
+        
+        // Send via the overlay channel
+        let _ = self.cmd_tx.send(super::ServiceCommand::SendNotesToOverlay(notes_data)).await;
+        
+        Ok(())
+    }
 }

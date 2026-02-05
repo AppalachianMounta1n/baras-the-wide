@@ -1390,6 +1390,34 @@ impl Default for DotTrackerConfig {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Notes Overlay Configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Configuration for the encounter notes overlay
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotesOverlayConfig {
+    /// Font size for notes text (default 14)
+    #[serde(default = "default_notes_font_size")]
+    pub font_size: u8,
+    /// Font color for notes text
+    #[serde(default = "default_font_color")]
+    pub font_color: Color,
+}
+
+fn default_notes_font_size() -> u8 {
+    14
+}
+
+impl Default for NotesOverlayConfig {
+    fn default() -> Self {
+        Self {
+            font_size: default_notes_font_size(),
+            font_color: overlay_colors::WHITE,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Hotkey Settings
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1498,6 +1526,10 @@ pub struct OverlaySettings {
     pub dot_tracker: DotTrackerConfig,
     #[serde(default = "default_opacity")]
     pub dot_tracker_opacity: u8,
+    #[serde(default)]
+    pub notes_overlay: NotesOverlayConfig,
+    #[serde(default = "default_opacity")]
+    pub notes_opacity: u8,
     /// Auto-hide overlays when local player is in a conversation
     #[serde(default)]
     pub hide_during_conversations: bool,
@@ -1540,6 +1572,8 @@ impl Default for OverlaySettings {
             cooldown_tracker_opacity: 180,
             dot_tracker: DotTrackerConfig::default(),
             dot_tracker_opacity: 180,
+            notes_overlay: NotesOverlayConfig::default(),
+            notes_opacity: 180,
             hide_during_conversations: false,
         }
     }

@@ -5,7 +5,7 @@
 
 use baras_core::context::{OverlayPositionConfig, OverlaySettings};
 use baras_overlay::{
-    platform, CooldownConfig, DotTrackerConfig, EffectsABConfig, EffectsLayout,
+    platform, CooldownConfig, DotTrackerConfig, EffectsABConfig, EffectsLayout, NotesConfig,
     OverlayConfigUpdate, OverlayData, RaidGridLayout, RaidOverlayConfig,
 };
 use std::time::Duration;
@@ -14,8 +14,8 @@ use super::metrics::create_entries_for_type;
 use super::spawn::{
     create_alerts_overlay, create_boss_health_overlay, create_challenges_overlay,
     create_cooldowns_overlay, create_dot_tracker_overlay, create_effects_a_overlay,
-    create_effects_b_overlay, create_metric_overlay, create_personal_overlay, create_raid_overlay,
-    create_timers_a_overlay, create_timers_b_overlay,
+    create_effects_b_overlay, create_metric_overlay, create_notes_overlay, create_personal_overlay,
+    create_raid_overlay, create_timers_a_overlay, create_timers_b_overlay,
 };
 use super::state::{OverlayCommand, OverlayHandle, PositionEvent};
 use super::types::{MetricType, OverlayType};
@@ -106,6 +106,10 @@ impl OverlayManager {
                 let dot_config = settings.dot_tracker.clone();
                 create_dot_tracker_overlay(position, dot_config, settings.dot_tracker_opacity)?
             }
+            OverlayType::Notes => {
+                let notes_config = settings.notes_overlay.clone();
+                create_notes_overlay(position, notes_config, settings.notes_opacity)?
+            }
         };
 
         Ok(SpawnResult {
@@ -180,7 +184,8 @@ impl OverlayManager {
             | OverlayType::EffectsA
             | OverlayType::EffectsB
             | OverlayType::Cooldowns
-            | OverlayType::DotTracker => {
+            | OverlayType::DotTracker
+            | OverlayType::Notes => {
                 // These get data via separate update channels (bridge)
             }
         }
@@ -353,6 +358,14 @@ impl OverlayManager {
                 };
                 OverlayConfigUpdate::DotTracker(dot_config, settings.dot_tracker_opacity)
             }
+            OverlayType::Notes => {
+                let cfg = &settings.notes_overlay;
+                let notes_config = NotesConfig {
+                    font_size: cfg.font_size,
+                    font_color: cfg.font_color.clone(),
+                };
+                OverlayConfigUpdate::Notes(notes_config, settings.notes_opacity)
+            }
         }
     }
 
@@ -399,6 +412,15 @@ impl OverlayManager {
         // Send initial data from cache if available (regardless of tailing state)
         let combat_data = service.current_combat_data().await;
         Self::send_initial_data(kind, &tx, combat_data.as_ref()).await;
+
+        // For Notes overlay, send current notes immediately
+        if matches!(kind, OverlayType::Notes) {
+            if let Some(notes_data) = service.get_current_notes().await {
+                let _ = tx
+                    .send(OverlayCommand::UpdateData(OverlayData::Notes(notes_data)))
+                    .await;
+            }
+        }
 
         // Save position if needed
         if needs_monitor_save {
@@ -495,6 +517,7 @@ impl OverlayManager {
                 "effects_b" => OverlayType::EffectsB,
                 "cooldowns" => OverlayType::Cooldowns,
                 "dot_tracker" => OverlayType::DotTracker,
+                "notes" => OverlayType::Notes,
                 _ => {
                     if let Some(mt) = MetricType::from_config_key(key) {
                         OverlayType::Metric(mt)
@@ -525,6 +548,15 @@ impl OverlayManager {
 
             // Send initial data
             Self::send_initial_data(kind, &spawn_result.0, combat_data.as_ref()).await;
+
+            // For Notes overlay, send current notes immediately
+            if matches!(kind, OverlayType::Notes) {
+                if let Some(notes_data) = service.get_current_notes().await {
+                    let _ = spawn_result.0
+                        .send(OverlayCommand::UpdateData(OverlayData::Notes(notes_data)))
+                        .await;
+                }
+            }
 
             // Track for position saving
             if spawn_result.1 {
@@ -641,6 +673,7 @@ impl OverlayManager {
                 "effects_b" => OverlayType::EffectsB,
                 "cooldowns" => OverlayType::Cooldowns,
                 "dot_tracker" => OverlayType::DotTracker,
+                "notes" => OverlayType::Notes,
                 _ => {
                     if let Some(mt) = MetricType::from_config_key(key) {
                         OverlayType::Metric(mt)
@@ -666,6 +699,15 @@ impl OverlayManager {
 
             // Send initial data
             Self::send_initial_data(kind, &spawn_result, combat_data.as_ref()).await;
+
+            // For Notes overlay, send current notes immediately
+            if matches!(kind, OverlayType::Notes) {
+                if let Some(notes_data) = service.get_current_notes().await {
+                    let _ = spawn_result
+                        .send(OverlayCommand::UpdateData(OverlayData::Notes(notes_data)))
+                        .await;
+                }
+            }
 
             // Update overlay status flag
             service.set_overlay_active(key, true);
@@ -875,6 +917,7 @@ impl OverlayManager {
             OverlayType::EffectsB,
             OverlayType::Cooldowns,
             OverlayType::DotTracker,
+            OverlayType::Notes,
         ];
         for mt in MetricType::all() {
             types.push(OverlayType::Metric(*mt));

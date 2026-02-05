@@ -146,6 +146,8 @@ pub enum OverlayType {
     Cooldowns,
     /// DOTs on enemy targets
     DotTracker,
+    /// Encounter notes overlay (Markdown)
+    Notes,
 }
 
 impl OverlayType {
@@ -164,6 +166,7 @@ impl OverlayType {
             OverlayType::EffectsB => "effects_b",
             OverlayType::Cooldowns => "cooldowns",
             OverlayType::DotTracker => "dot_tracker",
+            OverlayType::Notes => "notes",
         }
     }
 
@@ -182,6 +185,7 @@ impl OverlayType {
             OverlayType::EffectsB => "baras-effects-b".to_string(),
             OverlayType::Cooldowns => "baras-cooldowns".to_string(),
             OverlayType::DotTracker => "baras-dot-tracker".to_string(),
+            OverlayType::Notes => "baras-notes".to_string(),
         }
     }
 
@@ -200,6 +204,7 @@ impl OverlayType {
             OverlayType::EffectsB => (350, 280),
             OverlayType::Cooldowns => (50, 500),
             OverlayType::DotTracker => (50, 650),
+            OverlayType::Notes => (950, 550),
         }
     }
 }
