@@ -506,7 +506,7 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
         let Some(entity) = entity else { return };
 
         // Bump load_epoch to invalidate any in-flight tasks
-        let current_gen = *load_epoch.read() + 1;
+        let current_gen = *load_epoch.peek() + 1;
         load_epoch.set(current_gen);
 
         spawn(async move {
