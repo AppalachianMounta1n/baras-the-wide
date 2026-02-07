@@ -1020,27 +1020,31 @@ impl RaidOverlay {
             // Stack count if applicable (centered in the effect square)
             if effect.charges > 1 {
                 let count = format!("{}", effect.charges);
-                let stack_font = (effect_size * 0.55).max(8.0);
+                let stack_font = (effect_size * 0.7).max(8.0);
 
-                // Measure text for proper centering
-                let (text_w, _) = self.frame.measure_text(&count, stack_font);
+                // Measure text for proper centering (bold for readability)
+                let (text_w, _) =
+                    self.frame.measure_text_styled(&count, stack_font, true, false);
 
                 // Center horizontally, position in lower portion of square
                 let text_x = ex + (effect_size - text_w) / 2.0;
                 let text_y = ey + effect_size * 0.78;
 
                 // Draw shadow (subtle drop shadow for readability)
-                self.frame.draw_text(
+                self.frame.draw_text_styled(
                     &count,
                     text_x + 1.0,
                     text_y + 1.0,
                     stack_font,
                     colors::text_shadow(),
+                    true,
+                    false,
                 );
 
                 // Draw text on top
-                self.frame
-                    .draw_text(&count, text_x, text_y, stack_font, colors::white());
+                self.frame.draw_text_styled(
+                    &count, text_x, text_y, stack_font, colors::white(), true, false,
+                );
             }
         }
 
