@@ -139,6 +139,12 @@ ids = [4245686841245696]
 is_boss = true
 triggers_encounter = true
 
+[[boss.counter]]
+id = "holding_pens_droid_stealth"
+name = "Droid Stealth-outs"
+increment_on = { type = "effect_removed", effects = [4390573268008960] }
+initial_value = 0
+
 [[boss.timer]]
 id = "hold_pens_droid_1st"
 name = "Droid First"
@@ -160,6 +166,7 @@ trigger = { type = "effect_applied", effects = [
 ], source = { selector = [
   "Czerka Pursuit Droid",
 ] } }
+counter_condition = { counter_id = "holding_pens_droid_stealth", operator = "gte", value = 1 }
 difficulties = ["master"]
 
 [[boss.timer]]
