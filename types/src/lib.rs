@@ -286,6 +286,47 @@ pub struct CombatLogFindMatch {
     pub row_idx: u64,
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Rotation Analysis Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A single ability activation event for rotation analysis.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RotationEvent {
+    pub time_secs: f32,
+    pub ability_id: i64,
+    pub ability_name: String,
+}
+
+/// A GCD slot: one on-GCD ability plus any off-GCD abilities weaved with it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GcdSlot {
+    pub gcd_ability: RotationEvent,
+    pub off_gcd: Vec<RotationEvent>,
+}
+
+/// One rotation cycle (anchor-to-anchor).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RotationCycle {
+    pub slots: Vec<GcdSlot>,
+    pub duration_secs: f32,
+    pub total_damage: f64,
+    pub effective_heal: f64,
+    pub crit_count: i64,
+    pub hit_count: i64,
+}
+
+/// Full rotation analysis result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RotationAnalysis {
+    pub cycles: Vec<RotationCycle>,
+    /// Distinct abilities for the anchor dropdown: (ability_id, ability_name).
+    pub abilities: Vec<(i64, String)>,
+}
+
 /// A phase segment - one occurrence of a phase (phases can repeat).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PhaseSegment {
@@ -2023,6 +2064,7 @@ pub enum ViewMode {
     Charts,
     CombatLog,
     Detailed(DataTab),
+    Rotation,
 }
 
 impl ViewMode {

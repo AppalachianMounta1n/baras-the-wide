@@ -5,7 +5,7 @@
 use baras_core::query::{
     AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow, DataTab,
     EffectChartData, EffectWindow, EncounterTimeline, EntityBreakdown, PlayerDeath,
-    RaidOverviewRow, TimeRange, TimeSeriesPoint,
+    RaidOverviewRow, RotationAnalysis, TimeRange, TimeSeriesPoint,
 };
 use tauri::State;
 
@@ -253,4 +253,18 @@ pub async fn query_player_deaths(
     encounter_idx: Option<u32>,
 ) -> Result<Vec<PlayerDeath>, String> {
     handle.query_player_deaths(encounter_idx).await
+}
+
+/// Query rotation analysis for a player.
+#[tauri::command]
+pub async fn query_rotation(
+    handle: State<'_, ServiceHandle>,
+    encounter_idx: Option<u32>,
+    source_name: String,
+    anchor_ability_id: i64,
+    time_range: Option<TimeRange>,
+) -> Result<RotationAnalysis, String> {
+    handle
+        .query_rotation(encounter_idx, source_name, anchor_ability_id, time_range)
+        .await
 }

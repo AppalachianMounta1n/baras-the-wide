@@ -32,14 +32,22 @@ fn set_cached(ability_id: u64, url: Option<String>) {
 /// Uses a global cache to prevent redundant API calls when scrolling
 /// through lists with repeated abilities.
 #[component]
-pub fn AbilityIcon(ability_id: i64, #[props(default = 20)] size: u32) -> Element {
+pub fn AbilityIcon(
+    ability_id: i64,
+    #[props(default = 20)] size: u32,
+    /// Fallback text shown when icon is missing (e.g., ability name initials).
+    #[props(default = String::new())]
+    fallback: String,
+) -> Element {
     let mut icon_url = use_signal(|| None::<String>);
+    let mut loaded = use_signal(|| false);
     let id = ability_id as u64;
 
     use_effect(move || {
         // Check cache first
         if let Some(cached) = get_cached(id) {
             icon_url.set(cached);
+            loaded.set(true);
             return;
         }
 
@@ -48,6 +56,7 @@ pub fn AbilityIcon(ability_id: i64, #[props(default = 20)] size: u32) -> Element
             let result = api::get_icon_preview(id).await;
             set_cached(id, result.clone());
             icon_url.set(result);
+            loaded.set(true);
         });
     });
 
@@ -60,6 +69,23 @@ pub fn AbilityIcon(ability_id: i64, #[props(default = 20)] size: u32) -> Element
                 height: "{size}",
                 alt: ""
             }
+        } else if loaded() && !fallback.is_empty() {
+            div {
+                class: "ability-icon-fallback",
+                width: "{size}px",
+                height: "{size}px",
+                title: "{fallback}",
+                "{fallback_initials(&fallback)}"
+            }
         }
     }
+}
+
+/// Extract up to 2 uppercase initials from ability name for fallback display.
+fn fallback_initials(name: &str) -> String {
+    name.split_whitespace()
+        .filter_map(|w| w.chars().next())
+        .take(2)
+        .collect::<String>()
+        .to_uppercase()
 }

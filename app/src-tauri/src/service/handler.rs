@@ -1076,6 +1076,42 @@ impl ServiceHandle {
             .await
     }
 
+    /// Query rotation analysis for a player in an encounter.
+    pub async fn query_rotation(
+        &self,
+        encounter_idx: Option<u32>,
+        source_name: String,
+        anchor_ability_id: i64,
+        time_range: Option<TimeRange>,
+    ) -> Result<baras_core::query::RotationAnalysis, String> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref().ok_or("No active session")?;
+        let session = session.read().await;
+
+        if let Some(idx) = encounter_idx {
+            let dir = session.encounters_dir().ok_or("No encounters directory")?;
+            let path = dir.join(baras_core::storage::encounter_filename(idx));
+            if !path.exists() {
+                return Err(format!("Encounter file not found: {:?}", path));
+            }
+            self.shared.query_context.register_parquet(&path).await?;
+        } else {
+            let writer = session
+                .encounter_writer()
+                .ok_or("No live encounter buffer")?;
+            let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
+            self.shared.query_context.register_batch(batch).await?;
+        }
+
+        self.shared
+            .query_context
+            .query()
+            .await
+            .query()
+            .query_rotation(&source_name, anchor_ability_id, time_range.as_ref())
+            .await
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Overlay Status Flags (for skipping work in effects loop)
     // ─────────────────────────────────────────────────────────────────────────

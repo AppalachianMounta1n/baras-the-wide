@@ -849,8 +849,9 @@ pub async fn install_update() -> Result<(), String> {
 // Re-export query types from shared types crate
 pub use baras_types::{
     AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow, DataTab,
-    EffectChartData, EffectWindow, EncounterTimeline, EntityBreakdown, GroupedEntityNames,
-    PhaseSegment, PlayerDeath, RaidOverviewRow, TimeRange, TimeSeriesPoint,
+    EffectChartData, EffectWindow, EncounterTimeline, EntityBreakdown, GcdSlot,
+    GroupedEntityNames, PhaseSegment, PlayerDeath, RaidOverviewRow, RotationAnalysis,
+    RotationCycle, RotationEvent, TimeRange, TimeSeriesPoint,
 };
 
 /// Query ability breakdown for an encounter and data tab.
@@ -1296,6 +1297,35 @@ pub async fn query_player_deaths(encounter_idx: Option<u32>) -> Option<Vec<Playe
         js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
     let result = invoke("query_player_deaths", obj.into()).await;
+    from_js(result)
+}
+
+/// Query rotation analysis for a player in an encounter.
+pub async fn query_rotation(
+    encounter_idx: Option<u32>,
+    source_name: &str,
+    anchor_ability_id: i64,
+    time_range: Option<&TimeRange>,
+) -> Option<RotationAnalysis> {
+    let obj = js_sys::Object::new();
+    if let Some(idx) = encounter_idx {
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
+    } else {
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
+    }
+    js_set(&obj, "sourceName", &JsValue::from_str(source_name));
+    js_set(
+        &obj,
+        "anchorAbilityId",
+        &JsValue::from_f64(anchor_ability_id as f64),
+    );
+    if let Some(tr) = time_range {
+        let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
+        js_set(&obj, "timeRange", &tr_js);
+    } else {
+        js_set(&obj, "timeRange", &JsValue::NULL);
+    }
+    let result = invoke("query_rotation", obj.into()).await;
     from_js(result)
 }
 

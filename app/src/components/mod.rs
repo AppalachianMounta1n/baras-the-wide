@@ -14,6 +14,7 @@ pub mod history_panel;
 pub mod hotkey_input;
 pub mod parsely_upload_modal;
 pub mod phase_timeline;
+pub mod rotation_view;
 pub mod settings_panel;
 pub mod toast;
 

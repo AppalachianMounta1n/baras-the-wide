@@ -1393,3 +1393,108 @@
 .log-overheal-header {
   cursor: help;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Rotation Visualization
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.rotation-view {
+  padding: 0.75rem;
+}
+
+.rotation-controls {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.rotation-controls label {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rotation-anchor-select {
+  min-width: 200px;
+  padding: 0.35em 0.5em;
+  background: var(--blue-alpha-3, rgba(0, 0, 0, 0.3));
+  color: var(--text-primary, #e0e0e0);
+  border: 1px solid var(--border-color, #444);
+  border-radius: 4px;
+}
+
+.rotation-placeholder {
+  color: var(--text-muted, #888);
+  padding: 2rem;
+  text-align: center;
+}
+
+.rotation-cycles {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.rotation-cycle {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  padding: 0.5rem;
+}
+
+.rotation-slots {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.gcd-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.rotation-cycle-stats {
+  display: flex;
+  gap: 1rem;
+  padding: 0.25rem 0.5rem;
+  margin-bottom: 0.35rem;
+  font-size: 0.8em;
+  color: var(--text-secondary, #bbb);
+}
+
+.cycle-stat {
+  display: flex;
+  gap: 0.25em;
+}
+
+.cycle-stat-label {
+  color: var(--text-muted, #888);
+  font-weight: 600;
+}
+
+.cycle-stat.heal {
+  color: #6ec86e;
+}
+
+.cycle-stat.crit {
+  color: #e8c84a;
+}
+
+.cycle-stat.duration {
+  color: var(--text-muted, #888);
+  margin-left: auto;
+}
+
+.ability-icon-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(100, 100, 100, 0.5);
+  border: 1px solid rgba(150, 150, 150, 0.3);
+  border-radius: 2px;
+  font-size: 0.55em;
+  font-weight: 600;
+  color: #ccc;
+}

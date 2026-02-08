@@ -18,6 +18,7 @@ use crate::components::class_icons::{get_class_icon, get_role_icon};
 use crate::components::combat_log::CombatLog;
 use crate::components::history_panel::EncounterSummary;
 use crate::components::phase_timeline::PhaseTimelineFilter;
+use crate::components::rotation_view::RotationView;
 use crate::components::{ToastSeverity, use_toast};
 use crate::types::{BreakdownMode, CombatLogSessionState, DataTab, SortColumn, SortDirection, UiSessionState, ViewMode};
 use crate::utils::js_set;
@@ -780,13 +781,17 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
         let tr = time_range();
         let tl_state = timeline_state();
 
-        // Extract tab if in detailed mode, otherwise exit
-        let Some(tab) = mode.tab() else {
-            // Clear detailed data when not in detailed mode
-            let _ = entities.try_write().map(|mut w| *w = Vec::new());
-            let _ = abilities.try_write().map(|mut w| *w = Vec::new());
-            let _ = selected_source.try_write().map(|mut w| *w = None);
-            return;
+        // Extract tab if in detailed mode, or use Damage tab for Rotation mode
+        let tab = match mode {
+            ViewMode::Detailed(tab) => tab,
+            ViewMode::Rotation => DataTab::Damage,
+            _ => {
+                // Clear detailed data when not in detailed/rotation mode
+                let _ = entities.try_write().map(|mut w| *w = Vec::new());
+                let _ = abilities.try_write().map(|mut w| *w = Vec::new());
+                let _ = selected_source.try_write().map(|mut w| *w = None);
+                return;
+            }
         };
 
         // Only load when timeline is loaded and we have an encounter
@@ -920,11 +925,6 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
         let current = selected_source.read().clone();
         let tr = time_range();
 
-        // Get tab from view_mode
-        let Some(tab) = mode.tab() else {
-            return;
-        };
-
         // Toggle selection
         let new_source = if current.as_ref() == Some(&name) {
             None
@@ -933,6 +933,11 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
         };
 
         selected_source.set(new_source.clone());
+
+        // In Rotation mode, just set the source - the RotationView handles its own queries
+        let Some(tab) = mode.tab() else {
+            return;
+        };
 
         // Use time_range if not default
         let tr_opt = if tr.start == 0.0 && tr.end == 0.0 {
@@ -1017,11 +1022,12 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
     // Memoized entity list for detailed view - filtered by player/all toggle
     let entity_list = use_memo(move || {
         let players_only = *show_players_only.read();
+        let is_rotation = matches!(*view_mode.read(), ViewMode::Rotation);
         entities
             .read()
             .iter()
             .filter(|e| {
-                if players_only {
+                if is_rotation || players_only {
                     e.entity_type == "Player" || e.entity_type == "Companion"
                 } else {
                     e.entity_type == "Npc"
@@ -1353,6 +1359,11 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                             onclick: move |_| { death_search_text.set(None); view_mode.set(ViewMode::CombatLog); },
                             "Combat Log"
                         }
+                        button {
+                            class: if matches!(view_mode(), ViewMode::Rotation) { "data-tab active" } else { "data-tab" },
+                            onclick: move |_| view_mode.set(ViewMode::Rotation),
+                            "Rotation"
+                        }
                     }
 
                     // Loading/Error state display
@@ -1551,25 +1562,30 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                 }
                             }
                         }
-                    } else if let ViewMode::Detailed(current_tab) = view_mode() {
-                        // Two-column layout (Detailed breakdown)
+                    } else if matches!(view_mode(), ViewMode::Detailed(_) | ViewMode::Rotation) {
+                        // Two-column layout (Detailed breakdown or Rotation)
+                        {
+                        let current_tab = if let ViewMode::Detailed(tab) = view_mode() { Some(tab) } else { None };
+                        rsx! {
                         div { class: "explorer-content",
-                            // Entity breakdown (source filter for outgoing, target filter for incoming)
+                            // Entity breakdown sidebar
                             div { class: "entity-section",
                                 div { class: "entity-header",
                                     h4 {
-                                        if current_tab.is_outgoing() { "Sources" } else { "Targets" }
+                                        if current_tab.is_some_and(|t| !t.is_outgoing()) { "Targets" } else { "Sources" }
                                     }
-                                    div { class: "entity-filter-tabs",
-                                        button {
-                                            class: if *show_players_only.read() { "filter-tab active" } else { "filter-tab" },
-                                            onclick: move |_| show_players_only.set(true),
-                                            "Player"
-                                        }
-                                        button {
-                                            class: if !*show_players_only.read() { "filter-tab active" } else { "filter-tab" },
-                                            onclick: move |_| show_players_only.set(false),
-                                            "NPC"
+                                    if !matches!(view_mode(), ViewMode::Rotation) {
+                                        div { class: "entity-filter-tabs",
+                                            button {
+                                                class: if *show_players_only.read() { "filter-tab active" } else { "filter-tab" },
+                                                onclick: move |_| show_players_only.set(true),
+                                                "Player"
+                                            }
+                                            button {
+                                                class: if !*show_players_only.read() { "filter-tab active" } else { "filter-tab" },
+                                                onclick: move |_| show_players_only.set(false),
+                                                "NPC"
+                                            }
                                         }
                                     }
                                 }
@@ -1609,6 +1625,16 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                 }
                             }
 
+                            if matches!(view_mode(), ViewMode::Rotation) {
+                                // Rotation view in right column
+                                div { class: "ability-section",
+                                    RotationView {
+                                        encounter_idx: *selected_encounter.read(),
+                                        time_range: time_range(),
+                                        selected_source: selected_source.read().clone(),
+                                    }
+                                }
+                            } else if let Some(current_tab) = current_tab {
                             // Ability breakdown table
                             div { class: "ability-section",
                                 // Header with breakdown controls only
@@ -1818,6 +1844,9 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                 }
                                 }
                             }
+                            }
+                        }
+                        }
                         }
                     }
                 }
