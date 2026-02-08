@@ -201,7 +201,7 @@ fn load_bundled_effects(app_handle: &AppHandle) -> HashMap<String, EffectDefinit
 }
 
 /// Load user effect overrides from single config file
-fn load_user_effects_file() -> Option<(u32, Vec<EffectDefinition>)> {
+pub(crate) fn load_user_effects_file() -> Option<(u32, Vec<EffectDefinition>)> {
     let path = get_user_effects_path()?;
     if !path.exists() {
         return None;
@@ -214,7 +214,7 @@ fn load_user_effects_file() -> Option<(u32, Vec<EffectDefinition>)> {
 }
 
 /// Save user effects to the config file
-fn save_user_effects(effects: &[EffectDefinition]) -> Result<(), String> {
+pub(crate) fn save_user_effects(effects: &[EffectDefinition]) -> Result<(), String> {
     let path = get_user_effects_path().ok_or("Cannot determine user effects path")?;
 
     let config = DefinitionConfig {

@@ -848,3 +848,33 @@ pub struct EffectImportPreview {
     pub effects_unchanged: usize,
     pub errors: Vec<String>,
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StarParse Import Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationPreview {
+    pub name: String,
+    pub timer_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StarParsePreview {
+    pub encounter_timers: usize,
+    pub effect_timers: usize,
+    pub operations: Vec<OperationPreview>,
+    pub unmapped_bosses: Vec<String>,
+    pub skipped_builtin: usize,
+    pub skipped_unsupported_effects: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StarParseImportResult {
+    pub files_written: usize,
+    pub encounter_timers_imported: usize,
+    pub effects_imported: usize,
+}

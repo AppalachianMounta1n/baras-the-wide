@@ -1796,6 +1796,8 @@ pub fn App() -> Element {
                                     span { class: "save-status", "{parsely_save_status}" }
                                 }
                             }
+
+                            StarParseImportSection {}
                             } // settings-content
                         }
                     }
@@ -2159,4 +2161,149 @@ fn apply_status(
     overlays_visible.set(status.overlays_visible);
     move_mode.set(status.move_mode);
     rearrange_mode.set(status.rearrange_mode);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StarParse Import
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Clone, PartialEq)]
+enum ImportState {
+    Idle,
+    Previewing,
+    Ready(String, crate::types::StarParsePreview),
+    Importing,
+    Done(crate::types::StarParseImportResult),
+    Error(String),
+}
+
+#[component]
+fn StarParseImportSection() -> Element {
+    let toast = use_toast();
+    let mut state = use_signal(|| ImportState::Idle);
+
+    rsx! {
+        div { class: "settings-section",
+            h4 { "Import" }
+            p { class: "hint", "Import timers and effects from StarParse XML exports." }
+
+            match state() {
+                ImportState::Idle | ImportState::Error(_) => rsx! {
+                    if let ImportState::Error(ref msg) = state() {
+                        p { class: "hint hint-warning", "{msg}" }
+                    }
+                    button {
+                        class: "btn",
+                        onclick: move |_| {
+                            let mut state = state.clone();
+                            let mut toast = toast.clone();
+                            spawn(async move {
+                                let Some(path) = api::open_xml_file_dialog().await else {
+                                    return;
+                                };
+                                state.set(ImportState::Previewing);
+                                match api::preview_starparse_import(&path).await {
+                                    Ok(preview) => state.set(ImportState::Ready(path, preview)),
+                                    Err(e) => {
+                                        toast.show(format!("Failed to parse XML: {}", e), ToastSeverity::Normal);
+                                        state.set(ImportState::Error(e));
+                                    }
+                                }
+                            });
+                        },
+                        "Import StarParse XML..."
+                    }
+                },
+                ImportState::Previewing => rsx! {
+                    p { class: "hint", "Parsing XML..." }
+                },
+                ImportState::Ready(ref path, ref preview) => {
+                    let path = path.clone();
+                    let preview = preview.clone();
+                    rsx! {
+                        div { class: "import-preview",
+                            if preview.encounter_timers > 0 {
+                                p {
+                                    strong { "{preview.encounter_timers}" }
+                                    " encounter timers across "
+                                    strong { "{preview.operations.len()}" }
+                                    " operations"
+                                }
+                            }
+                            if preview.effect_timers > 0 {
+                                p {
+                                    strong { "{preview.effect_timers}" }
+                                    " personal effects"
+                                }
+                            }
+                            if preview.skipped_builtin > 0 {
+                                p { class: "hint",
+                                    "{preview.skipped_builtin} built-in timers skipped"
+                                }
+                            }
+                            if preview.skipped_unsupported_effects > 0 {
+                                p { class: "hint hint-warning",
+                                    "{preview.skipped_unsupported_effects} personal timers skipped (non-effect triggers not supported)"
+                                }
+                            }
+                            if !preview.unmapped_bosses.is_empty() {
+                                p { class: "hint hint-warning",
+                                    "Unmapped bosses: {preview.unmapped_bosses.join(\", \")}"
+                                }
+                            }
+                            div { class: "button-row",
+                                button {
+                                    class: "btn btn-primary",
+                                    onclick: move |_| {
+                                        let path = path.clone();
+                                        let mut state = state.clone();
+                                        let mut toast = toast.clone();
+                                        spawn(async move {
+                                            state.set(ImportState::Importing);
+                                            match api::import_starparse_timers(&path).await {
+                                                Ok(result) => {
+                                                    toast.show(
+                                                        format!(
+                                                            "Imported {} encounter timers and {} effects",
+                                                            result.encounter_timers_imported,
+                                                            result.effects_imported,
+                                                        ),
+                                                        ToastSeverity::Normal,
+                                                    );
+                                                    state.set(ImportState::Done(result));
+                                                }
+                                                Err(e) => {
+                                                    toast.show(format!("Import failed: {}", e), ToastSeverity::Normal);
+                                                    state.set(ImportState::Error(e));
+                                                }
+                                            }
+                                        });
+                                    },
+                                    "Confirm Import"
+                                }
+                                button {
+                                    class: "btn",
+                                    onclick: move |_| state.set(ImportState::Idle),
+                                    "Cancel"
+                                }
+                            }
+                        }
+                    }
+                },
+                ImportState::Importing => rsx! {
+                    p { class: "hint", "Importing..." }
+                },
+                ImportState::Done(ref result) => rsx! {
+                    p { class: "hint",
+                        "Imported {result.encounter_timers_imported} encounter timers and {result.effects_imported} effects to {result.files_written} files"
+                    }
+                    button {
+                        class: "btn",
+                        onclick: move |_| state.set(ImportState::Idle),
+                        "Import Another"
+                    }
+                },
+            }
+        }
+    }
 }

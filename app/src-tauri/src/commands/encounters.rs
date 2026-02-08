@@ -76,11 +76,11 @@ impl EncounterItem {
 // Tauri Path Helpers (only Tauri-specific logic lives here)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-fn get_user_encounters_dir() -> Option<PathBuf> {
+pub(crate) fn get_user_encounters_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|p| p.join("baras").join("definitions").join("encounters"))
 }
 
-fn get_bundled_encounters_dir(app_handle: &AppHandle) -> Option<PathBuf> {
+pub(crate) fn get_bundled_encounters_dir(app_handle: &AppHandle) -> Option<PathBuf> {
     app_handle
         .path()
         .resolve(
@@ -90,7 +90,7 @@ fn get_bundled_encounters_dir(app_handle: &AppHandle) -> Option<PathBuf> {
         .ok()
 }
 
-fn ensure_user_dir() -> Result<PathBuf, String> {
+pub(crate) fn ensure_user_dir() -> Result<PathBuf, String> {
     let dir = get_user_encounters_dir().ok_or("Could not determine user config directory")?;
     if !dir.exists() {
         std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create dir: {}", e))?;

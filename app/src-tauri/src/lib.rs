@@ -226,6 +226,9 @@ pub fn run() {
             commands::export_effects_toml,
             commands::preview_import_effects,
             commands::import_effects_toml,
+            // StarParse import
+            commands::preview_starparse_import,
+            commands::import_starparse_timers,
             // Parsely upload
             commands::upload_to_parsely,
             commands::upload_encounter_to_parsely,

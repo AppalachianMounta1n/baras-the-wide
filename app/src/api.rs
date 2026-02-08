@@ -704,6 +704,41 @@ pub async fn import_effects_toml(toml_content: &str) -> Result<(), String> {
     Ok(())
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// StarParse Import
+// ─────────────────────────────────────────────────────────────────────────────
+
+use crate::types::{StarParseImportResult, StarParsePreview};
+
+/// Open a native file dialog for .xml files (StarParse export)
+pub async fn open_xml_file_dialog() -> Option<String> {
+    let options = js_sys::Object::new();
+
+    let filter = js_sys::Object::new();
+    js_set(&filter, "name", &JsValue::from_str("XML files"));
+    let exts = js_sys::Array::new();
+    exts.push(&JsValue::from_str("xml"));
+    js_set(&filter, "extensions", &exts);
+    let filters = js_sys::Array::new();
+    filters.push(&filter);
+    js_set(&options, "filters", &filters);
+
+    let result = open_dialog(options.into()).await;
+    result.as_string()
+}
+
+/// Preview a StarParse XML import (parse + count timers/effects)
+pub async fn preview_starparse_import(path: &str) -> Result<StarParsePreview, String> {
+    let result = try_invoke("preview_starparse_import", build_args("path", &path)).await?;
+    from_js(result).ok_or_else(|| "Failed to parse preview".to_string())
+}
+
+/// Import StarParse timers and effects from XML file
+pub async fn import_starparse_timers(path: &str) -> Result<StarParseImportResult, String> {
+    let result = try_invoke("import_starparse_timers", build_args("path", &path)).await?;
+    from_js(result).ok_or_else(|| "Failed to parse import result".to_string())
+}
+
 /// Get icon preview as base64 data URL for an ability ID.
 /// Returns None if the icon is not found (graceful fallback).
 pub async fn get_icon_preview(ability_id: u64) -> Option<String> {

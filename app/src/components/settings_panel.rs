@@ -1977,3 +1977,4 @@ fn OpacitySlider(label: &'static str, value: u8, on_change: EventHandler<u8>) ->
         }
     }
 }
+
