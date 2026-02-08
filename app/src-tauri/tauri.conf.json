@@ -44,7 +44,12 @@
     "resources": {
       "../../core/definitions/effects/*": "definitions/effects/",
       "../../core/definitions/encounters/**/*": "definitions/encounters/",
-      "../../core/definitions/sounds/**/*": "definitions/sounds/",
+      "../../core/definitions/sounds/*.mp3": "definitions/sounds/",
+      "../../core/definitions/sounds/*.wav": "definitions/sounds/",
+      "../../core/definitions/sounds/Amy/*": "definitions/sounds/Amy/",
+      "../../core/definitions/sounds/Jim/*": "definitions/sounds/Jim/",
+      "../../core/definitions/sounds/Nerevar/*": "definitions/sounds/Nerevar/",
+      "../../core/definitions/sounds/Yolo/*": "definitions/sounds/Yolo/",
       "../../icons/*": "icons/"
     },
     "icon": [
