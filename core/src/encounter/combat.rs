@@ -247,6 +247,29 @@ impl CombatEncounter {
         self.active_boss_idx
     }
 
+    /// Check if the active boss has a victory trigger that applies to the current difficulty.
+    /// Returns false when `victory_trigger_difficulties` is set and the current difficulty
+    /// doesn't match (e.g., Trandoshan Squad only has a victory trigger on Master).
+    pub fn has_active_victory_trigger(&self) -> bool {
+        let Some(boss) = self.active_boss_definition() else {
+            return false;
+        };
+        if !boss.has_victory_trigger {
+            return false;
+        }
+        if boss.victory_trigger_difficulties.is_empty() {
+            return true;
+        }
+        self.difficulty
+            .as_ref()
+            .map(|d| {
+                boss.victory_trigger_difficulties
+                    .iter()
+                    .any(|vd| d.matches_config_key(vd))
+            })
+            .unwrap_or(true) // default to true if difficulty unknown
+    }
+
     /// Set the encounter difficulty
     pub fn set_difficulty(&mut self, difficulty: Option<Difficulty>) {
         self.difficulty = difficulty;

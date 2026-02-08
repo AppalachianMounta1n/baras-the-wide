@@ -141,11 +141,11 @@ fn handle_in_combat(
 
     // Check for combat timeout
     // Skip timeout for victory-trigger encounters (e.g., Coratanni has long phases with no activity)
+    // Uses difficulty-aware check: Trandos on Story/Veteran has no victory trigger, so normal timeout applies
     let has_victory_trigger = cache.current_encounter().map_or(false, |enc| {
-        enc.active_boss_idx()
-            .map_or(false, |idx| enc.boss_definitions()[idx].has_victory_trigger)
+        enc.has_active_victory_trigger()
     });
-    
+
     if !has_victory_trigger
         && let Some(enc) = cache.current_encounter()
         && let Some(last_activity) = enc.last_combat_activity_time
@@ -294,22 +294,18 @@ fn handle_in_combat(
 
     // Check if this is a victory-trigger encounter that hasn't triggered yet
     // If so, ignore ExitCombat events until the victory trigger fires
+    // Difficulty-aware: Trandos on Story/Veteran uses normal combat flow
     let should_ignore_exit_combat = cache.current_encounter().map_or(false, |enc| {
-        // Only check active boss - don't use fallback to avoid false positives
-        if let Some(idx) = enc.active_boss_idx() {
-            enc.boss_definitions()[idx].has_victory_trigger && !enc.victory_triggered
-        } else {
-            false
-        }
+        enc.has_active_victory_trigger() && !enc.victory_triggered
     });
 
     if effect_id == effect_id::ENTERCOMBAT {
         // Check if this is a victory-trigger encounter
         // These are special long encounters (e.g., Coratanni) where players can legitimately
         // die, medcenter, and run back while the raid continues fighting
+        // Difficulty-aware: Trandos on Story/Veteran uses normal combat flow
         let has_victory_trigger = cache.current_encounter().map_or(false, |enc| {
-            enc.active_boss_idx()
-                .map_or(false, |idx| enc.boss_definitions()[idx].has_victory_trigger)
+            enc.has_active_victory_trigger()
         });
 
         if has_victory_trigger {
@@ -394,10 +390,8 @@ fn handle_in_combat(
         if let Some(enc) = cache.current_encounter_mut() {
             // For victory-trigger encounters, exiting area without victory trigger = wipe
             // (player medcentered, left group, or got disconnected)
-            if let Some(idx) = enc.active_boss_idx() {
-                if enc.boss_definitions()[idx].has_victory_trigger && !enc.victory_triggered {
-                    enc.all_players_dead = true;
-                }
+            if enc.has_active_victory_trigger() && !enc.victory_triggered {
+                enc.all_players_dead = true;
             }
 
             enc.exit_combat_time = Some(timestamp);
@@ -689,10 +683,9 @@ pub fn tick_combat_state(cache: &mut SessionCache) -> Vec<GameSignal> {
     // Check wall-clock timeout
     // Skip timeout for victory-trigger encounters (e.g., Coratanni has long phases with no activity)
     let has_victory_trigger = cache.current_encounter().map_or(false, |enc| {
-        enc.active_boss_idx()
-            .map_or(false, |idx| enc.boss_definitions()[idx].has_victory_trigger)
+        enc.has_active_victory_trigger()
     });
-    
+
     if !has_victory_trigger
         && let Some(enc) = cache.current_encounter()
         && let Some(last_activity) = enc.last_combat_activity_time
