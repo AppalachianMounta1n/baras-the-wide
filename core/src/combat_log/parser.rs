@@ -311,11 +311,10 @@ impl LogParser {
         match effect_id {
             effect_id::DAMAGE => LogParser::parse_dmg_details(segment),
             effect_id::HEAL => LogParser::parse_heal_details(segment),
-            effect_id::TAUNT => {
+            effect_id::TAUNT | effect_id::MODIFYTHREAT => {
                 let bytes = segment.as_bytes();
                 let angle = memchr(b'<', bytes);
                 let angle_end = memchr(b'>', bytes);
-                // Parse threat from <value> - only present if effective heal occurred
                 let threat = angle
                     .zip(angle_end)
                     .and_then(|(s, e)| segment[s + 1..e].parse::<f32>().ok())

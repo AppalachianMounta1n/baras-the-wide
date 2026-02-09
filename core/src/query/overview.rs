@@ -144,7 +144,7 @@ impl EncounterQuery<'_> {
                 SELECT source_name as name,
                     SUM(threat) as threat_total
                 FROM events
-                WHERE threat > 0 {time_filter}
+                WHERE threat != 0 {time_filter}
                 GROUP BY source_name
             )
             SELECT
