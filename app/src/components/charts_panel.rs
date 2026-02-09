@@ -119,8 +119,10 @@ fn merge_effect_windows(mut windows: Vec<EffectWindow>) -> Vec<EffectWindow> {
 
 fn build_time_series_option(
     data: &[TimeSeriesPoint],
+    secondary_data: Option<&[TimeSeriesPoint]>,
     title: &str,
     color: &str,
+    secondary_color: Option<&str>,
     fill_color: &str,
     effect_windows: &[(i64, EffectWindow, &str)], // (effect_id, window, color)
     y_axis_name: &str,
@@ -363,6 +365,51 @@ fn build_time_series_option(
     js_set(&avg_series, "data", &avg_arr);
 
     series_arr.push(&avg_series);
+
+    // Optional secondary series (e.g., EHPS alongside raw HPS)
+    if let (Some(sec_data), Some(sec_color)) = (secondary_data, secondary_color) {
+        // Build secondary sparse lookup
+        let sec_sparse: std::collections::HashMap<i64, f64> = sec_data
+            .iter()
+            .map(|p| (p.bucket_start_ms, p.total_value))
+            .collect();
+
+        // Generate secondary average from the same time spine
+        let mut sec_avg_data: Vec<(f64, f64)> = Vec::with_capacity(num_buckets);
+        let mut sec_cumulative = 0.0;
+        for i in 0..num_buckets {
+            let time_ms = min_time_ms + (i as i64) * bucket_ms;
+            let time_secs = time_ms as f64 / 1000.0;
+            let value = sec_sparse.get(&time_ms).copied().unwrap_or(0.0);
+            sec_cumulative += value;
+            let elapsed_in_range = (i as f64) + 1.0;
+            let avg = (sec_cumulative / elapsed_in_range).round();
+            sec_avg_data.push((time_secs, avg));
+        }
+
+        let sec_series = js_sys::Object::new();
+        js_set(&sec_series, "type", &JsValue::from_str("line"));
+        js_set(&sec_series, "name", &JsValue::from_str("Effective"));
+        js_set(&sec_series, "smooth", &JsValue::TRUE);
+        js_set(&sec_series, "symbol", &JsValue::from_str("none"));
+        js_set(&sec_series, "yAxisIndex", &JsValue::from_f64(1.0));
+
+        let sec_line_style = js_sys::Object::new();
+        js_set(&sec_line_style, "color", &JsValue::from_str(sec_color));
+        js_set(&sec_line_style, "width", &JsValue::from_f64(2.5));
+        js_set(&sec_series, "lineStyle", &sec_line_style);
+
+        let sec_arr = js_sys::Array::new();
+        for (x, y) in sec_avg_data {
+            let pair = js_sys::Array::new();
+            pair.push(&JsValue::from_f64(x));
+            pair.push(&JsValue::from_f64(y));
+            sec_arr.push(&pair);
+        }
+        js_set(&sec_series, "data", &sec_arr);
+        series_arr.push(&sec_series);
+    }
+
     js_set(&obj, "series", &series_arr);
 
     // Animation
@@ -429,6 +476,7 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
     // Time series data
     let mut dps_data = use_signal(Vec::<TimeSeriesPoint>::new);
     let mut hps_data = use_signal(Vec::<TimeSeriesPoint>::new);
+    let mut ehps_data = use_signal(Vec::<TimeSeriesPoint>::new);
     let mut dtps_data = use_signal(Vec::<TimeSeriesPoint>::new);
 
     // Effect data
@@ -531,6 +579,12 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
                 hps_data.set(data);
             }
             if let Some(data) =
+                api::query_ehps_over_time(idx, bucket_ms, Some(&entity), tr_opt).await
+            {
+                if *load_epoch.read() != current_gen { return; }
+                ehps_data.set(data);
+            }
+            if let Some(data) =
                 api::query_dtps_over_time(idx, bucket_ms, Some(&entity), tr_opt).await
             {
                 if *load_epoch.read() != current_gen { return; }
@@ -611,6 +665,7 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
         let show_dtps_val = *show_dtps.read();
         let dps = dps_data.read().clone();
         let hps = hps_data.read().clone();
+        let ehps = ehps_data.read().clone();
         let dtps = dtps_data.read().clone();
         let windows = effect_windows.read().clone();
 
@@ -635,8 +690,10 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
             {
                 let option = build_time_series_option(
                     &dps,
+                    None,
                     "DPS",
                     "#e74c3c",
+                    None,
                     "rgba(231, 76, 60, 0.15)",
                     &windows,
                     "DPS",
@@ -648,10 +705,13 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
                 && !hps.is_empty()
                 && let Some(chart) = init_chart("chart-hps")
             {
+                let ehps_ref = if !ehps.is_empty() { Some(ehps.as_slice()) } else { None };
                 let option = build_time_series_option(
                     &hps,
+                    ehps_ref,
                     "HPS",
                     "#2ecc71",
+                    Some("#3498db"),
                     "rgba(46, 204, 113, 0.15)",
                     &windows,
                     "HPS",
@@ -665,8 +725,10 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
             {
                 let option = build_time_series_option(
                     &dtps,
+                    None,
                     "DTPS",
                     "#e67e22",
+                    None,
                     "rgba(230, 126, 34, 0.15)",
                     &windows,
                     "DTPS",

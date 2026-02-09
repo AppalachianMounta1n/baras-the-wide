@@ -1868,7 +1868,10 @@ async fn calculate_combat_data(shared: &Arc<SharedState>) -> Option<CombatData> 
                     .map(|def| def.name.clone())
             });
             let overall_duration = encounter.combat_time_secs.max(1.0);
-            let current_time = chrono::Local::now().naive_local();
+            // Use exit time when in PostCombat (grace window) so duration doesn't keep ticking
+            let current_time = encounter
+                .exit_combat_time
+                .unwrap_or_else(|| chrono::Local::now().naive_local());
 
             let entries: Vec<ChallengeEntry> = encounter
                 .challenge_tracker

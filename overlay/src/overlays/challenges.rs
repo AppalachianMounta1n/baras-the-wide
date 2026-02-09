@@ -149,12 +149,12 @@ impl ChallengeOverlay {
 
         let padding = self.frame.scaled(BASE_PADDING);
         let card_spacing = self.frame.scaled(BASE_CARD_SPACING);
-        let bar_height = self.frame.scaled(BASE_BAR_HEIGHT);
-        let bar_spacing = self.frame.scaled(BASE_BAR_SPACING);
-        let font_size = self.frame.scaled(BASE_FONT_SIZE);
-        let header_font_size = self.frame.scaled(BASE_HEADER_FONT_SIZE);
-        let duration_font_size = self.frame.scaled(BASE_DURATION_FONT_SIZE);
-        let bar_radius = 3.0 * self.frame.scale_factor();
+        let mut bar_height = self.frame.scaled(BASE_BAR_HEIGHT);
+        let mut bar_spacing = self.frame.scaled(BASE_BAR_SPACING);
+        let mut font_size = self.frame.scaled(BASE_FONT_SIZE);
+        let mut header_font_size = self.frame.scaled(BASE_HEADER_FONT_SIZE);
+        let mut duration_font_size = self.frame.scaled(BASE_DURATION_FONT_SIZE);
+        let mut bar_radius = 3.0 * self.frame.scale_factor();
 
         let font_color = color_from_rgba(self.config.font_color);
         let default_bar_color = color_from_rgba(self.config.default_bar_color);
@@ -175,6 +175,33 @@ impl ChallengeOverlay {
             .take(max_display)
             .cloned()
             .collect();
+
+        let num_visible = enabled_challenges.len();
+        if num_visible > 0 {
+            // Scale content up to fill available space when fewer challenges are shown.
+            // Estimate per-card height: header + separator + player bars + optional footer
+            let sep_overhead = bar_spacing * 2.0 + 4.0 * self.frame.scale_factor();
+            let card_height_est = header_font_size + sep_overhead
+                + MAX_PLAYERS as f32 * (bar_height + bar_spacing)
+                + if show_footer { font_size + bar_spacing } else { 0.0 };
+
+            let content_height_est = match layout {
+                ChallengeLayout::Vertical => {
+                    num_visible as f32 * card_height_est
+                        + (num_visible.saturating_sub(1)) as f32 * card_spacing
+                        + padding * 2.0
+                }
+                ChallengeLayout::Horizontal => card_height_est + padding * 2.0,
+            };
+
+            let content_scale = (height / content_height_est).clamp(1.0, 2.0);
+            bar_height *= content_scale;
+            bar_spacing *= content_scale;
+            font_size *= content_scale;
+            header_font_size *= content_scale;
+            duration_font_size *= content_scale;
+            bar_radius *= content_scale;
+        }
 
         match layout {
             ChallengeLayout::Vertical => {

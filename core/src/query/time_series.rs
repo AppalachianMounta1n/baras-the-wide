@@ -122,6 +122,25 @@ ORDER BY time_series.bucket_start_ms
         .await
     }
 
+    /// Query EHPS (effective healing per second) over time, bucketed by time interval.
+    pub async fn ehps_over_time(
+        &self,
+        bucket_ms: i64,
+        source_name: Option<&str>,
+        time_range: Option<&TimeRange>,
+    ) -> Result<Vec<TimeSeriesPoint>, String> {
+        self.query_time_series(
+            bucket_ms,
+            TimeSeriesConfig {
+                value_column: "heal_effective",
+                entity_column: "source_name",
+                entity_filter: source_name,
+            },
+            time_range,
+        )
+        .await
+    }
+
     /// Query DTPS (damage taken per second) over time for a target entity.
     pub async fn dtps_over_time(
         &self,

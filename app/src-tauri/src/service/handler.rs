@@ -722,6 +722,42 @@ impl ServiceHandle {
             .await
     }
 
+    /// Query EHPS (effective healing) over time for a specific encounter.
+    pub async fn query_ehps_over_time(
+        &self,
+        encounter_idx: Option<u32>,
+        bucket_ms: i64,
+        source_name: Option<String>,
+        time_range: Option<TimeRange>,
+    ) -> Result<Vec<TimeSeriesPoint>, String> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref().ok_or("No active session")?;
+        let session = session.read().await;
+
+        if let Some(idx) = encounter_idx {
+            let dir = session.encounters_dir().ok_or("No encounters directory")?;
+            let path = dir.join(baras_core::storage::encounter_filename(idx));
+            if !path.exists() {
+                return Err(format!("Encounter file not found: {:?}", path));
+            }
+            self.shared.query_context.register_parquet(&path).await?;
+        } else {
+            let writer = session
+                .encounter_writer()
+                .ok_or("No live encounter buffer")?;
+            let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
+            self.shared.query_context.register_batch(batch).await?;
+        }
+
+        self.shared
+            .query_context
+            .query()
+            .await
+            .query()
+            .ehps_over_time(bucket_ms, source_name.as_deref(), time_range.as_ref())
+            .await
+    }
+
     /// Query DTPS over time for a specific encounter.
     pub async fn query_dtps_over_time(
         &self,

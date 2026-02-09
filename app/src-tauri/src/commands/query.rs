@@ -106,6 +106,20 @@ pub async fn query_hps_over_time(
         .await
 }
 
+/// Query EHPS (effective healing) over time with specified bucket size.
+#[tauri::command]
+pub async fn query_ehps_over_time(
+    handle: State<'_, ServiceHandle>,
+    encounter_idx: Option<u32>,
+    bucket_ms: i64,
+    source_name: Option<String>,
+    time_range: Option<TimeRange>,
+) -> Result<Vec<TimeSeriesPoint>, String> {
+    handle
+        .query_ehps_over_time(encounter_idx, bucket_ms, source_name, time_range)
+        .await
+}
+
 /// Query DTPS over time with specified bucket size.
 #[tauri::command]
 pub async fn query_dtps_over_time(

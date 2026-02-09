@@ -241,6 +241,7 @@ pub fn run() {
             commands::query_raid_overview,
             commands::query_dps_over_time,
             commands::query_hps_over_time,
+            commands::query_ehps_over_time,
             commands::query_dtps_over_time,
             commands::query_effect_uptime,
             commands::query_effect_windows,

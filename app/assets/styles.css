@@ -3417,6 +3417,123 @@ details[open] .collapsible-summary::before {
   opacity: 0.7;
 }
 
+/* Challenge results in encounter detail */
+.challenge-results {
+  margin-top: 0.75em;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 0.75em;
+}
+
+.challenge-results-header {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-bottom: 0.5em;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.challenge-results-header i {
+  color: #c8a84e;
+}
+
+.challenge-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+}
+
+.challenge-card {
+  flex: 1 1 280px;
+  max-width: 400px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-md);
+  padding: 0.5em 0.75em;
+}
+
+.challenge-card-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75em;
+  margin-bottom: 0.4em;
+  font-size: 0.85em;
+}
+
+.challenge-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.challenge-total {
+  color: #7eb8da;
+  font-weight: 500;
+}
+
+.challenge-duration {
+  margin-left: auto;
+  font-size: 0.9em;
+}
+
+.challenge-players {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.challenge-player-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.15em 0.4em;
+  font-size: 0.8em;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.challenge-bar-fill {
+  position: absolute;
+  inset: 0;
+  background: rgba(74, 144, 217, 0.15);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.challenge-player-name {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.challenge-player-ps {
+  position: relative;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 4.5em;
+  text-align: right;
+}
+
+.challenge-player-value {
+  position: relative;
+  color: #7eb8da;
+  font-variant-numeric: tabular-nums;
+  min-width: 4.5em;
+  text-align: right;
+}
+
+.challenge-player-pct {
+  position: relative;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 3.5em;
+  text-align: right;
+}
+
 /* Phase header rows (area/phase dividers - collapsible) */
 .phase-header-row {
   background: linear-gradient(

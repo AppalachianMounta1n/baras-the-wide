@@ -82,6 +82,8 @@ pub struct EncounterSummary {
     pub is_phase_start: bool,
     #[serde(default)]
     pub npc_names: Vec<String>,
+    #[serde(default)]
+    pub challenges: Vec<ChallengeSummary>,
     // Line number tracking for per-encounter Parsely uploads
     #[serde(default)]
     pub area_entered_line: Option<u64>,
@@ -92,6 +94,26 @@ pub struct EncounterSummary {
     // Parsely link (set after successful upload)
     #[serde(default)]
     pub parsely_link: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChallengeSummary {
+    pub name: String,
+    pub metric: String,
+    pub total_value: i64,
+    pub event_count: u32,
+    pub duration_secs: f32,
+    pub per_second: Option<f32>,
+    pub by_player: Vec<ChallengePlayerSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChallengePlayerSummary {
+    pub entity_id: i64,
+    pub name: String,
+    pub value: i64,
+    pub percent: f32,
+    pub per_second: Option<f32>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,6 +197,10 @@ pub fn HistoryPanel(mut props: HistoryPanelProps) -> Element {
     // Fetch encounter history
     use_future(move || async move {
         if let Some(history) = api::get_encounter_history().await {
+            // Auto-expand the most recent encounter (last in list = newest)
+            if let Some(latest) = history.last() {
+                expanded_id.set(Some(latest.encounter_id));
+            }
             encounters.set(history);
         }
         loading.set(false);
@@ -190,9 +216,17 @@ pub fn HistoryPanel(mut props: HistoryPanelProps) -> Element {
                     || event_type.contains("TailingModeChanged")
                     || event_type.contains("FileLoaded"))
             {
+                let is_combat_ended = event_type.contains("CombatEnded");
                 spawn(async move {
                     if let Some(history) = api::get_encounter_history().await {
-                        // Use try_write to handle signal being dropped when component unmounts
+                        // Auto-expand the newest encounter on CombatEnded
+                        if is_combat_ended {
+                            if let Some(latest) = history.last() {
+                                let _ = expanded_id
+                                    .try_write()
+                                    .map(|mut w| *w = Some(latest.encounter_id));
+                            }
+                        }
                         let _ = encounters.try_write().map(|mut w| *w = history);
                     }
                 });
@@ -723,6 +757,66 @@ fn EncounterDetail(
                                     td { class: "metric-value hps", "{player.effective_heal_pct:.1}%" }
                                     td { class: "metric-value hps", "{format_number(player.abs)}" }
                                     td { class: "metric-value apm", "{player.apm:.1}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Challenge results
+            if !encounter.challenges.is_empty() {
+                div { class: "challenge-results",
+                    h4 { class: "challenge-results-header",
+                        i { class: "fa-solid fa-trophy" }
+                        " Challenges"
+                    }
+                    div { class: "challenge-cards",
+                        for challenge in encounter.challenges.iter() {
+                            {
+                                let duration_str = format_duration(challenge.duration_secs as i64);
+                                let per_sec_str = challenge.per_second
+                                    .map(|ps| format_number(ps as i64))
+                                    .unwrap_or_default();
+
+                                rsx! {
+                                    div { class: "challenge-card",
+                                        div { class: "challenge-card-header",
+                                            span { class: "challenge-name", "{challenge.name}" }
+                                            span { class: "challenge-total",
+                                                "{format_number(challenge.total_value)}"
+                                                if !per_sec_str.is_empty() {
+                                                    span { class: "text-muted", " ({per_sec_str}/s)" }
+                                                }
+                                            }
+                                            span { class: "challenge-duration text-muted", "{duration_str}" }
+                                        }
+                                        if !challenge.by_player.is_empty() {
+                                            div { class: "challenge-players",
+                                                for player in challenge.by_player.iter() {
+                                                    {
+                                                        let ps_str = player.per_second
+                                                            .map(|ps| format_number(ps as i64))
+                                                            .unwrap_or_default();
+                                                        rsx! {
+                                                            div { class: "challenge-player-row",
+                                                                div {
+                                                                    class: "challenge-bar-fill",
+                                                                    style: "width: {player.percent:.1}%",
+                                                                }
+                                                                span { class: "challenge-player-name", "{player.name}" }
+                                                                if !ps_str.is_empty() {
+                                                                    span { class: "challenge-player-ps", "{ps_str}/s" }
+                                                                }
+                                                                span { class: "challenge-player-value", "{format_number(player.value)}" }
+                                                                span { class: "challenge-player-pct", "{player.percent:.1}%" }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
