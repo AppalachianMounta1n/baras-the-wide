@@ -1410,6 +1410,9 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                 time_range: time_range(),
                                 initial_search: death_search_text(),
                                 state: combat_log_state,
+                                on_range_change: move |new_range: TimeRange| {
+                                    time_range.set(new_range);
+                                },
                             }
                         }
                     } else if matches!(view_mode(), ViewMode::Charts) {
@@ -1671,6 +1674,9 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                         encounter_idx: *selected_encounter.read(),
                                         time_range: time_range(),
                                         selected_source: selected_source.read().clone(),
+                                        on_range_change: move |new_range: TimeRange| {
+                                            time_range.set(new_range);
+                                        },
                                     }
                                 }
                             } else if let Some(current_tab) = current_tab {

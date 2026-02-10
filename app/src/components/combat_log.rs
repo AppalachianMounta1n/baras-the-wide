@@ -53,6 +53,9 @@ pub struct CombatLogProps {
     pub initial_search: Option<String>,
     /// Persisted state signal (survives tab switches, includes show_ids!)
     pub state: Signal<CombatLogSessionState>,
+    /// Optional callback to update the parent's time range (e.g. from context menu)
+    #[props(default)]
+    pub on_range_change: Option<EventHandler<TimeRange>>,
 }
 
 /// Format time as M:SS.dd (relative to combat start)
@@ -250,6 +253,10 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
     let mut find_matches = use_signal(Vec::<CombatLogFindMatch>::new);
     let mut find_current_idx = use_signal(|| 0usize);
     let mut highlighted_row = use_signal(|| None::<u64>);
+
+    // Context menu state for right-click "Set as range start/end"
+    let mut context_menu_pos = use_signal(|| None::<(f64, f64)>);
+    let mut context_menu_time = use_signal(|| 0.0f32);
 
     // Data state
     let mut rows = use_signal(Vec::<CombatLogRow>::new);
@@ -1092,9 +1099,19 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                     div {
                         style: "position: absolute; top: {start_idx as f64 * ROW_HEIGHT}px; width: 100%;",
                         for row in visible_rows.iter() {
+                            {
+                            let row_time = row.time_secs;
+                            rsx! {
                             div {
                                 key: "{row.row_idx}",
                                 class: "{row_class(&row, highlighted_row_idx)}",
+                                oncontextmenu: move |e: MouseEvent| {
+                                    if props.on_range_change.is_some() {
+                                        e.prevent_default();
+                                        context_menu_pos.set(Some((e.client_coordinates().x, e.client_coordinates().y)));
+                                        context_menu_time.set(row_time);
+                                    }
+                                },
                                 div { class: "log-cell log-time", style: "width: {col_time}px; min-width: {col_time}px;",
                                     if absolute_time {
                                         "{format_time_absolute(row.timestamp_ms)}"
@@ -1166,6 +1183,45 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                                     }
                                 }
                             }
+                            } // rsx!
+                            } // let row_time block
+                        }
+                    }
+                }
+            }
+
+            // Context menu for "Set as range start/end"
+            if let Some((x, y)) = *context_menu_pos.read() {
+                if props.on_range_change.is_some() {
+                    // Transparent backdrop for click-outside dismissal
+                    div {
+                        style: "position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 999;",
+                        onclick: move |_| context_menu_pos.set(None),
+                    }
+                    div {
+                        class: "log-context-menu",
+                        style: "position: fixed; left: {x}px; top: {y}px; z-index: 1000;",
+                        div {
+                            class: "context-menu-item",
+                            onclick: move |_| {
+                                let t = *context_menu_time.read();
+                                if let Some(ref handler) = props.on_range_change {
+                                    handler.call(TimeRange::new(t, props.time_range.end));
+                                }
+                                context_menu_pos.set(None);
+                            },
+                            "Set as range start"
+                        }
+                        div {
+                            class: "context-menu-item",
+                            onclick: move |_| {
+                                let t = *context_menu_time.read();
+                                if let Some(ref handler) = props.on_range_change {
+                                    handler.call(TimeRange::new(props.time_range.start, t));
+                                }
+                                context_menu_pos.set(None);
+                            },
+                            "Set as range end"
                         }
                     }
                 }

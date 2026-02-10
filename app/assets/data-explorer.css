@@ -152,18 +152,39 @@
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 
-/* Compact range display (inline with track) */
+/* Range display below timeline, left-aligned */
 .phase-timeline-range {
   display: flex;
   gap: 4px;
   align-items: center;
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
+  padding-top: 4px;
 }
 
 .phase-timeline-range-value {
   font-family: var(--font-mono);
   color: var(--accent-gold);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+  width: 5.5ch;
+  text-align: center;
+  font-size: 12px;
+  cursor: text;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.phase-timeline-range-value:hover {
+  border-color: var(--border-subtle);
+}
+
+.phase-timeline-range-value:focus {
+  outline: none;
+  border-color: var(--accent-gold);
+  background: var(--bg-tertiary);
+  border-bottom: 2px solid var(--accent-gold);
 }
 
 .phase-timeline-range-separator {
@@ -1497,4 +1518,31 @@
   font-size: 0.55em;
   font-weight: 600;
   color: #ccc;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Context Menu (right-click "Set as range start/end")
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.log-context-menu {
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border-subtle, #444);
+  border-radius: var(--radius-sm, 4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  padding: 4px 0;
+  min-width: 160px;
+  font-size: 12px;
+}
+
+.context-menu-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  color: var(--text-primary, #e0e0e0);
+  transition: background var(--transition-fast, 0.1s);
+  white-space: nowrap;
+}
+
+.context-menu-item:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.1));
+  color: var(--accent-gold, #ffc832);
 }

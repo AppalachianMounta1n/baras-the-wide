@@ -14,6 +14,9 @@ pub struct RotationViewProps {
     pub encounter_idx: Option<u32>,
     pub time_range: TimeRange,
     pub selected_source: Option<String>,
+    /// Optional callback to update the parent's time range (e.g. from context menu)
+    #[props(default)]
+    pub on_range_change: Option<EventHandler<TimeRange>>,
 }
 
 #[component]
@@ -22,6 +25,10 @@ pub fn RotationView(props: RotationViewProps) -> Element {
     let mut selected_anchor = use_signal(|| None::<i64>);
     let mut rotation = use_signal(|| None::<RotationAnalysis>);
     let mut loading = use_signal(|| false);
+
+    // Context menu state for right-click "Set as range start/end"
+    let mut context_menu_pos = use_signal(|| None::<(f64, f64)>);
+    let mut context_menu_time = use_signal(|| 0.0f32);
 
     // Track source in a signal so effects can react to changes
     let mut tracked_source = use_signal(|| props.selected_source.clone());
@@ -172,10 +179,23 @@ pub fn RotationView(props: RotationViewProps) -> Element {
                                 }
                                 div { class: "rotation-slots",
                                     for (j, slot) in cycle.slots.iter().enumerate() {
+                                        {
+                                        let gcd_time = slot.gcd_ability.time_secs;
+                                        rsx! {
                                         div { class: "gcd-slot", key: "{j}",
                                             // Off-GCD weaves stacked above (reversed: last weave nearest GCD)
                                             for (k, weave) in slot.off_gcd.iter().rev().enumerate() {
+                                                {
+                                                let weave_time = weave.time_secs;
+                                                rsx! {
                                                 div { title: "{weave.ability_name}",
+                                                    oncontextmenu: move |e: MouseEvent| {
+                                                        if props.on_range_change.is_some() {
+                                                            e.prevent_default();
+                                                            context_menu_pos.set(Some((e.client_coordinates().x, e.client_coordinates().y)));
+                                                            context_menu_time.set(weave_time);
+                                                        }
+                                                    },
                                                     AbilityIcon {
                                                         key: "w{k}",
                                                         ability_id: weave.ability_id,
@@ -183,9 +203,18 @@ pub fn RotationView(props: RotationViewProps) -> Element {
                                                         fallback: weave.ability_name.clone(),
                                                     }
                                                 }
+                                                }
+                                                }
                                             }
                                             // GCD ability on bottom
                                             div { title: "{slot.gcd_ability.ability_name}",
+                                                oncontextmenu: move |e: MouseEvent| {
+                                                    if props.on_range_change.is_some() {
+                                                        e.prevent_default();
+                                                        context_menu_pos.set(Some((e.client_coordinates().x, e.client_coordinates().y)));
+                                                        context_menu_time.set(gcd_time);
+                                                    }
+                                                },
                                                 AbilityIcon {
                                                     ability_id: slot.gcd_ability.ability_id,
                                                     size: 40,
@@ -193,9 +222,47 @@ pub fn RotationView(props: RotationViewProps) -> Element {
                                                 }
                                             }
                                         }
+                                        }
+                                        }
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            // Context menu for "Set as range start/end"
+            if let Some((x, y)) = *context_menu_pos.read() {
+                if props.on_range_change.is_some() {
+                    div {
+                        style: "position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 999;",
+                        onclick: move |_| context_menu_pos.set(None),
+                    }
+                    div {
+                        class: "log-context-menu",
+                        style: "position: fixed; left: {x}px; top: {y}px; z-index: 1000;",
+                        div {
+                            class: "context-menu-item",
+                            onclick: move |_| {
+                                let t = *context_menu_time.read();
+                                if let Some(ref handler) = props.on_range_change {
+                                    handler.call(TimeRange::new(t, props.time_range.end));
+                                }
+                                context_menu_pos.set(None);
+                            },
+                            "Set as range start"
+                        }
+                        div {
+                            class: "context-menu-item",
+                            onclick: move |_| {
+                                let t = *context_menu_time.read();
+                                if let Some(ref handler) = props.on_range_change {
+                                    handler.call(TimeRange::new(props.time_range.start, t));
+                                }
+                                context_menu_pos.set(None);
+                            },
+                            "Set as range end"
                         }
                     }
                 }

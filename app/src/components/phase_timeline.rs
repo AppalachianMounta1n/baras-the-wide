@@ -13,6 +13,18 @@ fn format_time(secs: f32) -> String {
     format!("{}:{:02}", mins, secs)
 }
 
+/// Parse a time string in M:SS, M:SS.d, or bare seconds format.
+fn parse_time(s: &str) -> Option<f32> {
+    let s = s.trim();
+    if let Some((min_str, sec_str)) = s.split_once(':') {
+        let mins: f32 = min_str.parse().ok()?;
+        let secs: f32 = sec_str.parse().ok()?;
+        Some(mins * 60.0 + secs)
+    } else {
+        s.parse().ok()
+    }
+}
+
 /// Generate a consistent HSL color based on phase_id string.
 /// All instances of the same phase type will get the same color.
 /// Uses muted colors that blend with the dark UI theme.
@@ -47,6 +59,11 @@ pub fn PhaseTimelineFilter(props: PhaseTimelineProps) -> Element {
     // Drag state: start_time when dragging
     let mut drag_start = use_signal(|| None::<f32>);
     let mut committed_range = use_signal(|| None::<TimeRange>); // Persists after drag until acknowledged
+    let mut was_dragged = use_signal(|| false);
+
+    // Editing state for inline time inputs
+    let mut editing_start = use_signal(|| None::<String>);
+    let mut editing_end = use_signal(|| None::<String>);
 
     // Calculate percentage position for a time value
     let time_to_pct = |t: f32| -> f32 {
@@ -156,6 +173,7 @@ pub fn PhaseTimelineFilter(props: PhaseTimelineProps) -> Element {
         // Mouseup handler
         let mut drag_start_clone2 = drag_start.clone();
         let mut committed_range_clone2 = committed_range.clone();
+        let mut was_dragged_clone = was_dragged.clone();
         let on_range_change = props.on_range_change.clone();
         let on_mouseup =
             Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |e: web_sys::MouseEvent| {
@@ -193,11 +211,17 @@ pub fn PhaseTimelineFilter(props: PhaseTimelineProps) -> Element {
                     };
 
                     // If just a click (no drag), reset to full
-                    let final_range = if (end - start).abs() < 1.0 {
-                        TimeRange::full(duration)
-                    } else {
+                    let real_drag = (end - start).abs() >= 1.0;
+                    let final_range = if real_drag {
                         TimeRange::new(start, end)
+                    } else {
+                        TimeRange::full(duration)
                     };
+
+                    // Mark as dragged so phase onclick doesn't clobber
+                    if real_drag {
+                        let _ = was_dragged_clone.try_write().map(|mut w| *w = true);
+                    }
 
                     let _ = committed_range_clone2
                         .try_write()
@@ -227,6 +251,10 @@ pub fn PhaseTimelineFilter(props: PhaseTimelineProps) -> Element {
     } else {
         range // Always use props range when not dragging
     };
+
+    // Display values for editable time inputs
+    let start_display = editing_start.read().clone().unwrap_or_else(|| format_time(display_range.start));
+    let end_display = editing_end.read().clone().unwrap_or_else(|| format_time(display_range.end));
 
     rsx! {
         div { class: "phase-timeline",
@@ -260,6 +288,10 @@ pub fn PhaseTimelineFilter(props: PhaseTimelineProps) -> Element {
                                     title: "{phase.phase_name} ({format_time(phase.start_secs)} - {format_time(phase.end_secs)})",
                                     onclick: move |e| {
                                         e.stop_propagation();
+                                        if *was_dragged.peek() {
+                                            was_dragged.set(false);
+                                            return;
+                                        }
                                         select_phase(&phase_clone);
                                     },
 
@@ -293,19 +325,133 @@ pub fn PhaseTimelineFilter(props: PhaseTimelineProps) -> Element {
                         }
                     }
                 }
+            }
 
-                // Range display + reset (inline)
-                div { class: "phase-timeline-range",
-                    span { class: "phase-timeline-range-value", "{format_time(display_range.start)}" }
+            // Range display below timeline, left-aligned
+            div { class: "phase-timeline-range",
+                    input {
+                        class: "phase-timeline-range-value",
+                        r#type: "text",
+                        size: 5,
+                        value: "{start_display}",
+                        onfocus: move |_| {
+                            editing_start.set(Some(format_time(range.start)));
+                        },
+                        oninput: move |e: Event<FormData>| {
+                            editing_start.set(Some(e.value()));
+                        },
+                        onblur: move |_| {
+                            if let Some(ref text) = *editing_start.read() {
+                                if let Some(t) = parse_time(text) {
+                                    let t = t.clamp(0.0, duration);
+                                    if t < range.end {
+                                        props.on_range_change.call(TimeRange::new(t, range.end));
+                                    }
+                                }
+                            }
+                            editing_start.set(None);
+                        },
+                        onkeydown: move |e: Event<KeyboardData>| {
+                            match e.key() {
+                                Key::Enter => {
+                                    if let Some(ref text) = *editing_start.read() {
+                                        if let Some(t) = parse_time(text) {
+                                            let t = t.clamp(0.0, duration);
+                                            if t < range.end {
+                                                props.on_range_change.call(TimeRange::new(t, range.end));
+                                            }
+                                        }
+                                    }
+                                    editing_start.set(None);
+                                }
+                                Key::Escape => editing_start.set(None),
+                                Key::ArrowUp => {
+                                    e.prevent_default();
+                                    let cur = editing_start.read().as_ref()
+                                        .and_then(|t| parse_time(t))
+                                        .unwrap_or(range.start);
+                                    let v = (cur + 1.0).min(range.end - 1.0).max(0.0);
+                                    props.on_range_change.call(TimeRange::new(v, range.end));
+                                    editing_start.set(Some(format_time(v)));
+                                }
+                                Key::ArrowDown => {
+                                    e.prevent_default();
+                                    let cur = editing_start.read().as_ref()
+                                        .and_then(|t| parse_time(t))
+                                        .unwrap_or(range.start);
+                                    let v = (cur - 1.0).max(0.0);
+                                    props.on_range_change.call(TimeRange::new(v, range.end));
+                                    editing_start.set(Some(format_time(v)));
+                                }
+                                _ => {}
+                            }
+                        },
+                    }
                     span { class: "phase-timeline-range-separator", "—" }
-                    span { class: "phase-timeline-range-value", "{format_time(display_range.end)}" }
+                    input {
+                        class: "phase-timeline-range-value",
+                        r#type: "text",
+                        size: 5,
+                        value: "{end_display}",
+                        onfocus: move |_| {
+                            editing_end.set(Some(format_time(range.end)));
+                        },
+                        oninput: move |e: Event<FormData>| {
+                            editing_end.set(Some(e.value()));
+                        },
+                        onblur: move |_| {
+                            if let Some(ref text) = *editing_end.read() {
+                                if let Some(t) = parse_time(text) {
+                                    let t = t.clamp(0.0, duration);
+                                    if t > range.start {
+                                        props.on_range_change.call(TimeRange::new(range.start, t));
+                                    }
+                                }
+                            }
+                            editing_end.set(None);
+                        },
+                        onkeydown: move |e: Event<KeyboardData>| {
+                            match e.key() {
+                                Key::Enter => {
+                                    if let Some(ref text) = *editing_end.read() {
+                                        if let Some(t) = parse_time(text) {
+                                            let t = t.clamp(0.0, duration);
+                                            if t > range.start {
+                                                props.on_range_change.call(TimeRange::new(range.start, t));
+                                            }
+                                        }
+                                    }
+                                    editing_end.set(None);
+                                }
+                                Key::Escape => editing_end.set(None),
+                                Key::ArrowUp => {
+                                    e.prevent_default();
+                                    let cur = editing_end.read().as_ref()
+                                        .and_then(|t| parse_time(t))
+                                        .unwrap_or(range.end);
+                                    let v = (cur + 1.0).min(duration);
+                                    props.on_range_change.call(TimeRange::new(range.start, v));
+                                    editing_end.set(Some(format_time(v)));
+                                }
+                                Key::ArrowDown => {
+                                    e.prevent_default();
+                                    let cur = editing_end.read().as_ref()
+                                        .and_then(|t| parse_time(t))
+                                        .unwrap_or(range.end);
+                                    let v = (cur - 1.0).max(range.start + 1.0);
+                                    props.on_range_change.call(TimeRange::new(range.start, v));
+                                    editing_end.set(Some(format_time(v)));
+                                }
+                                _ => {}
+                            }
+                        },
+                    }
 
-                    if !range.is_full(duration) {
-                        button {
-                            class: "phase-timeline-reset",
-                            onclick: reset_range,
-                            "✕"
-                        }
+                if !range.is_full(duration) {
+                    button {
+                        class: "phase-timeline-reset",
+                        onclick: reset_range,
+                        "✕"
                     }
                 }
             }
