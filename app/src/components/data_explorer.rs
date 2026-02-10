@@ -1415,11 +1415,21 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                     } else if matches!(view_mode(), ViewMode::Charts) {
                         // Charts Panel
                         if let Some(tl) = timeline.read().as_ref() {
-                            ChartsPanel {
-                                key: "{selected_encounter():?}",
-                                encounter_idx: *selected_encounter.read(),
-                                duration_secs: tl.duration_secs,
-                                time_range: time_range(),
+                            {
+                                let tr = time_range();
+                                let duration = if tr.start != 0.0 || tr.end != 0.0 {
+                                    tr.end - tr.start
+                                } else {
+                                    tl.duration_secs
+                                };
+                                rsx! {
+                                    ChartsPanel {
+                                        key: "{selected_encounter():?}",
+                                        encounter_idx: *selected_encounter.read(),
+                                        duration_secs: duration,
+                                        time_range: tr,
+                                    }
+                                }
                             }
                         }
                     } else if matches!(view_mode(), ViewMode::Overview) {
