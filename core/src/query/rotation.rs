@@ -5,11 +5,7 @@
 use std::collections::HashMap;
 
 use super::*;
-use crate::game_data::effect_id;
-
-/// Window in seconds: events within this time of a GCD slot's first event
-/// are considered off-GCD weaves rather than new GCD activations.
-const GCD_WINDOW_SECS: f32 = 0.6;
+use crate::game_data::{OFF_GCD_ABILITIES, effect_id};
 
 /// A damage or heal event to attribute to a rotation cycle.
 struct ValueEvent {
@@ -181,29 +177,32 @@ impl EncounterQuery<'_> {
     }
 }
 
-/// Group sequential ability events into GCD slots using a timing heuristic.
-/// The last event in each window is the GCD ability (damage abilities are on-GCD),
-/// while earlier events are off-GCD weaves (buffs, adrenals fire first).
+/// Group ability events into GCD slots using the off-GCD ability set.
+/// Off-GCD abilities attach to the next on-GCD ability that follows them.
 fn group_into_gcd_slots(events: &[RotationEvent]) -> Vec<GcdSlot> {
     let mut slots = Vec::new();
-    let mut i = 0;
+    let mut pending_off_gcd = Vec::new();
+    let mut prev_gcd_time: Option<f32> = None;
 
-    while i < events.len() {
-        let slot_start = events[i].time_secs;
-        let mut group = vec![events[i].clone()];
-
-        i += 1;
-        while i < events.len() && (events[i].time_secs - slot_start) < GCD_WINDOW_SECS {
-            group.push(events[i].clone());
-            i += 1;
+    for event in events {
+        if OFF_GCD_ABILITIES.contains(&event.ability_id) {
+            pending_off_gcd.push(event.clone());
+        } else {
+            let gcd_gap = prev_gcd_time.map(|t| event.time_secs - t);
+            prev_gcd_time = Some(event.time_secs);
+            slots.push(GcdSlot {
+                gcd_ability: event.clone(),
+                off_gcd: std::mem::take(&mut pending_off_gcd),
+                gcd_gap,
+            });
         }
+    }
 
-        // Last event in the window is the GCD ability; preceding ones are off-GCD weaves
-        let gcd_ability = group.pop().unwrap();
-        slots.push(GcdSlot {
-            gcd_ability,
-            off_gcd: group,
-        });
+    // Trailing off-GCD abilities with no following GCD — attach to last slot
+    if !pending_off_gcd.is_empty() {
+        if let Some(last) = slots.last_mut() {
+            last.off_gcd.extend(pending_off_gcd);
+        }
     }
 
     slots

@@ -107,11 +107,53 @@ pub struct AbilityBreakdown {
     pub max_hit: f64,
     pub avg_hit: f64,
 
+    // Extended metrics
+    #[serde(default)]
+    pub miss_count: i64,
+    #[serde(default)]
+    pub activation_count: i64,
+    #[serde(default)]
+    pub crit_total: f64,
+    #[serde(default)]
+    pub effective_total: f64,
+    #[serde(default)]
+    pub is_shield: bool,
+
+    // DamageTaken-specific fields
+    #[serde(default)]
+    pub attack_type: String,
+    #[serde(default)]
+    pub damage_type: String,
+    #[serde(default)]
+    pub shield_count: i64,
+    #[serde(default)]
+    pub absorbed_total: f64,
+
     // Computed fields (require duration/total context)
     #[serde(default)]
     pub dps: f64,
     #[serde(default)]
     pub percent_of_total: f64,
+}
+
+/// Summary statistics for the Damage Taken tab.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DamageTakenSummary {
+    pub internal_elemental_total: f64,
+    pub internal_elemental_pct: f64,
+    pub kinetic_energy_total: f64,
+    pub kinetic_energy_pct: f64,
+    pub force_tech_total: f64,
+    pub force_tech_pct: f64,
+    pub melee_ranged_total: f64,
+    pub melee_ranged_pct: f64,
+    pub avoided_pct: f64,
+    pub shielded_pct: f64,
+    pub absorbed_self_total: f64,
+    pub absorbed_self_pct: f64,
+    pub absorbed_given_total: f64,
+    pub absorbed_given_pct: f64,
 }
 
 /// Query result for damage/healing by source entity.
@@ -305,6 +347,8 @@ pub struct RotationEvent {
 pub struct GcdSlot {
     pub gcd_ability: RotationEvent,
     pub off_gcd: Vec<RotationEvent>,
+    /// Seconds since the previous GCD activation (None for the first slot).
+    pub gcd_gap: Option<f32>,
 }
 
 /// One rotation cycle (anchor-to-anchor).
@@ -2090,6 +2134,18 @@ pub enum SortColumn {
     Hits,
     Avg,
     CritPct,
+    MissPct,
+    AvgHit,
+    AvgCrit,
+    Activations,
+    Effective,
+    EffectivePct,
+    ShieldTotal,
+    Sps,
+    AttackType,
+    DamageType,
+    ShldPct,
+    Absorbed,
 }
 
 /// Sort direction
