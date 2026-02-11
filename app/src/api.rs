@@ -854,10 +854,10 @@ pub async fn install_update() -> Result<(), String> {
 
 // Re-export query types from shared types crate
 pub use baras_types::{
-    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow, DataTab,
-    EffectChartData, EffectWindow, EncounterTimeline, EntityBreakdown, GcdSlot,
-    GroupedEntityNames, PhaseSegment, PlayerDeath, RaidOverviewRow, RotationAnalysis,
-    RotationCycle, RotationEvent, TimeRange, TimeSeriesPoint,
+    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow,
+    DamageTakenSummary, DataTab, EffectChartData, EffectWindow, EncounterTimeline,
+    EntityBreakdown, GcdSlot, GroupedEntityNames, PhaseSegment, PlayerDeath, RaidOverviewRow,
+    RotationAnalysis, RotationCycle, RotationEvent, TimeRange, TimeSeriesPoint,
 };
 
 /// Query ability breakdown for an encounter and data tab.
@@ -1332,6 +1332,36 @@ pub async fn query_player_deaths(encounter_idx: Option<u32>) -> Option<Vec<Playe
         js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
     let result = invoke("query_player_deaths", obj.into()).await;
+    from_js(result)
+}
+
+/// Query damage taken summary (damage type breakdown + mitigation stats).
+pub async fn query_damage_taken_summary(
+    encounter_idx: Option<u32>,
+    entity_name: &str,
+    time_range: Option<&TimeRange>,
+    entity_types: Option<&[&str]>,
+) -> Option<DamageTakenSummary> {
+    let obj = js_sys::Object::new();
+    if let Some(idx) = encounter_idx {
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
+    } else {
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
+    }
+    js_set(&obj, "entityName", &JsValue::from_str(entity_name));
+    if let Some(tr) = time_range {
+        let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
+        js_set(&obj, "timeRange", &tr_js);
+    } else {
+        js_set(&obj, "timeRange", &JsValue::NULL);
+    }
+    if let Some(types) = entity_types {
+        let types_js = serde_wasm_bindgen::to_value(types).unwrap_or(JsValue::NULL);
+        js_set(&obj, "entityTypes", &types_js);
+    } else {
+        js_set(&obj, "entityTypes", &JsValue::NULL);
+    }
+    let result = invoke("query_damage_taken_summary", obj.into()).await;
     from_js(result)
 }
 

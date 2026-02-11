@@ -252,6 +252,7 @@ pub fn run() {
             commands::query_target_names,
             commands::query_player_deaths,
             commands::query_rotation,
+            commands::query_damage_taken_summary,
             commands::query_encounter_timeline,
             commands::list_encounter_files,
             // Updater

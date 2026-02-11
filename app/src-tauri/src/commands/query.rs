@@ -3,9 +3,9 @@
 //! Provides SQL-based queries over encounter data using DataFusion.
 
 use baras_core::query::{
-    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow, DataTab,
-    EffectChartData, EffectWindow, EncounterTimeline, EntityBreakdown, PlayerDeath,
-    RaidOverviewRow, RotationAnalysis, TimeRange, TimeSeriesPoint,
+    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow,
+    DamageTakenSummary, DataTab, EffectChartData, EffectWindow, EncounterTimeline,
+    EntityBreakdown, PlayerDeath, RaidOverviewRow, RotationAnalysis, TimeRange, TimeSeriesPoint,
 };
 use tauri::State;
 
@@ -267,6 +267,20 @@ pub async fn query_player_deaths(
     encounter_idx: Option<u32>,
 ) -> Result<Vec<PlayerDeath>, String> {
     handle.query_player_deaths(encounter_idx).await
+}
+
+/// Query damage taken summary (damage type breakdown + mitigation stats).
+#[tauri::command]
+pub async fn query_damage_taken_summary(
+    handle: State<'_, ServiceHandle>,
+    encounter_idx: Option<u32>,
+    entity_name: String,
+    time_range: Option<TimeRange>,
+    entity_types: Option<Vec<String>>,
+) -> Result<DamageTakenSummary, String> {
+    handle
+        .query_damage_taken_summary(encounter_idx, entity_name, time_range, entity_types)
+        .await
 }
 
 /// Query rotation analysis for a player.

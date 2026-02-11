@@ -28,10 +28,10 @@ use column_helpers::*;
 
 // Re-export query types from shared types crate
 pub use baras_types::{
-    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow, DataTab,
-    EffectChartData, EffectWindow, EncounterTimeline, EntityBreakdown, GcdSlot,
-    GroupedEntityNames, PhaseSegment, PlayerDeath, RaidOverviewRow, RotationAnalysis,
-    RotationCycle, RotationEvent, TimeRange, TimeSeriesPoint,
+    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow,
+    DamageTakenSummary, DataTab, EffectChartData, EffectWindow, EncounterTimeline,
+    EntityBreakdown, GcdSlot, GroupedEntityNames, PhaseSegment, PlayerDeath, RaidOverviewRow,
+    RotationAnalysis, RotationCycle, RotationEvent, TimeRange, TimeSeriesPoint,
 };
 
 /// Escape single quotes for SQL string literals (O'Brien -> O''Brien)

@@ -12,9 +12,9 @@ use baras_core::context::{AppConfig, AppConfigExt, resolve};
 use baras_core::encounter::EncounterState;
 use baras_core::game_data::Discipline;
 use baras_core::query::{
-    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow, DataTab,
-    EffectChartData, EffectWindow, EncounterTimeline, EntityBreakdown, PlayerDeath,
-    RaidOverviewRow, TimeRange, TimeSeriesPoint,
+    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow,
+    DamageTakenSummary, DataTab, EffectChartData, EffectWindow, EncounterTimeline,
+    EntityBreakdown, PlayerDeath, RaidOverviewRow, TimeRange, TimeSeriesPoint,
 };
 use tauri::{AppHandle, Emitter};
 
@@ -458,6 +458,49 @@ impl ServiceHandle {
                 types_ref.as_deref(),
                 breakdown_mode.as_ref(),
                 duration_secs,
+            )
+            .await
+    }
+
+    /// Query damage taken summary (damage type breakdown + mitigation stats).
+    pub async fn query_damage_taken_summary(
+        &self,
+        encounter_idx: Option<u32>,
+        entity_name: String,
+        time_range: Option<TimeRange>,
+        entity_types: Option<Vec<String>>,
+    ) -> Result<DamageTakenSummary, String> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref().ok_or("No active session")?;
+        let session = session.read().await;
+
+        if let Some(idx) = encounter_idx {
+            let dir = session.encounters_dir().ok_or("No encounters directory")?;
+            let path = dir.join(baras_core::storage::encounter_filename(idx));
+            if !path.exists() {
+                return Err(format!("Encounter file not found: {:?}", path));
+            }
+            self.shared.query_context.register_parquet(&path).await?;
+        } else {
+            let writer = session
+                .encounter_writer()
+                .ok_or("No live encounter buffer")?;
+            let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
+            self.shared.query_context.register_batch(batch).await?;
+        }
+
+        let types_ref: Option<Vec<&str>> = entity_types
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
+        self.shared
+            .query_context
+            .query()
+            .await
+            .query()
+            .query_damage_taken_summary(
+                &entity_name,
+                time_range.as_ref(),
+                types_ref.as_deref(),
             )
             .await
     }
