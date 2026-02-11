@@ -1517,6 +1517,7 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                         // Combat Log Panel
                         if let Some(enc_idx) = *selected_encounter.read() {
                             CombatLog {
+                                key: "{enc_idx}",
                                 encounter_idx: enc_idx,
                                 time_range: time_range(),
                                 initial_search: death_search_text(),
