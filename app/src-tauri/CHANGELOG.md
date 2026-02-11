@@ -1,23 +1,24 @@
-# v2026.2.8
+# v2026
 
-Lots of documentation has been added to
+Features / Improvements:
 
-## New Features
+- Extended ability breakdown tables with activations, miss/def%, effective healing%, shield detection, and
+  average hit/crit columns
+- Damage Taken tab: summary panel with damage type breakdown (internal/elemental, kinetic/energy,
+  force/tech, melee/ranged) and mitigation stats (avoided, shielded, absorbed)
+- Damage Taken tab: attack type and damage type columns per ability
+- Totals row on all ability breakdown tables
+- Improved rotation analysis using explicit off-GCD ability classification instead of timing heuristic
+- Data explorer defaults to local player instead of top value
+- Phase timeline and combat log time range selection (start/end)
+- Tab-colored value columns in ability tables for better readability
+- Data explorer tabs now default to local player
 
-- Rotation viewer has been added to the data explorer (experimental)
-- Import and export options have been added for custom encounter definitions and effects
-- Experimental Starparse timer import has been added
-- Added Starparse built-in audio files to help facilitate import
-- Challenge results now appear in the encounter summary
+Fixes:
 
-## UI Tweaks
-
-- EHPS line is now displayed on data explorer healing chart
-- Text size of effect charges in raid frames has been increased
-
-## Bug Fixes
-
-- Phase scoped challenges are now calculated over the correct time range
-- Dxun SM/HM Trandoshan Squad will now end correctly
-- Fixed issue where NPCs could get registered in raid frames
-- Fixed issues with some ability/effects icons not showing properly
+- Respect time range filter in effect uptime calculations
+- Respect time range in shield attribution queries
+- Remove self-damage events from data explorer
+- Properly parse threat drops
+- Protect recent log files (48h) from cleanup instead of date-based cutoff
+- Fix stale timer pipeline_delay argument
