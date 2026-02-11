@@ -80,6 +80,14 @@ end_trigger = { type = "effect_applied", effects = [4906768207446016] }
 [[boss.challenges]]
 id = "oc_core_dps"
 name = "Core DPS"
-conditions = [{ type = "phase", phase_ids = ["oc_core", "oc_meltdown"] }]
+conditions = [
+  { type = "phase", phase_ids = [
+    "oc_core",
+    "oc_meltdown",
+  ] },
+  { type = "target", match = { selector = [
+    "Orbital Core",
+  ] } },
+]
 metric = "damage"
 color = [24, 156, 139, 255]
