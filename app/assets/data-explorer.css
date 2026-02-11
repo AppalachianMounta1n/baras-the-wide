@@ -406,26 +406,6 @@
   opacity: 0.8;
 }
 
-.pct-cell {
-  position: relative;
-  min-width: 60px;
-}
-
-.pct-bar {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  height: 14px;
-  background: hsla(210, 60%, 50%, 0.3);
-  border-radius: 2px;
-  z-index: 0;
-}
-
-.pct-text {
-  position: relative;
-  z-index: 1;
-}
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Data Tab Selector (Damage, Healing, Damage Taken, Healing Taken)
@@ -1545,4 +1525,62 @@
 .context-menu-item:hover {
   background: var(--bg-hover, rgba(255, 255, 255, 0.1));
   color: var(--accent-gold, #ffc832);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Damage Taken Summary Panel
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.damage-taken-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-sm);
+  font-size: 0.85em;
+}
+
+.dt-summary-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  padding: 1px 0;
+}
+
+.dt-summary-label {
+  flex: 1;
+  color: var(--text-secondary);
+}
+
+.dt-summary-pct {
+  min-width: 48px;
+  text-align: right;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.dt-summary-val {
+  min-width: 48px;
+  text-align: right;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+/* DT (damage type) column in ability table */
+.ability-table .col-dmg-type {
+  text-transform: capitalize;
+}
+
+.ability-table tfoot .totals-row {
+  background: var(--bg-tertiary);
+  border-top: 2px solid var(--border-subtle);
+  font-weight: 600;
+}
+
+.ability-table tfoot .totals-row td {
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
