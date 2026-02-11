@@ -163,22 +163,23 @@ impl DirectoryIndex {
             .collect()
     }
 
-    /// Get all empty files (excluding the most recent)
+    /// Get all empty files (excluding the most recent and files created within 48h)
     pub fn empty_files(&self) -> Vec<&LogFileMetaData> {
         let newest = self.newest_file().map(|e| &e.path);
+        let cutoff = chrono::Local::now().naive_local() - chrono::Duration::hours(48);
         self.entries
             .values()
-            .filter(|e| e.is_empty && Some(&e.path) != newest)
+            .filter(|e| e.is_empty && Some(&e.path) != newest && e.created_at < cutoff)
             .collect()
     }
 
-    /// Get files under 1MB, excluding any from today (protects live session)
+    /// Get files under 1MB, excluding files created within 48h
     pub fn small_files(&self) -> Vec<&LogFileMetaData> {
         const SMALL_THRESHOLD: u64 = 1_000_000;
-        let today = chrono::Local::now().date_naive();
+        let cutoff = chrono::Local::now().naive_local() - chrono::Duration::hours(48);
         self.entries
             .values()
-            .filter(|e| !e.is_empty && e.file_size < SMALL_THRESHOLD && e.date != today)
+            .filter(|e| !e.is_empty && e.file_size < SMALL_THRESHOLD && e.created_at < cutoff)
             .collect()
     }
 
