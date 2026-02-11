@@ -32,6 +32,7 @@ ids = [
   2857544821243904,
 ]
 is_boss = true
+is_kill_target = false
 
 [[boss.entities]]
 name = "Toth"
@@ -43,6 +44,7 @@ ids = [
   285754911621120,
 ]
 is_boss = true
+is_kill_target = false
 
 [[boss.phases]]
 id = "zt_main"
@@ -292,6 +294,23 @@ trigger = { type = "combat_start" }
 duration_secs = 15
 color = [23, 197, 209, 255]
 difficulties = ["veteran", "master"]
+
+[[boss.timer]]
+id = "firebrand_stormcaller_targeted_by_missile"
+name = "Targeted by missile"
+is_alert = true
+alert_text = "Cleanse and move"
+color = [255, 234, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "effect_applied"
+effects = [2876648835776790]
+source = "boss"
+target = "local_player"
+
 
 # -- Ability Timers (refresh on cast) --
 [[boss.timer]]
@@ -599,6 +618,22 @@ trigger = { type = "effect_applied", effects = [2877078332506112] }
 duration_secs = 6
 color = [224, 168, 33, 255]
 difficulties = ["master"]
+
+[[boss.timer]]
+id = "warlord_kephess_bomb"
+name = "Bomb"
+is_alert = true
+alert_text = "You have the bomb"
+color = [255, 128, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "effect_applied"
+effects = [2877026792898560]
+source = "any"
+target = "local_player"
 
 [[boss.timer]]
 id = "wk_baradium_countdown"
