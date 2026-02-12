@@ -71,6 +71,7 @@ pub struct SharedState {
 
 impl SharedState {
     pub fn new(config: AppConfig, directory_index: DirectoryIndex) -> Self {
+        let raid_slots = config.overlay_settings.raid_overlay.total_slots();
         Self {
             config: RwLock::new(config),
             directory_index: RwLock::new(directory_index),
@@ -78,7 +79,7 @@ impl SharedState {
             in_combat: AtomicBool::new(false),
             watching: AtomicBool::new(false),
             is_live_tailing: AtomicBool::new(true), // Start in live tailing mode
-            raid_registry: Mutex::new(RaidSlotRegistry::new(8)), // Default 8 slots (2x4 grid)
+            raid_registry: Mutex::new(RaidSlotRegistry::new(raid_slots)),
             current_area_id: AtomicI64::new(0),
             // Overlay status flags - updated by OverlayManager
             raid_overlay_active: AtomicBool::new(false),
