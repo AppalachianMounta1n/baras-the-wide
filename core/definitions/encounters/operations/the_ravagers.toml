@@ -424,6 +424,11 @@ difficulties = ["veteran"]
 id = "master_blaster"
 name = "Master & Blaster"
 difficulties = ["story", "veteran", "master"]
+has_victory_trigger = true
+victory_trigger = { type = "effect_removed", effects = [
+  3462181727240192,
+  3391331946725697,
+] }
 
 [[boss.entities]]
 name = "Blaster"
@@ -452,8 +457,12 @@ trigger = { type = "combat_start" }
 id = "master_blaster_master"
 name = "Master & Blaster"
 trigger = { type = "any_of", conditions = [
-  { type = "npc_appears", selector = ["Master"] },
-  { type = "effect_removed", effects = [3400759399940096] },
+  { type = "npc_appears", selector = [
+    "Master",
+  ] },
+  { type = "effect_removed", effects = [
+    3400759399940096,
+  ] },
 ] }
 
 [[boss.phases]]
@@ -618,8 +627,12 @@ is_boss = true
 id = "coratanni_transition_tracker"
 name = "Transition Tracker"
 increment_on = { type = "any_of", conditions = [
-  { type = "entity_death", selector = ["Pearl"] },
-  { type = "boss_hp_below", hp_percent = 20.0, selector = ["Coratanni"] },
+  { type = "entity_death", selector = [
+    "Pearl",
+  ] },
+  { type = "boss_hp_below", hp_percent = 20.0, selector = [
+    "Coratanni",
+  ] },
 ] }
 initial_value = 0
 
@@ -695,7 +708,9 @@ difficulties = ["veteran"]
 [[boss.timer]]
 id = "coratanni_phase_2_hp"
 name = "Phase 2 HP"
-trigger = { type = "boss_hp_below", hp_percent = 70.0, selector = ["Coratanni"] }
+trigger = { type = "boss_hp_below", hp_percent = 70.0, selector = [
+  "Coratanni",
+] }
 is_alert = true
 alert_text = "Phase 2"
 color = [33, 224, 221, 255]
@@ -704,7 +719,9 @@ difficulties = ["veteran"]
 [[boss.timer]]
 id = "coratanni_phase_3_hp"
 name = "Phase 3 HP"
-trigger = { type = "boss_hp_below", hp_percent = 20.0, selector = ["Coratanni"] }
+trigger = { type = "boss_hp_below", hp_percent = 20.0, selector = [
+  "Coratanni",
+] }
 is_alert = true
 alert_text = "Phase 3"
 color = [29, 224, 223, 255]
