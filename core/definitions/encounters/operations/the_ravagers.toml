@@ -425,10 +425,7 @@ id = "master_blaster"
 name = "Master & Blaster"
 difficulties = ["story", "veteran", "master"]
 has_victory_trigger = true
-victory_trigger = { type = "effect_removed", effects = [
-  3462181727240192,
-  3391331946725697,
-] }
+victory_trigger = { type = "effect_removed", effects = [3391331946725697] }
 
 [[boss.entities]]
 name = "Blaster"
