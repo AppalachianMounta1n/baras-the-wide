@@ -599,25 +599,26 @@ pub fn App() -> Element {
                             value: active_profile().unwrap_or_default(),
                             onchange: move |e| {
                                 let selected = e.value();
+                                if selected.is_empty() { return; }
+                                let previous = active_profile();
+                                active_profile.set(Some(selected.clone()));
                                 let mut toast = use_toast();
                                 spawn(async move {
-                                    if !selected.is_empty() {
-                                        if let Err(err) = api::load_profile(&selected).await {
-                                            toast.show(format!("Failed to load profile: {}", err), ToastSeverity::Normal);
-                                        } else {
-                                            active_profile.set(Some(selected));
-                                            if let Some(cfg) = api::get_config().await {
-                                                overlay_settings.set(cfg.overlay_settings);
-                                            }
-                                            api::refresh_overlay_settings().await;
-                                            if let Some(status) = api::get_overlay_status().await {
-                                                apply_status(&status, &mut metric_overlays_enabled, &mut personal_enabled,
-                                                    &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
-                                                    &mut timers_b_enabled, &mut challenges_enabled, &mut alerts_enabled,
-                                                    &mut effects_a_enabled, &mut effects_b_enabled,
-                                                    &mut cooldowns_enabled, &mut dot_tracker_enabled, &mut notes_enabled,
-                                                    &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
-                                            }
+                                    if let Err(err) = api::load_profile(&selected).await {
+                                        active_profile.set(previous);
+                                        toast.show(format!("Failed to load profile: {}", err), ToastSeverity::Normal);
+                                    } else {
+                                        if let Some(cfg) = api::get_config().await {
+                                            overlay_settings.set(cfg.overlay_settings);
+                                        }
+                                        api::refresh_overlay_settings().await;
+                                        if let Some(status) = api::get_overlay_status().await {
+                                            apply_status(&status, &mut metric_overlays_enabled, &mut personal_enabled,
+                                                &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
+                                                &mut timers_b_enabled, &mut challenges_enabled, &mut alerts_enabled,
+                                                &mut effects_a_enabled, &mut effects_b_enabled,
+                                                &mut cooldowns_enabled, &mut dot_tracker_enabled, &mut notes_enabled,
+                                                &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
                                         }
                                     }
                                 });
@@ -1029,25 +1030,26 @@ pub fn App() -> Element {
                                         value: active_profile().unwrap_or_default(),
                                         onchange: move |e| {
                                             let selected = e.value();
+                                            if selected.is_empty() { return; }
+                                            let previous = active_profile();
+                                            active_profile.set(Some(selected.clone()));
                                             let mut toast = use_toast();
                                             spawn(async move {
-                                                if !selected.is_empty() {
-                                                    if let Err(err) = api::load_profile(&selected).await {
-                                                        toast.show(format!("Failed to load profile: {}", err), ToastSeverity::Normal);
-                                                    } else {
-                                                        active_profile.set(Some(selected));
-                                                        if let Some(cfg) = api::get_config().await {
-                                                            overlay_settings.set(cfg.overlay_settings);
-                                                        }
-                                                        api::refresh_overlay_settings().await;
-                                                        if let Some(status) = api::get_overlay_status().await {
-                                                            apply_status(&status, &mut metric_overlays_enabled, &mut personal_enabled,
-                                                                &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
-                                                                &mut timers_b_enabled, &mut challenges_enabled, &mut alerts_enabled,
-                                                                &mut effects_a_enabled, &mut effects_b_enabled,
-                                                                &mut cooldowns_enabled, &mut dot_tracker_enabled, &mut notes_enabled,
-                                                                &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
-                                                        }
+                                                if let Err(err) = api::load_profile(&selected).await {
+                                                    active_profile.set(previous);
+                                                    toast.show(format!("Failed to load profile: {}", err), ToastSeverity::Normal);
+                                                } else {
+                                                    if let Some(cfg) = api::get_config().await {
+                                                        overlay_settings.set(cfg.overlay_settings);
+                                                    }
+                                                    api::refresh_overlay_settings().await;
+                                                    if let Some(status) = api::get_overlay_status().await {
+                                                        apply_status(&status, &mut metric_overlays_enabled, &mut personal_enabled,
+                                                            &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
+                                                            &mut timers_b_enabled, &mut challenges_enabled, &mut alerts_enabled,
+                                                            &mut effects_a_enabled, &mut effects_b_enabled,
+                                                            &mut cooldowns_enabled, &mut dot_tracker_enabled, &mut notes_enabled,
+                                                            &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
                                                     }
                                                 }
                                             });
