@@ -20,6 +20,7 @@ Timers and Definitions:
 - Added Dxun II Pursuit droid phases and DPS challenge (credit Wolfy)
 - Add Lady Dominique Phases and 2 alerts (credit Wolfy)
 - Added definition file for Orbital Core
+- Master Blaster is now classified as a success when the Blaster cast effect is removed
 
 Fixes:
 
