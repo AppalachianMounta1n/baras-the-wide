@@ -18,7 +18,7 @@ use crate::signal_processor::{GameSignal, SignalHandler};
 
 use crate::timers::FiredAlert;
 
-use super::{ActiveEffect, AlertTrigger, DisplayTarget, EffectDefinition, EffectKey};
+use super::{ActiveEffect, AlertTrigger, DisplayTarget, EffectDefinition, EffectKey, RefreshTrigger};
 
 /// Hardcoded ability IDs for AoE DOTs that need special handling.
 /// These abilities spread/refresh DOTs on multiple targets and don't follow
@@ -147,8 +147,8 @@ impl DefinitionSet {
         }
 
         // Index refresh_abilities
-        for selector in &def.refresh_abilities {
-            match selector {
+        for refresh in &def.refresh_abilities {
+            match refresh.ability() {
                 AbilitySelector::Id(id) => {
                     self.refresh_ability_id_index.entry(*id).or_default().push(def.id.clone());
                 }
@@ -767,8 +767,8 @@ impl EffectTracker {
                 // hit multiple targets and we only track the primary target's cast.
                 if def.display_target == DisplayTarget::DotTracker {
                     // Check if any refresh_ability is an AoE ability (skip validation if so)
-                    let is_aoe_refreshable = def.refresh_abilities.iter().any(|selector| {
-                        if let baras_types::AbilitySelector::Id(ability_id) = selector {
+                    let is_aoe_refreshable = def.refresh_abilities.iter().any(|refresh| {
+                        if let baras_types::AbilitySelector::Id(ability_id) = refresh.ability() {
                             AOE_REFRESH_ABILITY_IDS.contains(ability_id)
                         } else {
                             false
@@ -778,8 +778,8 @@ impl EffectTracker {
                     if !is_aoe_refreshable {
                         const RECENT_CAST_WINDOW_MS: i64 = 1500;
 
-                        let has_recent_cast = def.refresh_abilities.iter().any(|selector| {
-                            if let baras_types::AbilitySelector::Id(ability_id) = selector {
+                        let has_recent_cast = def.refresh_abilities.iter().any(|refresh| {
+                            if let baras_types::AbilitySelector::Id(ability_id) = refresh.ability() {
                                 if let Some(&cast_time) =
                                     self.recent_casts.get(&(*ability_id, target_id))
                                 {
@@ -888,6 +888,10 @@ impl EffectTracker {
     /// Refresh any tracked effects that have this action in their refresh_abilities.
     /// For raid frame effects, also creates the effect if it doesn't exist yet
     /// (handles late registration when initial application was missed).
+    ///
+    /// The `trigger_type` parameter specifies what kind of event triggered this refresh:
+    /// - `Activation`: AbilityActivated signal (instant refresh)
+    /// - `Heal`: HealingDone signal (refresh after heal lands, for cast-time abilities)
     fn refresh_effects_by_action(
         &mut self,
         action_id: i64,
@@ -898,6 +902,7 @@ impl EffectTracker {
         target_name: IStr,
         timestamp: NaiveDateTime,
         encounter: Option<&crate::encounter::CombatEncounter>,
+        trigger_type: RefreshTrigger,
     ) {
         // For AoE abilities (target_id == 0), we can't reliably detect which targets
         // were actually hit. Damage events from ongoing DOTs on other targets look
@@ -933,6 +938,8 @@ impl EffectTracker {
             alert_text: Option<String>,
             alert_on_expire: bool,
             default_charges: Option<u8>,
+            /// Minimum stacks required for this refresh (None = any)
+            min_stacks: Option<u8>,
         }
 
         let refreshable_defs: Vec<_> = self
@@ -945,22 +952,33 @@ impl EffectTracker {
                     EntityFilter::LocalPlayer | EntityFilter::Any
                 )
             })
-            .map(|def| RefreshableEffect {
-                id: def.id.clone(),
-                name: def.name.clone(),
-                display_text: def.display_text().to_string(),
-                duration: self.effective_duration(def),
-                color: def.effective_color(),
-                display_target: def.display_target,
-                icon_ability_id: def.icon_ability_id.unwrap_or(action_id as u64),
-                show_at_secs: def.show_at_secs,
-                show_icon: def.show_icon,
-                display_source: def.display_source,
-                cooldown_ready_secs: def.cooldown_ready_secs,
-                audio: def.audio.clone(),
-                alert_text: def.alert_text.clone(),
-                alert_on_expire: def.alert_on == AlertTrigger::OnExpire,
-                default_charges: def.default_charges,
+            .filter_map(|def| {
+                // Find the matching RefreshAbility entry to get conditions
+                let refresh_ability = def.find_refresh_ability(action_id as u64, Some(action_name_str))?;
+                
+                // Check if trigger type matches
+                if refresh_ability.trigger() != trigger_type {
+                    return None;
+                }
+                
+                Some(RefreshableEffect {
+                    id: def.id.clone(),
+                    name: def.name.clone(),
+                    display_text: def.display_text().to_string(),
+                    duration: self.effective_duration(def),
+                    color: def.effective_color(),
+                    display_target: def.display_target,
+                    icon_ability_id: def.icon_ability_id.unwrap_or(action_id as u64),
+                    show_at_secs: def.show_at_secs,
+                    show_icon: def.show_icon,
+                    display_source: def.display_source,
+                    cooldown_ready_secs: def.cooldown_ready_secs,
+                    audio: def.audio.clone(),
+                    alert_text: def.alert_text.clone(),
+                    alert_on_expire: def.alert_on == AlertTrigger::OnExpire,
+                    default_charges: def.default_charges,
+                    min_stacks: refresh_ability.min_stacks(),
+                })
             })
             .collect();
 
@@ -968,6 +986,13 @@ impl EffectTracker {
             let key = EffectKey::new(&def.id, target_id);
 
             if let Some(effect) = self.active_effects.get_mut(&key) {
+                // Check min_stacks condition if specified
+                if let Some(min_stacks) = def.min_stacks {
+                    if effect.stacks < min_stacks {
+                        continue; // Skip refresh - not enough stacks
+                    }
+                }
+
                 // Existing effect - refresh duration
                 effect.refresh(timestamp, def.duration);
 
@@ -1685,6 +1710,7 @@ impl SignalHandler for EffectTracker {
                         resolved_target_name,
                         *timestamp,
                         encounter,
+                        RefreshTrigger::Activation,
                     );
 
                     // For AoE abilities, set up pending state for damage correlation
@@ -1703,6 +1729,31 @@ impl SignalHandler for EffectTracker {
                 // Only process for local player's damage
                 if self.local_player_id == Some(*source_id) {
                     self.handle_damage_for_aoe_refresh(*ability_id, *target_id, *timestamp);
+                }
+            }
+            GameSignal::HealingDone {
+                ability_id,
+                ability_name,
+                source_id,
+                source_name,
+                target_id,
+                target_name,
+                timestamp,
+                ..
+            } => {
+                // Only process for local player's heals (for refresh on heal completion)
+                if self.local_player_id == Some(*source_id) {
+                    self.refresh_effects_by_action(
+                        *ability_id,
+                        *ability_name,
+                        *source_id,
+                        *source_name,
+                        *target_id,
+                        *target_name,
+                        *timestamp,
+                        encounter,
+                        RefreshTrigger::Heal,
+                    );
                 }
             }
             GameSignal::TargetChanged {

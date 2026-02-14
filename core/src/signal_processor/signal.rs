@@ -127,6 +127,24 @@ pub enum GameSignal {
         timestamp: NaiveDateTime,
     },
 
+    /// Healing done (for effect refresh on heal completion)
+    HealingDone {
+        /// The ability that healed
+        ability_id: i64,
+        ability_name: IStr,
+        source_id: i64,
+        source_entity_type: EntityType,
+        source_name: IStr,
+        /// NPC class/template ID of source (0 for players/companions)
+        source_npc_id: i64,
+        target_id: i64,
+        target_entity_type: EntityType,
+        target_name: IStr,
+        /// NPC class/template ID of target (0 for players/companions)
+        target_npc_id: i64,
+        timestamp: NaiveDateTime,
+    },
+
     /// Entity changed their target (TARGETSET effect)
     TargetChanged {
         source_id: i64,
@@ -242,6 +260,7 @@ impl GameSignal {
             | Self::EffectChargesChanged { timestamp, .. }
             | Self::AbilityActivated { timestamp, .. }
             | Self::DamageTaken { timestamp, .. }
+            | Self::HealingDone { timestamp, .. }
             | Self::TargetChanged { timestamp, .. }
             | Self::TargetCleared { timestamp, .. }
             | Self::AreaEntered { timestamp, .. }

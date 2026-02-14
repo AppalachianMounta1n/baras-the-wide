@@ -17,7 +17,7 @@ use baras_core::dsl::{AudioConfig, Trigger};
 use baras_core::effects::{
     AlertTrigger, DefinitionConfig, DisplayTarget, EFFECTS_DSL_VERSION, EffectDefinition,
 };
-use baras_types::AbilitySelector;
+use baras_types::RefreshAbility;
 
 use crate::service::ServiceHandle;
 use tracing::warn;
@@ -35,12 +35,14 @@ pub struct EffectListItem {
     pub display_text: Option<String>,
     /// Whether this effect has a user override (vs bundled-only)
     pub is_user_override: bool,
+    /// Whether this effect exists in the bundled defaults
+    pub is_bundled: bool,
 
     // Effect data
     pub enabled: bool,
     pub trigger: Trigger,
     pub ignore_effect_removed: bool,
-    pub refresh_abilities: Vec<AbilitySelector>,
+    pub refresh_abilities: Vec<RefreshAbility>,
     pub duration_secs: Option<f32>,
     pub is_refreshed_on_modify: bool,
     pub default_charges: Option<u8>,
@@ -74,12 +76,13 @@ pub struct EffectListItem {
 }
 
 impl EffectListItem {
-    fn from_definition(def: &EffectDefinition, is_user_override: bool) -> Self {
+    fn from_definition(def: &EffectDefinition, is_user_override: bool, is_bundled: bool) -> Self {
         Self {
             id: def.id.clone(),
             name: def.name.clone(),
             display_text: def.display_text.clone(),
             is_user_override,
+            is_bundled,
             enabled: def.enabled,
             trigger: def.trigger.clone(),
             ignore_effect_removed: def.ignore_effect_removed,
@@ -237,9 +240,13 @@ pub(crate) fn save_user_effects(effects: &[EffectDefinition]) -> Result<(), Stri
 }
 
 /// Load merged effects (bundled + user overrides) for UI display
-fn load_all_effects(app_handle: &AppHandle) -> Vec<(EffectDefinition, bool)> {
+/// Returns (effect, is_user_override, is_bundled)
+fn load_all_effects(app_handle: &AppHandle) -> Vec<(EffectDefinition, bool, bool)> {
     // Load bundled effects
     let bundled = load_bundled_effects(app_handle);
+
+    // Track which IDs are bundled
+    let bundled_ids: std::collections::HashSet<_> = bundled.keys().cloned().collect();
 
     // Load user overrides (if version matches)
     let user_effects: HashMap<String, EffectDefinition> =
@@ -271,12 +278,13 @@ fn load_all_effects(app_handle: &AppHandle) -> Vec<(EffectDefinition, bool)> {
         merged.insert(id, effect);
     }
 
-    // Convert to list with is_user_override flag
+    // Convert to list with is_user_override and is_bundled flags
     merged
         .into_iter()
         .map(|(id, effect)| {
             let is_user = user_ids.contains(&id);
-            (effect, is_user)
+            let is_bundled = bundled_ids.contains(&id);
+            (effect, is_user, is_bundled)
         })
         .collect()
 }
@@ -292,7 +300,7 @@ pub async fn get_effect_definitions(app_handle: AppHandle) -> Result<Vec<EffectL
 
     let items: Vec<_> = effects
         .iter()
-        .map(|(effect, is_user)| EffectListItem::from_definition(effect, *is_user))
+        .map(|(effect, is_user, is_bundled)| EffectListItem::from_definition(effect, *is_user, *is_bundled))
         .collect();
 
     Ok(items)
@@ -357,7 +365,7 @@ pub async fn create_effect_definition(
 
     // Check for duplicate ID across all effects
     let all_effects = load_all_effects(&app_handle);
-    if all_effects.iter().any(|(e, _)| e.id == effect.id) {
+    if all_effects.iter().any(|(e, _, _)| e.id == effect.id) {
         return Err(format!("Effect with ID '{}' already exists", effect.id));
     }
 
@@ -432,7 +440,7 @@ pub async fn duplicate_effect_definition(
     // Find the effect to duplicate
     let source = all_effects
         .iter()
-        .find(|(e, _)| e.id == effect_id)
+        .find(|(e, _, _)| e.id == effect_id)
         .ok_or_else(|| format!("Effect '{}' not found", effect_id))?;
 
     // Generate unique ID
@@ -440,7 +448,7 @@ pub async fn duplicate_effect_definition(
     let mut suffix = 1;
     loop {
         let new_id = format!("{}_copy{}", effect_id, suffix);
-        if !all_effects.iter().any(|(e, _)| e.id == new_id) {
+        if !all_effects.iter().any(|(e, _, _)| e.id == new_id) {
             new_effect.id = new_id;
             new_effect.name = format!("{} (Copy)", source.0.name);
             break;
@@ -460,7 +468,8 @@ pub async fn duplicate_effect_definition(
     // Reload definitions in the running service
     let _ = service.reload_effect_definitions().await;
 
-    Ok(EffectListItem::from_definition(&new_effect, true))
+    // Duplicated effect is always user-created (not bundled)
+    Ok(EffectListItem::from_definition(&new_effect, true, false))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -534,7 +543,7 @@ pub async fn preview_import_effects(
     // Load current merged effects for diff
     let current_effects = load_all_effects(&app_handle);
     let current_ids: std::collections::HashSet<String> =
-        current_effects.iter().map(|(e, _)| e.id.clone()).collect();
+        current_effects.iter().map(|(e, _, _)| e.id.clone()).collect();
     let imported_ids: std::collections::HashSet<String> =
         config.effects.iter().map(|e| e.id.clone()).collect();
 
