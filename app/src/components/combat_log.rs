@@ -48,9 +48,9 @@ const DEFENSE_REFLECTED: i64 = 836045448953649;
 pub struct CombatLogProps {
     pub encounter_idx: u32,
     pub time_range: TimeRange,
-    /// Optional initial search text (e.g., player name from death tracker)
+    /// Optional initial target filter (e.g., player name from death tracker)
     #[props(default)]
-    pub initial_search: Option<String>,
+    pub initial_target: Option<String>,
     /// Persisted state signal (survives tab switches, includes show_ids!)
     pub state: Signal<CombatLogSessionState>,
     /// Optional callback to update the parent's time range (e.g. from context menu)
@@ -210,10 +210,10 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
     }
 
     // Determine whether to restore saved state:
-    // - Only restore if no initial_search override (death tracker click)
+    // - Only restore if no initial_target override (death tracker click)
     // - Only restore if encounter matches (filters are encounter-specific)
     let mut state = props.state;
-    let should_restore = props.initial_search.is_none()
+    let should_restore = props.initial_target.is_none()
         && state.peek().encounter_idx == Some(props.encounter_idx);
 
     // Filter state - restore from saved state or use defaults
@@ -221,12 +221,12 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
         if should_restore { state.peek().source_filter.clone() } else { None }
     });
     let mut target_filter = use_signal(|| {
-        if should_restore { state.peek().target_filter.clone() } else { None }
+        if let Some(ref target) = props.initial_target {
+            Some(target.clone())
+        } else if should_restore { state.peek().target_filter.clone() } else { None }
     });
     let mut search_text = use_signal(|| {
-        if let Some(ref search) = props.initial_search {
-            search.clone()
-        } else if should_restore {
+        if should_restore {
             state.peek().search_text.clone()
         } else {
             String::new()

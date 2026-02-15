@@ -435,8 +435,8 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
     // Track last (encounter, time_range) we fetched overview data for (prevents re-fetch loops)
     let mut last_overview_fetch = use_signal(|| None::<(Option<u32>, TimeRange)>);
 
-    // Death search text - set when clicking a death to search combat log (source OR target)
-    let mut death_search_text = use_signal(|| None::<String>);
+    // Death target filter - set when clicking a death to filter combat log by target
+    let mut death_target_filter = use_signal(|| None::<String>);
 
     // Memoized overview table data (rows + totals) - prevents recomputation on every render
     let overview_table_data = use_memo(move || {
@@ -1484,7 +1484,7 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                         }
                         button {
                             class: if matches!(view_mode(), ViewMode::CombatLog) { "data-tab active" } else { "data-tab" },
-                            onclick: move |_| { death_search_text.set(None); view_mode.set(ViewMode::CombatLog); },
+                            onclick: move |_| { death_target_filter.set(None); view_mode.set(ViewMode::CombatLog); },
                             "Combat Log"
                         }
                         button {
@@ -1520,7 +1520,7 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                 key: "{enc_idx}",
                                 encounter_idx: enc_idx,
                                 time_range: time_range(),
-                                initial_search: death_search_text(),
+                                initial_target: death_target_filter(),
                                 state: combat_log_state,
                                 on_range_change: move |new_range: TimeRange| {
                                     time_range.set(new_range);
@@ -1577,7 +1577,7 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                                                     move |_| {
                                                                         let start = (death_time - 10.0).max(0.0);
                                                                         time_range.set(TimeRange { start, end: death_time });
-                                                                        death_search_text.set(Some(player_name.clone()));
+                                                                        death_target_filter.set(Some(player_name.clone()));
                                                                         view_mode.set(ViewMode::CombatLog);
                                                                     }
                                                                 },
