@@ -27,7 +27,8 @@ use super::{ActiveEffect, AlertTrigger, DisplayTarget, EffectDefinition, EffectK
 /// 2. Skipping recent-cast validation (targets aren't individually tracked)
 const AOE_REFRESH_ABILITY_IDS: &[u64] = &[
     807698664783872,  // Shrap Bomb (Gunslinger)
-    1703989619982930, // Toxic Haze (Operative)
+    807698664784339, // Shrap Bomb (Ruffian)
+    1703989619982930, // Corrosive Grenade (Operative)
     1703989619982932, // Corrosive Grenade (Sniper)
 ];
 
@@ -955,12 +956,12 @@ impl EffectTracker {
             .filter_map(|def| {
                 // Find the matching RefreshAbility entry to get conditions
                 let refresh_ability = def.find_refresh_ability(action_id as u64, Some(action_name_str))?;
-                
+
                 // Check if trigger type matches
                 if refresh_ability.trigger() != trigger_type {
                     return None;
                 }
-                
+
                 Some(RefreshableEffect {
                     id: def.id.clone(),
                     name: def.name.clone(),
