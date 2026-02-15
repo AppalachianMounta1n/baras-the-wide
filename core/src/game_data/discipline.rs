@@ -234,6 +234,125 @@ impl Discipline {
         }
     }
 
+    /// Look up discipline from its display name
+    pub fn from_name(name: &str) -> Option<Self> {
+        use Discipline::*;
+        match name {
+            "Lightning" => Some(Lightning),
+            "Madness" => Some(Madness),
+            "Corruption" => Some(Corruption),
+            "Hatred" => Some(Hatred),
+            "Darkness" => Some(Darkness),
+            "Deception" => Some(Deception),
+            "Vengeance" => Some(Vengeance),
+            "Immortal" => Some(Immortal),
+            "Rage" => Some(Rage),
+            "Annihilation" => Some(Annihilation),
+            "Carnage" => Some(Carnage),
+            "Fury" => Some(Fury),
+            "Arsenal" => Some(Arsenal),
+            "Innovative Ordnance" => Some(InnovativeOrdnance),
+            "Bodyguard" => Some(Bodyguard),
+            "Shield Tech" => Some(ShieldTech),
+            "Pyrotech" => Some(Pyrotech),
+            "Advanced Prototype" => Some(AdvancedPrototype),
+            "Concealment" => Some(Concealment),
+            "Lethality" => Some(Lethality),
+            "Medicine" => Some(Medicine),
+            "Marksmanship" => Some(Marksmanship),
+            "Engineering" => Some(Engineering),
+            "Virulence" => Some(Virulence),
+            "Telekinetics" => Some(Telekinetics),
+            "Seer" => Some(Seer),
+            "Balance" => Some(Balance),
+            "Infiltration" => Some(Infiltration),
+            "Kinetic Combat" => Some(KineticCombat),
+            "Serenity" => Some(Serenity),
+            "Focus" => Some(Focus),
+            "Vigilance" => Some(Vigilance),
+            "Defense" => Some(Defense),
+            "Combat" => Some(Combat),
+            "Watchman" => Some(Watchman),
+            "Concentration" => Some(Concentration),
+            "Gunnery" => Some(Gunnery),
+            "Assault Specialist" => Some(AssaultSpecialist),
+            "Combat Medic" => Some(CombatMedic),
+            "Plasmatech" => Some(Plasmatech),
+            "Shield Specialist" => Some(ShieldSpecialist),
+            "Tactics" => Some(Tactics),
+            "Scrapper" => Some(Scrapper),
+            "Ruffian" => Some(Ruffian),
+            "Sawbones" => Some(Sawbones),
+            "Sharpshooter" => Some(Sharpshooter),
+            "Saboteur" => Some(Saboteur),
+            "Dirty Fighting" => Some(DirtyFighting),
+            _ => None,
+        }
+    }
+
+    /// Get all disciplines in display order (grouped by class)
+    pub fn all() -> &'static [Discipline] {
+        use Discipline::*;
+        &[
+            // Sorcerer / Sage
+            Lightning,
+            Madness,
+            Corruption,
+            Telekinetics,
+            Balance,
+            Seer,
+            // Assassin / Shadow
+            Hatred,
+            Darkness,
+            Deception,
+            Infiltration,
+            KineticCombat,
+            Serenity,
+            // Juggernaut / Guardian
+            Vengeance,
+            Immortal,
+            Rage,
+            Focus,
+            Vigilance,
+            Defense,
+            // Marauder / Sentinel
+            Annihilation,
+            Carnage,
+            Fury,
+            Combat,
+            Watchman,
+            Concentration,
+            // Mercenary / Commando
+            Arsenal,
+            InnovativeOrdnance,
+            Bodyguard,
+            Gunnery,
+            AssaultSpecialist,
+            CombatMedic,
+            // Powertech / Vanguard
+            ShieldTech,
+            Pyrotech,
+            AdvancedPrototype,
+            Plasmatech,
+            ShieldSpecialist,
+            Tactics,
+            // Operative / Scoundrel
+            Concealment,
+            Lethality,
+            Medicine,
+            Scrapper,
+            Ruffian,
+            Sawbones,
+            // Sniper / Gunslinger
+            Marksmanship,
+            Engineering,
+            Virulence,
+            Sharpshooter,
+            Saboteur,
+            DirtyFighting,
+        ]
+    }
+
     /// Look up discipline from its GUID (from combat log)
     pub fn from_guid(guid: i64) -> Option<Self> {
         use Discipline::*;

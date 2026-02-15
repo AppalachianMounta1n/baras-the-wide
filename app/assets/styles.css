@@ -5632,6 +5632,15 @@ details[open] .collapsible-summary::before {
   margin-top: var(--space-xs);
 }
 
+/* Discipline selector dropdown */
+.discipline-selector {
+  position: relative;
+}
+
+.discipline-dropdown {
+  margin-top: var(--space-xs);
+}
+
 /* Row toggle buttons (enable/audio in timer list) */
 .row-toggle {
   cursor: pointer;

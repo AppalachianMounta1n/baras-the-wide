@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::dsl::AudioConfig;
 use crate::dsl::Trigger;
+use crate::game_data::Discipline;
 
 // Re-export from shared modules
 pub use crate::dsl::EntityFilter;
@@ -145,6 +146,13 @@ pub struct EffectDefinition {
     #[serde(default)]
     pub display_source: bool,
 
+    // ─── Discipline Scoping ────────────────────────────────────────────────
+    /// Disciplines this effect is restricted to. Empty = all disciplines.
+    /// When set, the effect only activates if the local player's discipline
+    /// is in this list. Does not affect NPCs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disciplines: Vec<Discipline>,
+
     // ─── Behavior ───────────────────────────────────────────────────────────
     /// Should this effect persist after target dies?
     #[serde(default)]
@@ -241,6 +249,20 @@ impl EffectDefinition {
         self.refresh_abilities
             .iter()
             .find(|r| r.matches(ability_id, ability_name))
+    }
+
+    /// Check if this effect should activate for the given discipline.
+    /// Returns true if no discipline filter is set (empty list) or if the
+    /// discipline matches one of the configured disciplines.
+    /// When discipline is None (unknown/not yet detected), returns true
+    /// to avoid hiding effects before discipline detection.
+    pub fn matches_discipline(&self, discipline: Option<&Discipline>) -> bool {
+        if self.disciplines.is_empty() {
+            return true;
+        }
+        discipline
+            .map(|d| self.disciplines.contains(d))
+            .unwrap_or(true)
     }
 
     /// Get the source filter from the trigger

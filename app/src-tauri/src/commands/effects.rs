@@ -17,6 +17,7 @@ use baras_core::dsl::{AudioConfig, Trigger};
 use baras_core::effects::{
     AlertTrigger, DefinitionConfig, DisplayTarget, EFFECTS_DSL_VERSION, EffectDefinition,
 };
+use baras_core::game_data::Discipline;
 use baras_types::RefreshAbility;
 
 use crate::service::ServiceHandle;
@@ -59,6 +60,11 @@ pub struct EffectListItem {
     pub is_affected_by_alacrity: bool,
     pub cooldown_ready_secs: f32,
 
+    // Discipline scoping
+    /// Disciplines this effect is scoped to (empty = all)
+    #[serde(default)]
+    pub disciplines: Vec<String>,
+
     // Behavior
     pub persist_past_death: bool,
     pub track_outside_combat: bool,
@@ -98,6 +104,7 @@ impl EffectListItem {
             display_source: def.display_source,
             is_affected_by_alacrity: def.is_affected_by_alacrity,
             cooldown_ready_secs: def.cooldown_ready_secs,
+            disciplines: def.disciplines.iter().map(|d| d.name().to_string()).collect(),
             persist_past_death: def.persist_past_death,
             track_outside_combat: def.track_outside_combat,
             on_apply_trigger_timer: def.on_apply_trigger_timer.clone(),
@@ -122,6 +129,9 @@ impl EffectListItem {
             default_charges: self.default_charges,
             color: self.color,
             show_at_secs: self.show_at_secs,
+            disciplines: self.disciplines.iter()
+                .filter_map(|name| Discipline::from_name(name))
+                .collect(),
             persist_past_death: self.persist_past_death,
             track_outside_combat: self.track_outside_combat,
             on_apply_trigger_timer: self.on_apply_trigger_timer.clone(),
