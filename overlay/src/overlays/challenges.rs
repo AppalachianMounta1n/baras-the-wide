@@ -13,7 +13,7 @@ use super::{Overlay, OverlayConfigUpdate, OverlayData};
 use crate::frame::OverlayFrame;
 use crate::platform::{OverlayConfig, PlatformError};
 use crate::utils::{color_from_rgba, format_duration_short, format_number, truncate_name};
-use crate::widgets::{Footer, ProgressBar, colors};
+use crate::widgets::{colors, Footer, ProgressBar};
 
 /// Data for the challenges overlay
 #[derive(Debug, Clone, Default)]
@@ -181,9 +181,14 @@ impl ChallengeOverlay {
             // Scale content up to fill available space when fewer challenges are shown.
             // Estimate per-card height: header + separator + player bars + optional footer
             let sep_overhead = bar_spacing * 2.0 + 4.0 * self.frame.scale_factor();
-            let card_height_est = header_font_size + sep_overhead
+            let card_height_est = header_font_size
+                + sep_overhead
                 + MAX_PLAYERS as f32 * (bar_height + bar_spacing)
-                + if show_footer { font_size + bar_spacing } else { 0.0 };
+                + if show_footer {
+                    font_size + bar_spacing
+                } else {
+                    0.0
+                };
 
             let content_height_est = match layout {
                 ChallengeLayout::Vertical => {
@@ -411,6 +416,14 @@ impl ChallengeOverlay {
     ) -> f32 {
         // Draw challenge name
         let title_y = y + header_font_size;
+        // Shadow for readability
+        self.frame.draw_text(
+            &challenge.name,
+            x + 1.0,
+            title_y + 1.0,
+            header_font_size,
+            colors::text_shadow(),
+        );
         self.frame
             .draw_text(&challenge.name, x, title_y, header_font_size, font_color);
 
@@ -421,6 +434,14 @@ impl ChallengeOverlay {
             let duration_x = x + width - duration_width;
             // Align baseline with header text (adjust for smaller font)
             let duration_y = title_y - (header_font_size - duration_font_size) * 0.3;
+            // Shadow for readability
+            self.frame.draw_text(
+                &duration_str,
+                duration_x + 1.0,
+                duration_y + 1.0,
+                duration_font_size,
+                colors::text_shadow(),
+            );
             self.frame.draw_text(
                 &duration_str,
                 duration_x,

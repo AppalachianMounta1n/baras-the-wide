@@ -56,6 +56,14 @@ impl Header {
         spacing: f32,
     ) -> f32 {
         let title_y = y + font_size;
+        // Shadow for readability
+        frame.draw_text(
+            &self.title,
+            x + 1.0,
+            title_y + 1.0,
+            font_size,
+            colors::text_shadow(),
+        );
         frame.draw_text(&self.title, x, title_y, font_size, self.color);
 
         if self.show_separator {
@@ -140,9 +148,18 @@ impl Footer {
 
         // Draw primary value right-aligned
         let (text_width, _) = frame.measure_text(&self.value, effective_font_size);
+        let primary_x = x + width - text_width - text_padding;
+        // Shadow for readability
         frame.draw_text(
             &self.value,
-            x + width - text_width - text_padding,
+            primary_x + 1.0,
+            text_y + 1.0,
+            effective_font_size,
+            colors::text_shadow(),
+        );
+        frame.draw_text(
+            &self.value,
+            primary_x,
             text_y,
             effective_font_size,
             self.color,
@@ -154,6 +171,14 @@ impl Footer {
             let right_start = x + width * 0.71; // Match progress bar column layout
             let (secondary_width, _) = frame.measure_text(secondary, effective_font_size);
             let secondary_x = right_start - secondary_width - text_padding;
+            // Shadow for readability
+            frame.draw_text(
+                secondary,
+                secondary_x + 1.0,
+                text_y + 1.0,
+                effective_font_size,
+                colors::text_shadow(),
+            );
             frame.draw_text(
                 secondary,
                 secondary_x,
