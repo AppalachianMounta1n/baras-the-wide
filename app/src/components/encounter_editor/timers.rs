@@ -974,9 +974,14 @@ fn TimerEditForm(
                                                 d.audio.file = if e.value().is_empty() { None } else { Some(e.value()) };
                                                 draft.set(d);
                                             },
-                                            option { value: "", "(none)" }
+                                            option { value: "", selected: draft().audio.file.is_none(), "(none)" }
                                             for name in sound_files().iter() {
-                                                option { key: "{name}", value: "{name}", "{name}" }
+                                                {
+                                                    let is_selected = draft().audio.file.as_deref() == Some(name.as_str());
+                                                    rsx! {
+                                                        option { key: "{name}", value: "{name}", selected: is_selected, "{name}" }
+                                                    }
+                                                }
                                             }
                                             if let Some(ref path) = draft().audio.file {
                                                 if !path.is_empty() && !sound_files().contains(path) {

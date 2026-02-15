@@ -30,6 +30,8 @@ pub struct FiredAlert {
     pub text: String,
     pub color: Option<[u8; 4]>,
     pub timestamp: NaiveDateTime,
+    /// Whether this alert should display text in the overlay
+    pub alert_text_enabled: bool,
     /// Whether audio is enabled for this alert
     pub audio_enabled: bool,
     /// Optional custom audio file for this alert (relative path)
@@ -438,6 +440,7 @@ impl TimerManager {
                     text,
                     color: Some(color),
                     timestamp: now,
+                    alert_text_enabled: false,
                     audio_enabled: true,
                     audio_file,
                 }
@@ -506,14 +509,23 @@ impl TimerManager {
         if should_alert_on_start {
             let raw_text = def.alert_text.clone().unwrap_or_else(|| def.name.clone());
             let text = self.format_alert_text(&raw_text, timestamp);
+            // For instant alerts, audio fires with the alert since there's no timer lifecycle.
+            // For regular timers, audio fires independently via offset/countdown/expiration,
+            // so we don't attach it here — AlertOn only controls the text alert overlay.
+            let (alert_audio_enabled, alert_audio_file) = if def.is_alert {
+                (audio_enabled, audio_file.clone())
+            } else {
+                (false, None)
+            };
             self.fired_alerts.push(FiredAlert {
                 id: def.id.clone(),
                 name: def.name.clone(),
                 text,
                 color: Some(color),
                 timestamp,
-                audio_enabled,
-                audio_file: audio_file.clone(),
+                alert_text_enabled: true,
+                audio_enabled: alert_audio_enabled,
+                audio_file: alert_audio_file,
             });
         }
 
@@ -724,6 +736,7 @@ impl TimerManager {
                         text,
                         color: Some(timer.color),
                         timestamp: current_time,
+                        alert_text_enabled: should_fire_expire_alert,
                         audio_enabled: should_fire_audio,
                         audio_file,
                     });

@@ -678,6 +678,7 @@ impl EffectTracker {
                     text: text.clone(),
                     color: def.color,
                     timestamp: current_time,
+                    alert_text_enabled: true,
                     audio_enabled: false,
                     audio_file: None,
                 });
@@ -818,6 +819,7 @@ impl EffectTracker {
                         text: text.clone(),
                         color: def.color,
                         timestamp,
+                        alert_text_enabled: true,
                         audio_enabled: false,
                         audio_file: None,
                     });
@@ -868,6 +870,7 @@ impl EffectTracker {
                         text: text.clone(),
                         color: def.color,
                         timestamp,
+                        alert_text_enabled: true,
                         audio_enabled: false,
                         audio_file: None,
                     });

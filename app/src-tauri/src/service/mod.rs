@@ -1865,9 +1865,10 @@ impl CombatService {
                             }
                         }
 
-                        // Send alerts to overlay (before audio consumes them)
-                        if !alerts.is_empty() {
-                            if overlay_tx.try_send(OverlayUpdate::AlertsFired(alerts.clone())).is_err() {
+                        // Send text alerts to overlay (only those with alert_text_enabled)
+                        let text_alerts: Vec<_> = alerts.iter().filter(|a| a.alert_text_enabled).cloned().collect();
+                        if !text_alerts.is_empty() {
+                            if overlay_tx.try_send(OverlayUpdate::AlertsFired(text_alerts)).is_err() {
                                 warn!("Overlay channel full, dropped timer alerts");
                             }
                         }
@@ -2416,6 +2417,7 @@ async fn process_effect_audio(shared: &std::sync::Arc<SharedState>) -> EffectAud
                 text,
                 color: Some(effect.color),
                 timestamp: chrono::Local::now().naive_local(),
+                alert_text_enabled: true,
                 audio_enabled: false,
                 audio_file: None,
             });
