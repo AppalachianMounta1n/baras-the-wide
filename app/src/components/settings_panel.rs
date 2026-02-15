@@ -1453,8 +1453,6 @@ pub fn SettingsPanel(
                 {
                     let cols = current_settings.raid_overlay.grid_columns;
                     let rows = current_settings.raid_overlay.grid_rows;
-                    let is_valid = current_settings.raid_overlay.is_valid_grid();
-
                     rsx! {
                         div { class: "settings-section",
                             h4 { "Grid Layout" }
@@ -1466,13 +1464,17 @@ pub fn SettingsPanel(
                                     onchange: move |e: Event<FormData>| {
                                         if let Ok(val) = e.value().parse::<u8>() {
                                             let mut new_settings = draft_settings();
-                                            new_settings.raid_overlay.grid_columns = val.clamp(1, 4);
+                                            new_settings.raid_overlay.grid_columns = val.clamp(1, 6);
                                             update_draft(new_settings);
                                         }
                                     },
-                                    option { value: "1", "1" }
-                                    option { value: "2", "2" }
-                                    option { value: "4", "4" }
+                                    for c in [1u8, 2, 3, 4, 5, 6] {
+                                        option {
+                                            value: "{c}",
+                                            disabled: c as u16 * rows as u16 > 24,
+                                            "{c}"
+                                        }
+                                    }
                                 }
                             }
 
@@ -1483,24 +1485,22 @@ pub fn SettingsPanel(
                                     onchange: move |e: Event<FormData>| {
                                         if let Ok(val) = e.value().parse::<u8>() {
                                             let mut new_settings = draft_settings();
-                                            new_settings.raid_overlay.grid_rows = val.clamp(1, 8);
+                                            new_settings.raid_overlay.grid_rows = val.clamp(1, 24);
                                             update_draft(new_settings);
                                         }
                                     },
-                                    option { value: "1", "1" }
-                                    option { value: "2", "2" }
-                                    option { value: "4", "4" }
-                                    option { value: "8", "8" }
+                                    for r in [1u8, 2, 4, 8, 12, 16, 20, 24] {
+                                        option {
+                                            value: "{r}",
+                                            disabled: cols as u16 * r as u16 > 24,
+                                            "{r}"
+                                        }
+                                    }
                                 }
                             }
 
                             div { class: "setting-row",
                                 span { class: "hint", "Total slots: {cols * rows}" }
-                            }
-                            if !is_valid {
-                                div { class: "setting-row validation-error",
-                                    "⚠ Grid must have 4, 8, or 16 total slots"
-                                }
                             }
                             div { class: "setting-row",
                                 span { class: "hint hint-subtle", "Grid changes require toggling overlay off/on" }

@@ -317,8 +317,8 @@ impl RaidGridLayout {
     /// Create a layout from config-defined columns/rows
     pub fn from_config(settings: &baras_core::context::RaidOverlaySettings) -> Self {
         Self {
-            columns: settings.grid_columns.clamp(1, 4),
-            rows: settings.grid_rows.clamp(1, 8),
+            columns: settings.grid_columns.clamp(1, 6),
+            rows: settings.grid_rows.clamp(1, 24),
         }
     }
 
