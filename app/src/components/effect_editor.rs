@@ -1543,6 +1543,22 @@ fn EffectEditForm(
                                     },
                                     "Browse"
                                 }
+                                if draft().audio.file.is_some() {
+                                    button {
+                                        class: "btn btn-sm",
+                                        r#type: "button",
+                                        title: "Preview sound",
+                                        onclick: move |_| {
+                                            if let Some(ref file) = draft().audio.file {
+                                                let file = file.clone();
+                                                spawn(async move {
+                                                    api::preview_sound(&file).await;
+                                                });
+                                            }
+                                        },
+                                        "Play"
+                                    }
+                                }
                             }
     }
                             div { class: "form-row-hz",

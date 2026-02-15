@@ -107,6 +107,77 @@ pub async fn resume_live_tailing(handle: State<'_, ServiceHandle>) -> Result<(),
 pub fn is_live_tailing(handle: State<'_, ServiceHandle>) -> Result<bool, String> {
     Ok(handle.is_live_tailing())
 }
+/// Preview (play) a sound file so the user can hear it in the editor
+#[tauri::command]
+pub async fn preview_sound(
+    filename: String,
+    app: tauri::AppHandle,
+    handle: State<'_, ServiceHandle>,
+) -> Result<(), String> {
+    use tauri::Manager;
+
+    if filename.is_empty() {
+        return Err("No sound file specified".into());
+    }
+
+    // Read volume from current audio settings
+    let volume = handle.config().await.audio.volume;
+
+    // Resolve sound file path: user dir takes priority over bundled
+    let user_path = dirs::config_dir()
+        .map(|p| p.join("baras").join("sounds").join(&filename))
+        .unwrap_or_else(|| PathBuf::from(&filename));
+
+    let bundled_path = app
+        .path()
+        .resolve(
+            format!("definitions/sounds/{}", filename),
+            tauri::path::BaseDirectory::Resource,
+        )
+        .ok()
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(2)
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("core/definitions/sounds")
+                .join(&filename)
+        });
+
+    let path = if user_path.exists() {
+        user_path
+    } else if bundled_path.exists() {
+        bundled_path
+    } else {
+        return Err(format!("Sound file not found: {}", filename));
+    };
+
+    std::thread::spawn(move || {
+        use rodio::{Decoder, OutputStream, Sink};
+        use std::fs::File;
+        use std::io::BufReader;
+
+        let Ok((_stream, stream_handle)) = OutputStream::try_default() else {
+            return;
+        };
+        let Ok(file) = File::open(&path) else { return };
+        let Ok(source) = Decoder::new(BufReader::new(file)) else {
+            return;
+        };
+        let Ok(sink) = Sink::try_new(&stream_handle) else {
+            return;
+        };
+
+        sink.set_volume(volume as f32 / 100.0);
+        sink.append(source);
+        sink.sleep_until_end();
+    });
+
+    Ok(())
+}
+
 /// List available sound files from both bundled and user directories
 #[tauri::command]
 pub async fn list_sound_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
