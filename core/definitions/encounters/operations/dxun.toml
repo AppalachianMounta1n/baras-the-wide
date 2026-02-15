@@ -188,9 +188,9 @@ type = "target"
 match = { selector = ["Czerka Pursuit Droid"] }
 
 [[boss.counter]]
-id = "holding_pens_droid_stealth"
-name = "Droid Stealth-outs"
-increment_on = { type = "effect_removed", effects = [4390573268008960] }
+id = "holding_pens_stun_darts"
+name = "Stun Darts"
+increment_on = { type = "effect_applied", effects = [4389447986577664] }
 initial_value = 0
 
 [[boss.timer]]
@@ -198,11 +198,12 @@ id = "hold_pens_droid_1st"
 name = "Droid First"
 display_text = "Droid Returns"
 duration_secs = 13
-trigger = { type = "effect_removed", effects = [
-  4390573268008960,
+trigger = { type = "effect_applied", effects = [
+  4389426511740928,
 ], source = { selector = [
   "Czerka Pursuit Droid",
 ] } }
+counter_condition = { counter_id = "holding_pens_stun_darts", operator = "eq", value = 0 }
 difficulties = ["master"]
 
 [[boss.timer]]
@@ -214,7 +215,7 @@ trigger = { type = "effect_applied", effects = [
 ], source = { selector = [
   "Czerka Pursuit Droid",
 ] } }
-counter_condition = { counter_id = "holding_pens_droid_stealth", operator = "gte", value = 1 }
+counter_condition = { counter_id = "holding_pens_stun_darts", operator = "gte", value = 1 }
 difficulties = ["master"]
 
 [[boss.timer]]
