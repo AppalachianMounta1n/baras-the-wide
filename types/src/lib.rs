@@ -1140,12 +1140,6 @@ impl Default for RaidOverlaySettings {
 }
 
 impl RaidOverlaySettings {
-    /// Validate that grid dimensions result in 4, 8, or 16 total slots
-    pub fn is_valid_grid(&self) -> bool {
-        let total = self.grid_columns as u16 * self.grid_rows as u16;
-        matches!(total, 4 | 8 | 16)
-    }
-
     /// Get total number of slots
     pub fn total_slots(&self) -> u8 {
         self.grid_columns * self.grid_rows

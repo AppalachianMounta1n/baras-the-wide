@@ -621,6 +621,11 @@ pub struct EffectListItem {
     #[serde(default)]
     pub cooldown_ready_secs: f32,
 
+    // Discipline scoping
+    /// Disciplines this effect is scoped to (empty = all)
+    #[serde(default)]
+    pub disciplines: Vec<String>,
+
     // Behavior
     #[serde(default)]
     pub persist_past_death: bool,

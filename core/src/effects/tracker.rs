@@ -14,6 +14,7 @@ use crate::context::IStr;
 use crate::dsl::EntityDefinition;
 use crate::dsl::{EntityFilter, EntityFilterMatching};
 use crate::encounter::CombatEncounter;
+use crate::game_data::Discipline;
 use crate::signal_processor::{GameSignal, SignalHandler};
 
 use crate::timers::FiredAlert;
@@ -374,6 +375,9 @@ pub struct EffectTracker {
     /// Local player ID (set from session cache during signal dispatch)
     local_player_id: Option<i64>,
 
+    /// Local player's current discipline (for discipline-scoped effects)
+    local_player_discipline: Option<Discipline>,
+
     /// Player's alacrity percentage (e.g., 15.4 for 15.4%)
     /// Used to adjust durations for effects with is_affected_by_alacrity = true
     alacrity_percent: f32,
@@ -424,6 +428,7 @@ impl EffectTracker {
             active_effects: HashMap::new(),
             current_game_time: None,
             local_player_id: None,
+            local_player_discipline: None,
             alacrity_percent: 0.0,
             latency_ms: 0,
             new_targets: Vec::new(),
@@ -943,6 +948,7 @@ impl EffectTracker {
             min_stacks: Option<u8>,
         }
 
+        let local_discipline = self.local_player_discipline;
         let refreshable_defs: Vec<_> = self
             .definitions
             .find_refreshable_by(action_id as u64, Some(action_name_str))
@@ -953,6 +959,7 @@ impl EffectTracker {
                     EntityFilter::LocalPlayer | EntityFilter::Any
                 )
             })
+            .filter(|def| def.matches_discipline(local_discipline.as_ref()))
             .filter_map(|def| {
                 // Find the matching RefreshAbility entry to get conditions
                 let refresh_ability = def.find_refresh_ability(action_id as u64, Some(action_name_str))?;
@@ -1196,6 +1203,11 @@ impl EffectTracker {
         let current_target_id =
             local_player_id.and_then(|id| self.current_targets.get(&id).map(|(tid, _)| *tid));
         for def in matching_defs {
+            // Check discipline filter
+            if !def.matches_discipline(self.local_player_discipline.as_ref()) {
+                continue;
+            }
+
             // Check source filter from the trigger
             let source_filter = def.source_filter();
             if !source_filter.is_any()
@@ -1479,7 +1491,7 @@ impl EffectTracker {
         }
     }
 
-    /// Check if an effect matches source/target filters
+    /// Check if an effect matches source/target filters and discipline scope
     fn matches_filters(
         &self,
         def: &EffectDefinition,
@@ -1487,6 +1499,11 @@ impl EffectTracker {
         target: EntityInfo,
         encounter: Option<&crate::encounter::CombatEncounter>,
     ) -> bool {
+        // Check discipline filter (only relevant for player characters)
+        if !def.matches_discipline(self.local_player_discipline.as_ref()) {
+            return false;
+        }
+
         // Get local player ID from self, boss entity IDs from encounter
         let local_player_id = self.local_player_id;
         let current_target_id =
@@ -1634,6 +1651,16 @@ impl SignalHandler for EffectTracker {
             }
             GameSignal::AreaEntered { .. } => {
                 self.handle_area_change();
+            }
+            GameSignal::DisciplineChanged {
+                entity_id,
+                discipline_id,
+                ..
+            } => {
+                // Track local player's discipline for discipline-scoped effects
+                if self.local_player_id == Some(*entity_id) {
+                    self.local_player_discipline = Discipline::from_guid(*discipline_id);
+                }
             }
             GameSignal::PlayerInitialized { .. } => {
                 // Local player ID is now read from encounter context

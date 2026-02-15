@@ -45,6 +45,36 @@ start_trigger = { type = "ability_cast", abilities = [
 ] } }
 
 [[boss.timer]]
+id = "bestia_coming_down"
+name = "Bestia Coming Down"
+display_text = "Bestia Enters Fight"
+duration_secs = 120.0
+color = [200, 0, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+show_at_secs = 30.0
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "combat_start"
+
+[[boss.timer]]
+id = "bestia_dread_strike"
+name = "Dread Strike"
+duration_secs = 25.0
+color = [200, 0, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+can_be_refreshed = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [3294841211453440]
+source = "any"
+target = "any"
+
+[[boss.timer]]
 id = "bestia_tentacle_cs"
 name = "First Tentacle"
 display_text = "Tentacle Spawn"
@@ -210,7 +240,7 @@ countdown_start = 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Boss 3: Dread Master Calphayus
+# Boss 3: Dread Master CalphayusCorrosive Gren
 # ═══════════════════════════════════════════════════════════════════════════════
 
 [[boss]]
@@ -387,6 +417,25 @@ enabled = false
 offset = 0
 countdown_start = 0
 
+[[boss.timer]]
+id = "raptus_spinning_ending"
+name = "Spinning ending"
+duration_secs = 20.0
+color = [255, 128, 0, 255]
+difficulties = ["master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "effect_applied"
+effects = [3356173344440320]
+source = "boss"
+target = "any"
+
+[boss.timer.counter_condition]
+counter_id = "raptus_spinning"
+operator = "gt"
+value = 2
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Boss 5: The Dread Council
@@ -594,12 +643,7 @@ phase_id = "dread_council_p3_council"
 
 [boss.timer.cancel_trigger]
 type = "phase_ended"
-phase_id = ""
-
-[boss.timer.audio]
-enabled = false
-offset = 0
-countdown_start = 0
+phase_id = "dread_council_p3_council"
 
 [[boss.timer]]
 id = "dread_council_crystal_projection"
@@ -616,11 +660,6 @@ abilities = [3317217991065600]
 source = "boss"
 target = "any"
 
-[boss.timer.audio]
-enabled = false
-offset = 0
-countdown_start = 0
-
 [[boss.timer]]
 id = "dread_council_bosses_coming_down"
 name = "Bosses coming down"
@@ -634,7 +673,6 @@ show_at_secs = 15.0
 type = "phase_entered"
 phase_id = "dread_council_p2_brontes_styrak"
 
-[boss.timer.audio]
-enabled = false
-offset = 0
-countdown_start = 0
+[boss.timer.cancel_trigger]
+type = "phase_entered"
+phase_id = "dread_council_p3_council"

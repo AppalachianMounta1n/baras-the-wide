@@ -47,9 +47,38 @@ is_boss = true
 is_kill_target = false
 
 [[boss.phases]]
+id = "zorn_toth_murdok"
+name = "Handler Murdok"
+resets_counters = []
+
+[boss.phases.start_trigger]
+type = "npc_appears"
+selector = ["Handler Murdok"]
+
+[[boss.phases]]
 id = "zt_main"
-name = "Main"
-trigger = { type = "combat_start" }
+name = "Toth and Zorn"
+resets_counters = []
+
+[boss.phases.start_trigger]
+type = "combat_start"
+
+[[boss.timer]]
+id = "zorn_toth_drouks_enrage"
+name = "Drouks enrage"
+duration_secs = 310.0
+color = [200, 0, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+show_at_secs = 60.0
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "combat_start"
+
+[boss.timer.cancel_trigger]
+type = "phase_entered"
+phase_id = "zorn_toth_murdok"
 
 # -- Timers --
 [[boss.timer]]
@@ -245,6 +274,19 @@ trigger = { type = "phase_ended", phase_id = "fs_shield" }
 id = "fs_soft_enrage"
 name = "Soft Enrage"
 trigger = { type = "counter_reaches", counter_id = "fs_defensive_systems_ct", operator = "eq", value = 5 }
+
+[[boss.timer]]
+id = "firebrand_stormcaller_enrage"
+name = "Enrage"
+duration_secs = 360.0
+color = [200, 0, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+show_at_secs = 60.0
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "combat_start"
 
 # -- Challenges --
 [[boss.challenge]]
@@ -629,11 +671,26 @@ difficulties = ["story", "veteran", "master"]
 enabled = true
 display_target = "timers_a"
 
+
 [boss.timer.trigger]
 type = "effect_applied"
 effects = [2877026792898560]
 source = "any"
 target = "local_player"
+
+[[boss.timer]]
+id = "warlord_kephess_walker_enrage"
+name = "Walker enrage"
+duration_secs = 450.0
+color = [200, 0, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+show_at_secs = 60.0
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "combat_start"
+
 
 [[boss.timer]]
 id = "wk_baradium_countdown"

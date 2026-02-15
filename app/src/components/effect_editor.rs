@@ -186,6 +186,7 @@ fn default_effect(name: String) -> EffectListItem {
         display_source: false,
         is_affected_by_alacrity: false,
         cooldown_ready_secs: 0.0,
+        disciplines: vec![],
         persist_past_death: false,
         track_outside_combat: true,
         on_apply_trigger_timer: None,
@@ -1420,6 +1421,26 @@ fn EffectEditForm(
                             "Track Outside Combat"
                         }
 
+                        // Discipline scoping
+                        div { class: "form-row-hz",
+                            label { class: "flex items-center",
+                                "Disciplines"
+                                span {
+                                    class: "help-icon",
+                                    title: "Restrict this effect to specific player disciplines. If empty, the effect applies to all disciplines.",
+                                    "?"
+                                }
+                            }
+                            DisciplineSelector {
+                                selected: draft().disciplines.clone(),
+                                on_change: move |new_disciplines: Vec<String>| {
+                                    let mut d = draft();
+                                    d.disciplines = new_disciplines;
+                                    draft.set(d);
+                                }
+                            }
+                        }
+
                         // Alert section
                         div { class: "form-row-hz",
                             label { "Alert Text" }
@@ -1521,6 +1542,22 @@ fn EffectEditForm(
                                         });
                                     },
                                     "Browse"
+                                }
+                                if draft().audio.file.is_some() {
+                                    button {
+                                        class: "btn btn-sm",
+                                        r#type: "button",
+                                        title: "Preview sound",
+                                        onclick: move |_| {
+                                            if let Some(ref file) = draft().audio.file {
+                                                let file = file.clone();
+                                                spawn(async move {
+                                                    api::preview_sound(&file).await;
+                                                });
+                                            }
+                                        },
+                                        "Play"
+                                    }
                                 }
                             }
     }
@@ -1635,6 +1672,131 @@ fn EffectEditForm(
 
             }
         }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Discipline Selector (multi-select dropdown)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// All discipline display names grouped by class (Imp / Rep mirror pairs)
+const ALL_DISCIPLINES: &[(&str, &[&str])] = &[
+    ("Sorcerer / Sage", &["Lightning", "Madness", "Corruption", "Telekinetics", "Balance", "Seer"]),
+    ("Assassin / Shadow", &["Hatred", "Darkness", "Deception", "Infiltration", "Kinetic Combat", "Serenity"]),
+    ("Juggernaut / Guardian", &["Vengeance", "Immortal", "Rage", "Focus", "Vigilance", "Defense"]),
+    ("Marauder / Sentinel", &["Annihilation", "Carnage", "Fury", "Combat", "Watchman", "Concentration"]),
+    ("Mercenary / Commando", &["Arsenal", "Innovative Ordnance", "Bodyguard", "Gunnery", "Assault Specialist", "Combat Medic"]),
+    ("Powertech / Vanguard", &["Shield Tech", "Pyrotech", "Advanced Prototype", "Plasmatech", "Shield Specialist", "Tactics"]),
+    ("Operative / Scoundrel", &["Concealment", "Lethality", "Medicine", "Scrapper", "Ruffian", "Sawbones"]),
+    ("Sniper / Gunslinger", &["Marksmanship", "Engineering", "Virulence", "Sharpshooter", "Saboteur", "Dirty Fighting"]),
+];
+
+#[component]
+fn DisciplineSelector(
+    selected: Vec<String>,
+    on_change: EventHandler<Vec<String>>,
+) -> Element {
+    let mut dropdown_open = use_signal(|| false);
+    let mut dropdown_pos = use_signal(|| (0.0f64, 0.0f64));
+
+    let display = if selected.is_empty() {
+        "(all disciplines)".to_string()
+    } else if selected.len() == 1 {
+        selected[0].clone()
+    } else {
+        format!("{} disciplines", selected.len())
+    };
+
+    rsx! {
+        div {
+            class: "discipline-selector",
+            button {
+                class: "select",
+                style: "width: 200px; text-align: left;",
+                onclick: move |e| {
+                    if !dropdown_open() {
+                        let click = e.client_coordinates();
+                        let offset = e.element_coordinates();
+                        let btn_left = click.x - offset.x;
+                        let btn_bottom = click.y - offset.y + 30.0;
+                        dropdown_pos.set((btn_left, btn_bottom));
+                    }
+                    dropdown_open.set(!dropdown_open());
+                },
+                "{display}"
+                span { class: "ml-auto", "▾" }
+            }
+
+            if dropdown_open() {
+                // Invisible backdrop to catch clicks outside the dropdown
+                div {
+                    style: "position: fixed; inset: 0; z-index: 9999;",
+                    onclick: move |_| dropdown_open.set(false),
+                }
+                div {
+                    class: "discipline-dropdown",
+                    style: "position: fixed; left: {dropdown_pos().0}px; top: {dropdown_pos().1}px; z-index: 10000; background: #1e1e2e; border: 1px solid var(--border-medium); border-radius: var(--radius-sm); padding: var(--space-xs); min-width: 260px; max-height: 400px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.5);",
+
+                    // "All" option (clears selection)
+                    label { class: "flex items-center gap-xs text-sm p-xs cursor-pointer",
+                        input {
+                            r#type: "checkbox",
+                            checked: selected.is_empty(),
+                            onchange: move |_| {
+                                on_change.call(vec![]);
+                                dropdown_open.set(false);
+                            }
+                        }
+                        "(all disciplines)"
+                    }
+
+                    // Grouped disciplines
+                    for (group_name, disciplines) in ALL_DISCIPLINES.iter() {
+                        {
+                            let selected_clone = selected.clone();
+                            rsx! {
+                                div { class: "text-xs text-muted",
+                                    style: "padding: 6px 4px 2px 4px; font-weight: 600; border-top: 1px solid var(--border-subtle); margin-top: 2px;",
+                                    "{group_name}"
+                                }
+                                for disc in disciplines.iter() {
+                                    {
+                                        let disc_name = disc.to_string();
+                                        let is_selected = selected_clone.contains(&disc_name);
+                                        let selected_for_change = selected_clone.clone();
+
+                                        rsx! {
+                                            label { class: "flex items-center gap-xs text-sm p-xs cursor-pointer",
+                                                input {
+                                                    r#type: "checkbox",
+                                                    checked: is_selected,
+                                                    onchange: move |_| {
+                                                        let mut new_selected = selected_for_change.clone();
+                                                        if is_selected {
+                                                            new_selected.retain(|d| d != &disc_name);
+                                                        } else {
+                                                            new_selected.push(disc_name.clone());
+                                                        }
+                                                        on_change.call(new_selected);
+                                                    }
+                                                }
+                                                "{disc}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    button {
+                        class: "btn btn-sm w-full mt-xs",
+                        onclick: move |_| dropdown_open.set(false),
+                        "Done"
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -831,6 +831,11 @@ pub async fn pick_audio_file() -> Option<String> {
     from_js(result).unwrap_or(None)
 }
 
+/// Preview (play) a sound file so the user can hear it in the editor
+pub async fn preview_sound(filename: &str) {
+    let _ = try_invoke("preview_sound", build_args("filename", filename)).await;
+}
+
 /// Open a folder picker for the log directory, returns the selected path or None.
 /// This is handled on the Rust side to maintain macOS security-scoped access.
 pub async fn pick_log_directory() -> Option<String> {

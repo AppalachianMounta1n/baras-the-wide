@@ -42,6 +42,19 @@ trigger = { type = "boss_hp_below", hp_percent = 15.0, selector = [
 
 # ─── Timers ─────────────────────────────────────────────────────────────────────
 
+[[boss.timer]]
+id = "writhing_horror_enrage"
+name = "Enrage"
+duration_secs = 345.0
+color = [200, 0, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+show_at_secs = 60.0
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "combat_start"
+
 # -- Teleport --
 # Boss teleports to a random player. First one is faster.
 
@@ -287,12 +300,14 @@ difficulties = ["story"]
 [[boss.timer]]
 id = "dg_vitality_ext"
 name = "Vitality Extraction"
+display_text = "Puddling Forming"
 is_alert = true
 trigger = { type = "ability_cast", abilities = [
   3014512991010816,
 ], target = "local_player" }
 alert_text = "Vitality Extraction"
 difficulties = ["veteran", "master"]
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Boss 3: Operator IX
@@ -773,6 +788,12 @@ name = "Hypergate Beacon"
 ids = [3025194574675968, 3025405028073472]
 is_boss = false
 
+[[boss.entities]]
+name = "Unstable Larva"
+ids = [3044968604106752]
+is_boss = false
+is_kill_target = false
+
 # ─── Simple Timers ──────────────────────────────────────────────────────────────
 
 # First Tunneling Slam - 19 seconds from combat start
@@ -905,7 +926,36 @@ duration_secs = 30.0
 color = [20, 136, 30, 255]
 difficulties = ["veteran", "master"]
 
-# Dreadful Entity
+[[boss.timer]]
+id = "the_terror_from_beyond_lake_add_target"
+name = "Lake Add Target"
+is_alert = true
+alert_text = "Targeted by lake add"
+color = [255, 213, 0, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "target_set"
+selector = ["Unstable Larva"]
+target = "local_player"
+
+[[boss.timer]]
+id = "the_terror_from_beyond_inconsistency"
+name = "Inconsistency"
+is_alert = true
+alert_text = "Run to inconsistency"
+color = [0, 255, 123, 255]
+difficulties = ["master"]
+enabled = true
+
+[boss.timer.trigger]
+type = "effect_applied"
+effects = [836045448945483]
+source = "any"
+target = "local_player"
+
+#---------- Dreadful Entity
 [[boss]]
 id = "dreadful"
 name = "Dreadful Entity"

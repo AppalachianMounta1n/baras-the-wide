@@ -191,6 +191,7 @@ pub fn run() {
             commands::is_live_tailing,
             commands::list_sound_files,
             commands::pick_audio_file,
+            commands::preview_sound,
             commands::pick_log_directory,
             // Profile commands
             commands::get_profile_names,
