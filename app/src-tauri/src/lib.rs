@@ -189,6 +189,7 @@ pub fn run() {
             commands::open_historical_file,
             commands::resume_live_tailing,
             commands::is_live_tailing,
+            commands::list_sound_files,
             commands::pick_audio_file,
             commands::pick_log_directory,
             // Profile commands
@@ -206,6 +207,15 @@ pub fn run() {
             commands::create_encounter_item,
             commands::update_encounter_item,
             commands::delete_encounter_item,
+            commands::update_boss_notes,
+            commands::get_area_bosses_for_notes,
+            commands::select_boss_notes,
+            // Encounter export/import
+            commands::export_encounter_toml,
+            commands::save_export_file,
+            commands::read_import_file,
+            commands::preview_import_encounter,
+            commands::import_encounter_toml,
             // Effect editor commands
             commands::get_effect_definitions,
             commands::update_effect_definition,
@@ -213,6 +223,13 @@ pub fn run() {
             commands::delete_effect_definition,
             commands::duplicate_effect_definition,
             commands::get_icon_preview,
+            // Effect export/import
+            commands::export_effects_toml,
+            commands::preview_import_effects,
+            commands::import_effects_toml,
+            // StarParse import
+            commands::preview_starparse_import,
+            commands::import_starparse_timers,
             // Parsely upload
             commands::upload_to_parsely,
             commands::upload_encounter_to_parsely,
@@ -224,7 +241,9 @@ pub fn run() {
             commands::query_raid_overview,
             commands::query_dps_over_time,
             commands::query_hps_over_time,
+            commands::query_ehps_over_time,
             commands::query_dtps_over_time,
+            commands::query_hp_over_time,
             commands::query_effect_uptime,
             commands::query_effect_windows,
             commands::query_combat_log,
@@ -233,6 +252,8 @@ pub fn run() {
             commands::query_source_names,
             commands::query_target_names,
             commands::query_player_deaths,
+            commands::query_rotation,
+            commands::query_damage_taken_summary,
             commands::query_encounter_timeline,
             commands::list_encounter_files,
             // Updater

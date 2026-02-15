@@ -1,77 +1,39 @@
-# v2026.2.4
+# v2026.2.12
 
-Sorry for the frequent updates- trying very hard to ensure the application is 100% stable.
-Wayland keyboard shortcuts may work now -try them out!
+Extensive improvements to the data explorer. More boss definitions. Bug fixes.
 
-### Timers and Definitions
+Features / Improvements:
 
-- Added The Eyeless to Ops Encounters with crush timer
-- Added Dreadful Entity to TFB definitions
-- Dxun timer updates:
-  - Flare timers for Dxun encounters 2 & 3
-  - Czerka Pursuit Droid timer
-  - Updates to Apex timers
-- Gods from the Machine phase timers (first three bosses (SOME))
-- Added Styrak Kell dragon spine timers
+- Extended ability breakdown tables with activations, miss/def%, effective healing%, shield detection, and
+  average hit/crit columns
+- Damage Taken tab: summary panel with damage type breakdown (internal/elemental, kinetic/energy,
+  force/tech, melee/ranged) and mitigation stats (avoided, shielded, absorbed)
+- Damage Taken tab: attack type and damage type columns per ability
+- Health tracking chart added to data explorer
+- Totals row on all ability breakdown tables
+- Improved rotation analysis using explicit off-GCD ability classification instead of timing heuristic (thank you Mari for data)
+- Data explorer defaults to local player instead of top value
+- Phase timeline and combat log time range selection (start/end)
+- Tab-colored value columns in ability tables for better readability
 
-### Combat Log Improvements
+Timers and Definitions:
 
-- The combat log can now be navigate with the Home/End and Page Up/Down Keys
-- Added separate filter for miscellaneous events
-- Added Damage Type column
-- Split Player and NPCs into separate sections in target/source selection drop downs
-- Added toggle to display the raw timestamp
+- Zorn & Toth encounter now ends on Handler Murdock death
+- Brontes Clock phase start/end detection is more robust (credit Wolfy)
+- Added Dxun II Pursuit droid phases and DPS challenge (credit Wolfy)
+- Add Lady Dominique Phases and 2 alerts (credit Wolfy)
+- Added definition file for Orbital Core
+- Master Blaster is now classified as a success when the Blaster cast effect is removed and at least 1 player survives
+- Chief Zokar is now detected as a boss on CZ-198 master mode
+- XR-53 lethal strike timer changed from 30 seconds -> 32 seconds
+- XR-53 lethal strike timer now cancels on recovery protocol
 
-### Bug Fixes
+Fixes:
 
-- Fixed issue causing timers, effects, and raid frames to not populate after profile switch
-- Fixed Wayland hotkey listener session issues
-- Fixed potential race condition in UI
-- Fixed several UI formatting errors
-- Fixed line number tracking when starting parsing session in-combat
-- Fixed issue causing certain combat encounters to fail to upload to parsely
-- Definition files now log errors when they fail to parse
-
-# v2026.2.3
-
-- Implemented fix for regression causing parser to freeze.
-- Encounters will now time out 5 seconds after the local player receives the revive immunity buff
-- Ravager/TfB encounters no longer show all bosses as wipes
-- Fixed issue causing some bosses to be registered in trash fights prior to encounter
-- Enemies will only appear on the HP overlays after they have taken damage.
-- Removed Watchdog as a kill target in Lady Dom, causing wipes to be classified as success
-
-- Added experimental Wayland Hotkey support
-- Changes to overlay state via hotkeys will now be reflected in the UI
-
-# v2026.2.2 Hotfix
-
-- **Fixed issue causing timers not to appear for new overlay profiles and new users**
-- Improved wipe detection logic
-- Encounters ended by exiting to med center will no longer appear to be in the area exited to
-- Parsely upload success toast notification now stays until closed by user
-
-# v2026.2.1
-
-## What's New
-
-### General
-
-- Individual combats can now be uploaded to parsely.io via the session page
-- Users can now set visibility and add an optional note when uploading to Parsely
-- Starting the application in the middle of combat will now detect and parse the in-progress encounter
-- UI positions and open elements are now preserved across tab-navigation; including the combat log scroll position
-- Tweaked combat log formatting
-- Improved handling of SWTOR combat log rotation upon character login/logout
-
-### Encounter Classification
-
-- Fake combat encounters that occur shortly after fights (e.g. Dread Master Holocrons) are now automatically ignored
-- Fixed several edge cases causing encounter to split if mechanics are pushed too fast or player was revived at a specific time
-- Fixed issue causing encounter to be classified as wipe if the local player used area start revive
-- Coratanni boss fight will no longer appear split across multiple encounters if the local player dies during the encounter
-
-### Timers and Bosses
-
-- Fixed typo causing Ravagers default definitions failing to appear
-- Fixed several text alerts on ToS firing on non-local player
+- Respect time range filter in effect uptime calculations
+- Respect time range in shield attribution queries
+- Remove self-damage events from data explorer damage tab
+- Properly parse threat drops
+- Protect recent log files (48h) from cleanup instead of date-based cutoff
+- Fix stale timer pipeline_delay argument
+- Fix profile selection dropdowns getting out-of-sync

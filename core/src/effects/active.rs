@@ -255,9 +255,13 @@ impl ActiveEffect {
 
     /// Mark the effect as removed (starts fade-out)
     /// Called when we receive an EffectRemoved signal OR duration expires
-    pub fn mark_removed(&mut self) {
+    /// Returns true if this was the first time marking removed (for counter tracking)
+    pub fn mark_removed(&mut self) -> bool {
         if self.removed_at.is_none() {
             self.removed_at = Some(Instant::now());
+            true
+        } else {
+            false
         }
     }
 

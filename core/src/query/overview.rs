@@ -18,12 +18,15 @@ impl EncounterQuery<'_> {
     ///   LAST shield with actual dmg_absorbed
     async fn query_shield_attribution(
         &self,
-        _time_range: Option<&TimeRange>,
+        time_range: Option<&TimeRange>,
     ) -> Result<HashMap<String, f64>, String> {
+        let time_filter = time_range
+            .map(|tr| format!("AND {}", tr.sql_filter()))
+            .unwrap_or_default();
         // Query with UNNEST, only fetch columns we need for FIFO attribution
         // Only keep position=1 rows (first shield) to avoid double-counting
         let batches = self
-            .sql(
+            .sql(&format!(
                 r#"
             SELECT
                 CAST(dmg_absorbed AS BIGINT) as dmg_absorbed,
@@ -31,11 +34,11 @@ impl EncounterQuery<'_> {
             FROM (
                 SELECT dmg_absorbed, UNNEST(active_shields) as shield
                 FROM events
-                WHERE dmg_absorbed > 0 AND cardinality(active_shields) > 0
+                WHERE dmg_absorbed > 0 AND cardinality(active_shields) > 0 {time_filter}
             )
             WHERE CAST(shield['position'] AS BIGINT) = 1
-        "#,
-            )
+        "#
+            ))
             .await;
 
         let batches = match batches {
@@ -144,7 +147,7 @@ impl EncounterQuery<'_> {
                 SELECT source_name as name,
                     SUM(threat) as threat_total
                 FROM events
-                WHERE threat > 0 {time_filter}
+                WHERE threat != 0 {time_filter}
                 GROUP BY source_name
             )
             SELECT

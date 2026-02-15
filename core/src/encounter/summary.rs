@@ -16,6 +16,28 @@ use crate::debug_log;
 use crate::game_data::{BossInfo, ContentType, Difficulty, is_pvp_area, lookup_boss};
 use crate::state::info::AreaInfo;
 
+/// Summary of a single challenge metric from a completed encounter
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChallengeSummary {
+    pub name: String,
+    pub metric: String,
+    pub total_value: i64,
+    pub event_count: u32,
+    pub duration_secs: f32,
+    pub per_second: Option<f32>,
+    pub by_player: Vec<ChallengePlayerSummary>,
+}
+
+/// Per-player contribution to a challenge
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChallengePlayerSummary {
+    pub entity_id: i64,
+    pub name: String,
+    pub value: i64,
+    pub percent: f32,
+    pub per_second: Option<f32>,
+}
+
 /// Summary of a completed encounter with computed metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncounterSummary {
@@ -44,6 +66,11 @@ pub struct EncounterSummary {
     pub event_start_line: Option<u64>,
     /// Last line of events for this encounter (includes grace period)
     pub event_end_line: Option<u64>,
+
+    // ─── Challenge Results ────────────────────────────────────────────────────
+    /// Challenge metrics from this encounter (empty if no challenges defined)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub challenges: Vec<ChallengeSummary>,
 
     // ─── Parsely Integration ─────────────────────────────────────────────────
     /// Link to the uploaded encounter on Parsely (set after successful upload)
@@ -256,29 +283,37 @@ pub fn classify_encounter(
 /// Determine if an encounter was successful (not a wipe)
 /// Returns false (wipe) if all players died or kill targets are still alive
 /// For victory-trigger encounters, success requires the trigger to have fired
+/// (but only if the victory trigger applies to the current difficulty)
 pub fn determine_success(encounter: &CombatEncounter) -> bool {
     // Check if the ACTIVE boss requires a victory trigger
     // Only check the specific boss being fought, not all bosses in the area
     if let Some(idx) = encounter.active_boss_idx() {
         let def = &encounter.boss_definitions()[idx];
-        tracing::info!(
-            "[DETERMINE_SUCCESS] active_boss_idx={}, has_victory_trigger={}, victory_triggered={}, all_players_dead={}",
-            idx,
-            def.has_victory_trigger,
-            encounter.victory_triggered,
-            encounter.all_players_dead
-        );
         if def.has_victory_trigger {
-            // Hard requirement: victory trigger must have fired for success
-            // If the trigger never fired, it's always a wipe
-            return encounter.victory_triggered;
+            // Check if victory trigger applies to current difficulty
+            // If victory_trigger_difficulties is empty, it applies to all
+            // If specified, only require the trigger on matching difficulties
+            let trigger_applies = if def.victory_trigger_difficulties.is_empty() {
+                true
+            } else {
+                encounter
+                    .difficulty
+                    .as_ref()
+                    .map(|d| {
+                        def.victory_trigger_difficulties
+                            .iter()
+                            .any(|vd| d.matches_config_key(vd))
+                    })
+                    .unwrap_or(false) // If difficulty unknown, don't require trigger
+            };
+
+            if trigger_applies {
+                // Hard requirement: victory trigger must have fired for success
+                // If the trigger never fired, it's always a wipe
+                return encounter.victory_triggered;
+            }
+            // Victory trigger doesn't apply to this difficulty, fall through to normal logic
         }
-    } else {
-        tracing::info!(
-            "[DETERMINE_SUCCESS] active_boss_idx=None, boss_definitions={}, all_players_dead={}",
-            encounter.boss_definitions().len(),
-            encounter.all_players_dead
-        );
     }
     
     // Standard encounters: use is_likely_wipe()
@@ -413,6 +448,59 @@ pub fn create_encounter_summary(
         .collect();
     npc_names.sort();
 
+    // Build challenge summaries from the encounter's tracker
+    let challenges: Vec<ChallengeSummary> = encounter
+        .challenge_tracker
+        .snapshot()
+        .into_iter()
+        .filter(|val| val.event_count > 0)
+        .map(|val| {
+            let challenge_duration = val.duration_secs.max(1.0);
+            let mut by_player: Vec<ChallengePlayerSummary> = val
+                .by_player
+                .iter()
+                .map(|(&entity_id, &value)| {
+                    let name = encounter
+                        .players
+                        .get(&entity_id)
+                        .map(|p| resolve(p.name).to_string())
+                        .unwrap_or_else(|| format!("Player {}", entity_id));
+                    let percent = if val.value > 0 {
+                        (value as f32 / val.value as f32) * 100.0
+                    } else {
+                        0.0
+                    };
+                    ChallengePlayerSummary {
+                        entity_id,
+                        name,
+                        value,
+                        percent,
+                        per_second: if value > 0 {
+                            Some(value as f32 / challenge_duration)
+                        } else {
+                            None
+                        },
+                    }
+                })
+                .collect();
+            by_player.sort_by(|a, b| b.value.cmp(&a.value));
+
+            ChallengeSummary {
+                name: val.name,
+                metric: format!("{:?}", val.columns),
+                total_value: val.value,
+                event_count: val.event_count,
+                duration_secs: challenge_duration,
+                per_second: if val.value > 0 {
+                    Some(val.value as f32 / challenge_duration)
+                } else {
+                    None
+                },
+                by_player,
+            }
+        })
+        .collect();
+
     Some(EncounterSummary {
         encounter_id: encounter.id,
         display_name,
@@ -431,6 +519,7 @@ pub fn create_encounter_summary(
         player_metrics,
         is_phase_start,
         npc_names,
+        challenges,
         // Line number tracking for per-encounter Parsely uploads
         // Use encounter's area_entered_line (set when combat started) instead of cache's current area
         // This ensures we get the correct AreaEntered line even if player exits to a different area

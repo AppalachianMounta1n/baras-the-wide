@@ -3,9 +3,10 @@
 //! Provides SQL-based queries over encounter data using DataFusion.
 
 use baras_core::query::{
-    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow, DataTab,
-    EffectChartData, EffectWindow, EncounterTimeline, EntityBreakdown, PlayerDeath,
-    RaidOverviewRow, TimeRange, TimeSeriesPoint,
+    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow,
+    DamageTakenSummary, DataTab, EffectChartData, EffectWindow, EncounterTimeline,
+    EntityBreakdown, HpPoint, PlayerDeath, RaidOverviewRow, RotationAnalysis, TimeRange,
+    TimeSeriesPoint,
 };
 use tauri::State;
 
@@ -103,6 +104,34 @@ pub async fn query_hps_over_time(
 ) -> Result<Vec<TimeSeriesPoint>, String> {
     handle
         .query_hps_over_time(encounter_idx, bucket_ms, source_name, time_range)
+        .await
+}
+
+/// Query EHPS (effective healing) over time with specified bucket size.
+#[tauri::command]
+pub async fn query_ehps_over_time(
+    handle: State<'_, ServiceHandle>,
+    encounter_idx: Option<u32>,
+    bucket_ms: i64,
+    source_name: Option<String>,
+    time_range: Option<TimeRange>,
+) -> Result<Vec<TimeSeriesPoint>, String> {
+    handle
+        .query_ehps_over_time(encounter_idx, bucket_ms, source_name, time_range)
+        .await
+}
+
+/// Query HP% over time with specified bucket size.
+#[tauri::command]
+pub async fn query_hp_over_time(
+    handle: State<'_, ServiceHandle>,
+    encounter_idx: Option<u32>,
+    bucket_ms: i64,
+    target_name: Option<String>,
+    time_range: Option<TimeRange>,
+) -> Result<Vec<HpPoint>, String> {
+    handle
+        .query_hp_over_time(encounter_idx, bucket_ms, target_name, time_range)
         .await
 }
 
@@ -253,4 +282,32 @@ pub async fn query_player_deaths(
     encounter_idx: Option<u32>,
 ) -> Result<Vec<PlayerDeath>, String> {
     handle.query_player_deaths(encounter_idx).await
+}
+
+/// Query damage taken summary (damage type breakdown + mitigation stats).
+#[tauri::command]
+pub async fn query_damage_taken_summary(
+    handle: State<'_, ServiceHandle>,
+    encounter_idx: Option<u32>,
+    entity_name: String,
+    time_range: Option<TimeRange>,
+    entity_types: Option<Vec<String>>,
+) -> Result<DamageTakenSummary, String> {
+    handle
+        .query_damage_taken_summary(encounter_idx, entity_name, time_range, entity_types)
+        .await
+}
+
+/// Query rotation analysis for a player.
+#[tauri::command]
+pub async fn query_rotation(
+    handle: State<'_, ServiceHandle>,
+    encounter_idx: Option<u32>,
+    source_name: String,
+    anchor_ability_id: i64,
+    time_range: Option<TimeRange>,
+) -> Result<RotationAnalysis, String> {
+    handle
+        .query_rotation(encounter_idx, source_name, anchor_ability_id, time_range)
+        .await
 }

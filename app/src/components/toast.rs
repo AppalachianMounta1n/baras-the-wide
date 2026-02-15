@@ -23,6 +23,8 @@ pub struct Toast {
     pub id: u32,
     pub message: String,
     pub severity: ToastSeverity,
+    /// Optional clickable link displayed after the message.
+    pub link: Option<String>,
 }
 
 /// Global toast manager for showing notifications.
@@ -55,6 +57,7 @@ impl ToastManager {
             id,
             message: message.into(),
             severity,
+            link: None,
         };
 
         // Add toast, cap at 5 max (remove oldest if exceeded)
@@ -84,6 +87,39 @@ impl ToastManager {
     ///
     /// Toast will NOT auto-dismiss - user must click the X button to close it.
     /// Maximum 5 toasts are shown at once - oldest is removed if exceeded.
+    /// Show a toast with a clickable link that auto-dismisses after `duration_ms`.
+    pub fn show_with_link(
+        &mut self,
+        message: impl Into<String>,
+        link: String,
+        severity: ToastSeverity,
+        duration_ms: u32,
+    ) {
+        let id = *self.next_id.peek();
+        *self.next_id.write() += 1;
+
+        let toast = Toast {
+            id,
+            message: message.into(),
+            severity,
+            link: Some(link),
+        };
+
+        {
+            let mut toasts = self.toasts.write();
+            if toasts.len() >= 5 {
+                toasts.remove(0);
+            }
+            toasts.push(toast);
+        }
+
+        let mut toasts_signal = self.toasts;
+        spawn(async move {
+            TimeoutFuture::new(duration_ms).await;
+            toasts_signal.write().retain(|t| t.id != id);
+        });
+    }
+
     pub fn show_persistent(&mut self, message: impl Into<String>, severity: ToastSeverity) {
         let id = *self.next_id.peek();
         *self.next_id.write() += 1;
@@ -92,6 +128,7 @@ impl ToastManager {
             id,
             message: message.into(),
             severity,
+            link: None,
         };
 
         // Add toast, cap at 5 max (remove oldest if exceeded)
@@ -153,7 +190,17 @@ pub fn ToastFrame() -> Element {
                             _ => rsx! { i { class: "fa-solid fa-triangle-exclamation" } },
                         }
                     }
-                    span { class: "toast-message", "{toast.message}" }
+                    span { class: "toast-message",
+                        "{toast.message}"
+                        if let Some(link) = &toast.link {
+                            a {
+                                class: "toast-link",
+                                href: "{link}",
+                                target: "_blank",
+                                "{link}"
+                            }
+                        }
+                    }
                     button {
                         class: "toast-close",
                         onclick: {

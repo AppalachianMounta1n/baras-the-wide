@@ -34,11 +34,13 @@ pub use baras_types::{
     EntityFilter,
     EntitySelector,
     MainTab,
+    NotesOverlayConfig,
     OverlayAppearanceConfig,
     OverlaySettings,
     PersonalOverlayConfig,
     PersonalStat,
     RaidOverlaySettings,
+    RefreshAbility,
     SortColumn,
     SortDirection,
     TimerOverlayConfig,
@@ -102,9 +104,22 @@ pub struct OverlayStatus {
     pub cooldowns_enabled: bool,
     pub dot_tracker_running: bool,
     pub dot_tracker_enabled: bool,
+    pub notes_running: bool,
+    pub notes_enabled: bool,
     pub overlays_visible: bool,
     pub move_mode: bool,
     pub rearrange_mode: bool,
+}
+
+/// Area visit info for display in file browser
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AreaVisitInfo {
+    /// Display string: "AreaName Difficulty" (e.g., "Dxun NiM 8")
+    pub display: String,
+    /// Raw area name
+    pub area_name: String,
+    /// Difficulty string (may be empty)
+    pub difficulty: String,
 }
 
 /// Log file metadata for file browser
@@ -114,8 +129,13 @@ pub struct LogFileInfo {
     pub display_name: String,
     pub character_name: Option<String>,
     pub date: String,
+    /// Day of week (e.g., "Sunday")
+    #[serde(default)]
+    pub day_of_week: String,
     pub is_empty: bool,
     pub file_size: u64,
+    /// Areas/operations visited in this file (None if not yet indexed)
+    pub areas: Option<Vec<AreaVisitInfo>>,
 }
 
 /// Update availability info from backend
@@ -216,6 +236,7 @@ pub enum OverlayType {
     EffectsB,
     Cooldowns,
     DotTracker,
+    Notes,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -282,6 +303,9 @@ pub struct BossEncounterDefinition {
     pub timers: Vec<BossTimerDefinition>,
     #[serde(default)]
     pub challenges: Vec<ChallengeDefinition>,
+    /// User notes for this encounter (Markdown formatted)
+    #[serde(default)]
+    pub notes: Option<String>,
 }
 
 fn default_enabled() -> bool {
@@ -554,6 +578,9 @@ pub struct EffectListItem {
     /// Whether this effect has a user override (vs bundled-only)
     #[serde(default)]
     pub is_user_override: bool,
+    /// Whether this effect exists in the bundled defaults
+    #[serde(default)]
+    pub is_bundled: bool,
 
     // Core
     pub enabled: bool,
@@ -565,7 +592,7 @@ pub struct EffectListItem {
     pub ignore_effect_removed: bool,
 
     // Matching - abilities that refresh the effect duration
-    pub refresh_abilities: Vec<AbilitySelector>,
+    pub refresh_abilities: Vec<RefreshAbility>,
 
     // Duration
     pub duration_secs: Option<f32>,
@@ -778,4 +805,96 @@ pub struct NewAreaRequest {
 
 fn default_area_type() -> String {
     "operation".to_string()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Export/Import Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Export result from backend
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportResult {
+    pub toml: String,
+    pub is_bundled: bool,
+}
+
+/// Item-level diff entry for import preview
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportItemDiff {
+    pub item_type: String,
+    pub name: String,
+    pub id: String,
+}
+
+/// Per-boss preview for import
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportBossPreview {
+    pub boss_id: String,
+    pub boss_name: String,
+    pub is_new_boss: bool,
+    pub items_to_replace: Vec<ImportItemDiff>,
+    pub items_to_add: Vec<ImportItemDiff>,
+    pub items_unchanged: usize,
+}
+
+/// Full import preview response
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPreview {
+    pub source_area_name: Option<String>,
+    pub bosses: Vec<ImportBossPreview>,
+    pub is_new_area: bool,
+    pub errors: Vec<String>,
+}
+
+/// Effect import diff entry
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectImportDiff {
+    pub id: String,
+    pub name: String,
+    pub display_target: DisplayTarget,
+}
+
+/// Effect import preview response
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectImportPreview {
+    pub effects_to_replace: Vec<EffectImportDiff>,
+    pub effects_to_add: Vec<EffectImportDiff>,
+    pub effects_unchanged: usize,
+    pub errors: Vec<String>,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StarParse Import Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationPreview {
+    pub name: String,
+    pub timer_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StarParsePreview {
+    pub encounter_timers: usize,
+    pub effect_timers: usize,
+    pub operations: Vec<OperationPreview>,
+    pub unmapped_bosses: Vec<String>,
+    pub skipped_builtin: usize,
+    pub skipped_unsupported_effects: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StarParseImportResult {
+    pub files_written: usize,
+    pub encounter_timers_imported: usize,
+    pub effects_imported: usize,
 }

@@ -107,11 +107,53 @@ pub struct AbilityBreakdown {
     pub max_hit: f64,
     pub avg_hit: f64,
 
+    // Extended metrics
+    #[serde(default)]
+    pub miss_count: i64,
+    #[serde(default)]
+    pub activation_count: i64,
+    #[serde(default)]
+    pub crit_total: f64,
+    #[serde(default)]
+    pub effective_total: f64,
+    #[serde(default)]
+    pub is_shield: bool,
+
+    // DamageTaken-specific fields
+    #[serde(default)]
+    pub attack_type: String,
+    #[serde(default)]
+    pub damage_type: String,
+    #[serde(default)]
+    pub shield_count: i64,
+    #[serde(default)]
+    pub absorbed_total: f64,
+
     // Computed fields (require duration/total context)
     #[serde(default)]
     pub dps: f64,
     #[serde(default)]
     pub percent_of_total: f64,
+}
+
+/// Summary statistics for the Damage Taken tab.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DamageTakenSummary {
+    pub internal_elemental_total: f64,
+    pub internal_elemental_pct: f64,
+    pub kinetic_energy_total: f64,
+    pub kinetic_energy_pct: f64,
+    pub force_tech_total: f64,
+    pub force_tech_pct: f64,
+    pub melee_ranged_total: f64,
+    pub melee_ranged_pct: f64,
+    pub avoided_pct: f64,
+    pub shielded_pct: f64,
+    pub absorbed_self_total: f64,
+    pub absorbed_self_pct: f64,
+    pub absorbed_given_total: f64,
+    pub absorbed_given_pct: f64,
 }
 
 /// Query result for damage/healing by source entity.
@@ -169,6 +211,16 @@ pub struct RaidOverviewRow {
 pub struct TimeSeriesPoint {
     pub bucket_start_ms: i64,
     pub total_value: f64,
+}
+
+/// Query result for HP% over time — includes absolute HP for tooltips.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HpPoint {
+    pub bucket_start_ms: i64,
+    pub hp_pct: f64,
+    pub current_hp: i64,
+    pub max_hp: i64,
 }
 
 /// Time window when an effect was active (for chart highlighting).
@@ -284,6 +336,49 @@ pub struct CombatLogFindMatch {
     pub pos: u64,
     /// Row index / line_number (for highlighting)
     pub row_idx: u64,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rotation Analysis Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A single ability activation event for rotation analysis.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RotationEvent {
+    pub time_secs: f32,
+    pub ability_id: i64,
+    pub ability_name: String,
+}
+
+/// A GCD slot: one on-GCD ability plus any off-GCD abilities weaved with it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GcdSlot {
+    pub gcd_ability: RotationEvent,
+    pub off_gcd: Vec<RotationEvent>,
+    /// Seconds since the previous GCD activation (None for the first slot).
+    pub gcd_gap: Option<f32>,
+}
+
+/// One rotation cycle (anchor-to-anchor).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RotationCycle {
+    pub slots: Vec<GcdSlot>,
+    pub duration_secs: f32,
+    pub total_damage: f64,
+    pub effective_heal: f64,
+    pub crit_count: i64,
+    pub hit_count: i64,
+}
+
+/// Full rotation analysis result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RotationAnalysis {
+    pub cycles: Vec<RotationCycle>,
+    /// Distinct abilities for the anchor dropdown: (ability_id, ability_name).
+    pub abilities: Vec<(i64, String)>,
 }
 
 /// A phase segment - one occurrence of a phase (phases can repeat).
@@ -416,6 +511,68 @@ impl AbilitySelector {
                 .map(|n| n.eq_ignore_ascii_case(expected))
                 .unwrap_or(false),
         }
+    }
+}
+
+/// When an ability can trigger a refresh
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RefreshTrigger {
+    /// Refresh on ability activation (default)
+    #[default]
+    Activation,
+    /// Refresh on heal completion (for abilities with cast time)
+    Heal,
+}
+
+/// An ability that can refresh an effect, with optional conditions.
+/// Supports both simple syntax (just ability ID/name) and conditional syntax.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RefreshAbility {
+    /// Simple ability selector (backward compatible): just ID or name
+    Simple(AbilitySelector),
+    /// Ability with conditions
+    Conditional {
+        /// The ability that triggers refresh
+        ability: AbilitySelector,
+        /// Minimum stacks required for refresh (None = any stack count)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min_stacks: Option<u8>,
+        /// When the refresh triggers
+        #[serde(default)]
+        trigger: RefreshTrigger,
+    },
+}
+
+impl RefreshAbility {
+    /// Get the ability selector
+    pub fn ability(&self) -> &AbilitySelector {
+        match self {
+            Self::Simple(selector) => selector,
+            Self::Conditional { ability, .. } => ability,
+        }
+    }
+
+    /// Get minimum stacks requirement (None = any)
+    pub fn min_stacks(&self) -> Option<u8> {
+        match self {
+            Self::Simple(_) => None,
+            Self::Conditional { min_stacks, .. } => *min_stacks,
+        }
+    }
+
+    /// Get the trigger type
+    pub fn trigger(&self) -> RefreshTrigger {
+        match self {
+            Self::Simple(_) => RefreshTrigger::Activation,
+            Self::Conditional { trigger, .. } => *trigger,
+        }
+    }
+
+    /// Check if this ability matches the given ID or name
+    pub fn matches(&self, id: u64, name: Option<&str>) -> bool {
+        self.ability().matches(id, name)
     }
 }
 
@@ -1390,6 +1547,34 @@ impl Default for DotTrackerConfig {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Notes Overlay Configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Configuration for the encounter notes overlay
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotesOverlayConfig {
+    /// Font size for notes text (default 14)
+    #[serde(default = "default_notes_font_size")]
+    pub font_size: u8,
+    /// Font color for notes text
+    #[serde(default = "default_font_color")]
+    pub font_color: Color,
+}
+
+fn default_notes_font_size() -> u8 {
+    14
+}
+
+impl Default for NotesOverlayConfig {
+    fn default() -> Self {
+        Self {
+            font_size: default_notes_font_size(),
+            font_color: overlay_colors::WHITE,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Hotkey Settings
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1498,6 +1683,10 @@ pub struct OverlaySettings {
     pub dot_tracker: DotTrackerConfig,
     #[serde(default = "default_opacity")]
     pub dot_tracker_opacity: u8,
+    #[serde(default)]
+    pub notes_overlay: NotesOverlayConfig,
+    #[serde(default = "default_opacity")]
+    pub notes_opacity: u8,
     /// Auto-hide overlays when local player is in a conversation
     #[serde(default)]
     pub hide_during_conversations: bool,
@@ -1540,6 +1729,8 @@ impl Default for OverlaySettings {
             cooldown_tracker_opacity: 180,
             dot_tracker: DotTrackerConfig::default(),
             dot_tracker_opacity: 180,
+            notes_overlay: NotesOverlayConfig::default(),
+            notes_opacity: 180,
             hide_during_conversations: false,
         }
     }
@@ -1645,6 +1836,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub auto_delete_empty_files: bool,
     #[serde(default)]
+    pub auto_delete_small_files: bool,
+    #[serde(default)]
     pub auto_delete_old_files: bool,
     #[serde(default = "default_retention_days")]
     pub log_retention_days: u32,
@@ -1708,6 +1901,7 @@ impl AppConfig {
         Self {
             log_directory,
             auto_delete_empty_files: false,
+            auto_delete_small_files: false,
             auto_delete_old_files: false,
             log_retention_days: 21,
             minimize_to_tray: false,
@@ -1986,6 +2180,7 @@ pub enum ViewMode {
     Charts,
     CombatLog,
     Detailed(DataTab),
+    Rotation,
 }
 
 impl ViewMode {
@@ -2011,6 +2206,18 @@ pub enum SortColumn {
     Hits,
     Avg,
     CritPct,
+    MissPct,
+    AvgHit,
+    AvgCrit,
+    Activations,
+    Effective,
+    EffectivePct,
+    ShieldTotal,
+    Sps,
+    AttackType,
+    DamageType,
+    ShldPct,
+    Absorbed,
 }
 
 /// Sort direction
@@ -2163,4 +2370,100 @@ pub struct EffectsEditorState {
     pub expanded_effect: Option<String>,
     /// Search query
     pub search_query: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_refresh_ability_simple_parsing() {
+        // Test simple ability ID
+        let toml = r#"value = 814832605462528"#;
+
+        #[derive(Deserialize, Debug)]
+        struct Test {
+            value: RefreshAbility,
+        }
+
+        let parsed: Test = toml::from_str(toml).unwrap();
+        println!("Parsed simple: {:?}", parsed.value);
+
+        assert!(matches!(
+            parsed.value,
+            RefreshAbility::Simple(AbilitySelector::Id(814832605462528))
+        ));
+        assert_eq!(parsed.value.min_stacks(), None);
+        assert_eq!(parsed.value.trigger(), RefreshTrigger::Activation);
+    }
+
+    #[test]
+    fn test_refresh_ability_conditional_parsing() {
+        // Test conditional with min_stacks and trigger
+        let toml = r#"
+            [value]
+            ability = 1014376786034688
+            min_stacks = 2
+            trigger = "heal"
+        "#;
+
+        #[derive(Deserialize, Debug)]
+        struct Test {
+            value: RefreshAbility,
+        }
+
+        let parsed: Test = toml::from_str(toml).unwrap();
+        println!("Parsed conditional: {:?}", parsed.value);
+
+        assert!(matches!(parsed.value, RefreshAbility::Conditional { .. }));
+        assert_eq!(parsed.value.min_stacks(), Some(2));
+        assert_eq!(parsed.value.trigger(), RefreshTrigger::Heal);
+    }
+
+    #[test]
+    fn test_refresh_ability_array_parsing() {
+        // Test array with mixed simple and conditional - exactly like the TOML config
+        let toml = r#"
+            refresh_abilities = [
+                814832605462528,
+                { ability = 1014376786034688, min_stacks = 2, trigger = "heal" },
+                { ability = 815240627355648, min_stacks = 2, trigger = "heal" },
+            ]
+        "#;
+
+        #[derive(Deserialize, Debug)]
+        struct Test {
+            refresh_abilities: Vec<RefreshAbility>,
+        }
+
+        let parsed: Test = toml::from_str(toml).unwrap();
+        println!("Parsed array: {:?}", parsed.refresh_abilities);
+
+        // First entry: Simple
+        assert!(matches!(
+            parsed.refresh_abilities[0],
+            RefreshAbility::Simple(_)
+        ));
+        assert_eq!(parsed.refresh_abilities[0].min_stacks(), None);
+        assert_eq!(
+            parsed.refresh_abilities[0].trigger(),
+            RefreshTrigger::Activation
+        );
+
+        // Second entry: Conditional with min_stacks = 2, trigger = heal
+        assert!(matches!(
+            parsed.refresh_abilities[1],
+            RefreshAbility::Conditional { .. }
+        ));
+        assert_eq!(parsed.refresh_abilities[1].min_stacks(), Some(2));
+        assert_eq!(parsed.refresh_abilities[1].trigger(), RefreshTrigger::Heal);
+
+        // Third entry: Conditional with min_stacks = 2, trigger = heal
+        assert!(matches!(
+            parsed.refresh_abilities[2],
+            RefreshAbility::Conditional { .. }
+        ));
+        assert_eq!(parsed.refresh_abilities[2].min_stacks(), Some(2));
+        assert_eq!(parsed.refresh_abilities[2].trigger(), RefreshTrigger::Heal);
+    }
 }

@@ -18,7 +18,19 @@ use crate::signal_processor::{GameSignal, SignalHandler};
 
 use crate::timers::FiredAlert;
 
-use super::{ActiveEffect, AlertTrigger, DisplayTarget, EffectDefinition, EffectKey};
+use super::{ActiveEffect, AlertTrigger, DisplayTarget, EffectDefinition, EffectKey, RefreshTrigger};
+
+/// Hardcoded ability IDs for AoE DOTs that need special handling.
+/// These abilities spread/refresh DOTs on multiple targets and don't follow
+/// the normal single-target cast pattern. Used for:
+/// 1. Damage-based AoE refresh detection (no ApplyEffect on refresh)
+/// 2. Skipping recent-cast validation (targets aren't individually tracked)
+const AOE_REFRESH_ABILITY_IDS: &[u64] = &[
+    807698664783872,  // Shrap Bomb (Gunslinger)
+    807698664784339, // Shrap Bomb (Ruffian)
+    1703989619982930, // Corrosive Grenade (Operative)
+    1703989619982932, // Corrosive Grenade (Sniper)
+];
 
 /// Get the entity roster from the current encounter, or empty slice if none.
 fn get_entities(encounter: Option<&CombatEncounter>) -> &[EntityDefinition] {
@@ -48,11 +60,25 @@ fn get_boss_ids(encounter: Option<&CombatEncounter>) -> HashSet<i64> {
         .unwrap_or_default()
 }
 
-/// Combined set of effect definitions
+/// Combined set of effect definitions with indexes for fast lookup
 #[derive(Debug, Clone, Default)]
 pub struct DefinitionSet {
-    /// All effect definitions, keyed by ID
+    /// All effect definitions, keyed by definition ID
     pub effects: HashMap<String, EffectDefinition>,
+
+    // ─── Indexes for O(1) lookup ─────────────────────────────────────────────
+    /// Effect ID -> definition IDs (for EffectApplied/EffectRemoved triggers)
+    effect_id_index: HashMap<u64, Vec<String>>,
+    /// Ability ID -> definition IDs (for AbilityCast triggers)
+    ability_id_index: HashMap<u64, Vec<String>>,
+    /// Lowercase effect name -> definition IDs (for name-based effect matchers)
+    effect_name_index: HashMap<String, Vec<String>>,
+    /// Lowercase ability name -> definition IDs (for name-based ability matchers)
+    ability_name_index: HashMap<String, Vec<String>>,
+    /// Refresh ability ID -> definition IDs (for refresh_abilities matching)
+    refresh_ability_id_index: HashMap<u64, Vec<String>>,
+    /// Refresh ability name -> definition IDs (for refresh_abilities matching)
+    refresh_ability_name_index: HashMap<String, Vec<String>>,
 }
 
 impl DefinitionSet {
@@ -74,11 +100,88 @@ impl DefinitionSet {
                 if !overwrite {
                     continue; // Skip duplicate - keep the first definition
                 }
-                // Overwrite mode: user definitions replace bundled
+                // Overwrite mode: remove old index entries before replacing
+                self.remove_from_indexes(&def.id);
             }
+            self.add_to_indexes(&def);
             self.effects.insert(def.id.clone(), def);
         }
         duplicates
+    }
+
+    fn add_to_indexes(&mut self, def: &EffectDefinition) {
+        use crate::dsl::Trigger;
+        use baras_types::{AbilitySelector, EffectSelector};
+
+        match &def.trigger {
+            Trigger::EffectApplied { effects, .. } | Trigger::EffectRemoved { effects, .. } => {
+                for selector in effects {
+                    match selector {
+                        EffectSelector::Id(id) => {
+                            self.effect_id_index.entry(*id).or_default().push(def.id.clone());
+                        }
+                        EffectSelector::Name(name) => {
+                            self.effect_name_index
+                                .entry(name.to_lowercase())
+                                .or_default()
+                                .push(def.id.clone());
+                        }
+                    }
+                }
+            }
+            Trigger::AbilityCast { abilities, .. } => {
+                for selector in abilities {
+                    match selector {
+                        AbilitySelector::Id(id) => {
+                            self.ability_id_index.entry(*id).or_default().push(def.id.clone());
+                        }
+                        AbilitySelector::Name(name) => {
+                            self.ability_name_index
+                                .entry(name.to_lowercase())
+                                .or_default()
+                                .push(def.id.clone());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Index refresh_abilities
+        for refresh in &def.refresh_abilities {
+            match refresh.ability() {
+                AbilitySelector::Id(id) => {
+                    self.refresh_ability_id_index.entry(*id).or_default().push(def.id.clone());
+                }
+                AbilitySelector::Name(name) => {
+                    self.refresh_ability_name_index
+                        .entry(name.to_lowercase())
+                        .or_default()
+                        .push(def.id.clone());
+                }
+            }
+        }
+    }
+
+    fn remove_from_indexes(&mut self, def_id: &str) {
+        for entries in self.effect_id_index.values_mut() {
+            entries.retain(|id| id != def_id);
+        }
+        for entries in self.ability_id_index.values_mut() {
+            entries.retain(|id| id != def_id);
+        }
+        for entries in self.effect_name_index.values_mut() {
+            entries.retain(|id| id != def_id);
+        }
+        for entries in self.ability_name_index.values_mut() {
+            entries.retain(|id| id != def_id);
+        }
+        for entries in self.refresh_ability_id_index.values_mut() {
+            entries.retain(|id| id != def_id);
+        }
+        for entries in self.refresh_ability_name_index.values_mut() {
+            entries.retain(|id| id != def_id);
+        }
     }
 
     /// Get an effect definition by ID
@@ -86,28 +189,126 @@ impl DefinitionSet {
         self.effects.get(id)
     }
 
-    /// Find effect definitions that match a game effect ID/name
+    /// Find effect definitions matching a game effect ID or name (O(1) indexed lookup)
     pub fn find_matching(
         &self,
         effect_id: u64,
         effect_name: Option<&str>,
     ) -> Vec<&EffectDefinition> {
-        self.effects
-            .values()
-            .filter(|def| def.enabled && def.matches_effect(effect_id, effect_name))
-            .collect()
+        let mut results = Vec::new();
+        let mut seen: HashSet<&str> = HashSet::new();
+
+        if let Some(def_ids) = self.effect_id_index.get(&effect_id) {
+            for def_id in def_ids {
+                if let Some(def) = self.effects.get(def_id) {
+                    if def.enabled {
+                        seen.insert(def_id);
+                        results.push(def);
+                    }
+                }
+            }
+        }
+
+        if let Some(name) = effect_name {
+            if let Some(def_ids) = self.effect_name_index.get(&name.to_lowercase()) {
+                for def_id in def_ids {
+                    if seen.contains(def_id.as_str()) {
+                        continue;
+                    }
+                    if let Some(def) = self.effects.get(def_id) {
+                        if def.enabled {
+                            seen.insert(def_id);
+                            results.push(def);
+                        }
+                    }
+                }
+            }
+        }
+
+        results
     }
 
-    /// Find effect definitions that match an ability cast trigger
+    /// Find effect definitions matching an ability cast trigger (O(1) indexed lookup)
     pub fn find_ability_cast_matching(
         &self,
         ability_id: u64,
         ability_name: Option<&str>,
     ) -> Vec<&EffectDefinition> {
-        self.effects
-            .values()
-            .filter(|def| def.enabled && def.matches_ability_cast(ability_id, ability_name))
-            .collect()
+        let mut results = Vec::new();
+        let mut seen: HashSet<&str> = HashSet::new();
+
+        if let Some(def_ids) = self.ability_id_index.get(&ability_id) {
+            for def_id in def_ids {
+                if let Some(def) = self.effects.get(def_id) {
+                    if def.enabled {
+                        seen.insert(def_id);
+                        results.push(def);
+                    }
+                }
+            }
+        }
+
+        if let Some(name) = ability_name {
+            if let Some(def_ids) = self.ability_name_index.get(&name.to_lowercase()) {
+                for def_id in def_ids {
+                    if seen.contains(def_id.as_str()) {
+                        continue;
+                    }
+                    if let Some(def) = self.effects.get(def_id) {
+                        if def.enabled {
+                            seen.insert(def_id);
+                            results.push(def);
+                        }
+                    }
+                }
+            }
+        }
+
+        results
+    }
+
+    /// Find definitions that can be refreshed by an ability (O(1) indexed lookup)
+    pub fn find_refreshable_by(&self, ability_id: u64, ability_name: Option<&str>) -> Vec<&EffectDefinition> {
+        let mut results = Vec::new();
+        let mut seen: HashSet<&str> = HashSet::new();
+
+        if let Some(def_ids) = self.refresh_ability_id_index.get(&ability_id) {
+            for def_id in def_ids {
+                if let Some(def) = self.effects.get(def_id) {
+                    if def.enabled {
+                        seen.insert(def_id);
+                        results.push(def);
+                    }
+                }
+            }
+        }
+
+        if let Some(name) = ability_name {
+            if let Some(def_ids) = self.refresh_ability_name_index.get(&name.to_lowercase()) {
+                for def_id in def_ids {
+                    if seen.contains(def_id.as_str()) {
+                        continue;
+                    }
+                    if let Some(def) = self.effects.get(def_id) {
+                        if def.enabled {
+                            results.push(def);
+                        }
+                    }
+                }
+            }
+        }
+
+        results
+    }
+
+    /// Check if any definitions can be refreshed by an ability (O(1) indexed lookup)
+    pub fn has_refreshable_by(&self, ability_id: u64) -> bool {
+        self.refresh_ability_id_index
+            .get(&ability_id)
+            .map(|ids| ids.iter().any(|id| {
+                self.effects.get(id).map(|def| def.enabled).unwrap_or(false)
+            }))
+            .unwrap_or(false)
     }
 
     /// Get all enabled effect definitions
@@ -140,6 +341,8 @@ struct PendingAoeRefresh {
     ability_id: i64,
     /// When the ability was activated
     timestamp: NaiveDateTime,
+    /// The primary target (resolved at cast time)
+    primary_target: i64,
 }
 
 /// State for collecting AoE damage targets after finding anchor
@@ -195,9 +398,16 @@ pub struct EffectTracker {
     /// Alerts fired by effect start/end triggers
     fired_alerts: Vec<FiredAlert>,
 
+    /// Count of active (non-removed) effects for O(1) has_ticking_effects() check
+    ticking_count: usize,
+
     /// Current target for each entity (source_id -> (target_id, target_name))
     /// Used as fallback when encounter doesn't have target info (e.g., outside combat)
     current_targets: HashMap<i64, (i64, IStr)>,
+
+    /// Recent ability casts by local player: (ability_id, target_id) -> timestamp
+    /// Used to validate DotTracker ApplyEffect signals and reject lingering effects
+    recent_casts: HashMap<(u64, i64), NaiveDateTime>,
 }
 
 impl Default for EffectTracker {
@@ -220,7 +430,9 @@ impl EffectTracker {
             pending_aoe_refresh: None,
             aoe_collecting: None,
             fired_alerts: Vec::new(),
+            ticking_count: 0,
             current_targets: HashMap::new(),
+            recent_casts: HashMap::new(),
         }
     }
 
@@ -275,14 +487,56 @@ impl EffectTracker {
     }
 
     /// Update definitions (e.g., after config reload)
-    /// Also updates display properties on any active effects that match
+    /// Also updates display properties on any active effects that match.
+    /// Removes active effects whose definitions are now disabled or deleted.
     pub fn set_definitions(&mut self, definitions: DefinitionSet) {
+        // Remove active effects whose definitions are now disabled or deleted
+        self.active_effects.retain(|_, effect| {
+            definitions
+                .effects
+                .get(&effect.definition_id)
+                .map(|def| def.enabled)
+                .unwrap_or(false) // Remove if definition doesn't exist
+        });
+
         // Update active effects with new display properties from their definitions
         for effect in self.active_effects.values_mut() {
             if let Some(def) = definitions.effects.get(&effect.definition_id) {
+                // Track if alert_on_expire is changing to true (to prevent unexpected alerts)
+                let old_alert_on_expire = effect.alert_on_expire;
+                let new_alert_on_expire = matches!(def.alert_on, AlertTrigger::OnExpire);
+
+                // Display properties
+                effect.name = def.name.clone();
+                effect.display_text = def.display_text.clone().unwrap_or_else(|| def.name.clone());
                 effect.color = def.effective_color();
+                effect.display_target = def.display_target;
+                effect.icon_ability_id = def.icon_ability_id.unwrap_or(effect.game_effect_id);
+                effect.show_at_secs = def.show_at_secs;
+                effect.show_icon = def.show_icon;
+                effect.display_source = def.display_source;
+                effect.cooldown_ready_secs = def.cooldown_ready_secs;
+
+                // Alert properties
+                effect.alert_text = def.alert_text.clone();
+                effect.alert_on_expire = new_alert_on_expire;
+
+                // If alert_on_expire just became true, mark as already fired to prevent
+                // unexpected alerts on already-active effects
+                if new_alert_on_expire && !old_alert_on_expire {
+                    effect.on_end_alert_fired = true;
+                }
+
+                // Audio properties
+                effect.countdown_start = def.audio.countdown_start;
+                effect.countdown_voice =
+                    def.audio.countdown_voice.clone().unwrap_or_default();
+                effect.audio_file = def.audio.file.clone();
+                effect.audio_offset = def.audio.offset;
+                effect.audio_enabled = def.audio.enabled;
             }
         }
+
         self.definitions = definitions;
     }
 
@@ -293,8 +547,9 @@ impl EffectTracker {
 
     /// Check if there are effects still ticking (not yet removed/expired)
     /// Use this for early-out checks - effects with removed_at set are just fading out
+    /// O(1) using the ticking_count counter
     pub fn has_ticking_effects(&self) -> bool {
-        self.active_effects.values().any(|e| e.removed_at.is_none())
+        self.ticking_count > 0
     }
 
     /// Check if there's any work to do (effects to render or new targets to register)
@@ -390,24 +645,23 @@ impl EffectTracker {
             return;
         };
 
-        // Collect definition IDs of effects whose base duration just ended (for OnExpire alerts)
         let mut base_ended_def_ids: Vec<String> = Vec::new();
 
-        // Check for base duration expiry and mark fully expired effects as removed
         for effect in self.active_effects.values_mut() {
-            // Fire OnExpire alert when base duration ends (before ready state)
             if !effect.on_end_alert_fired && effect.has_base_duration_ended() {
                 effect.on_end_alert_fired = true;
                 base_ended_def_ids.push(effect.definition_id.clone());
             }
 
-            // Mark as removed when full duration (including ready state) expires
-            if effect.is_active(current_time) && effect.has_duration_expired(current_time) {
-                effect.mark_removed();
+            if effect.removed_at.is_none()
+                && effect.has_duration_expired(current_time)
+                && effect.mark_removed()
+            {
+                self.ticking_count = self.ticking_count.saturating_sub(1);
             }
         }
 
-        // Fire alerts for effects whose base duration ended
+        // Fire OnExpire alerts
         for def_id in base_ended_def_ids {
             if let Some(def) = self.definitions.effects.get(&def_id)
                 && def.alert_on == AlertTrigger::OnExpire
@@ -428,6 +682,10 @@ impl EffectTracker {
         // Remove effects that have finished fading
         self.active_effects
             .retain(|_, effect| !effect.should_remove());
+
+        // Clean up old recent_casts entries (older than 5 seconds)
+        self.recent_casts
+            .retain(|_, ts| (current_time - *ts).num_milliseconds() < 5000);
     }
 
     /// Handle effect application signal
@@ -451,11 +709,7 @@ impl EffectTracker {
     ) {
         self.current_game_time = Some(timestamp);
 
-        // Garbage collect only effects that have finished fading out.
-        // Don't use is_active() here - that would remove expiring effects before
-        // they can be refreshed by a reapplication in this same signal batch.
-        self.active_effects
-            .retain(|_, effect| !effect.should_remove());
+        // Note: GC is handled by tick() - don't duplicate here to reduce work per signal
 
         let local_player_id = self.local_player_id;
 
@@ -497,11 +751,52 @@ impl EffectTracker {
             let duration = self.effective_duration(def);
 
             if let Some(existing) = self.active_effects.get_mut(&key) {
-                // Always refresh when the same effect is applied again.
-                // The game is telling us the effect was (re)applied, so reset the timer.
-                // Note: refresh_abilities is for DIFFERENT abilities that can extend
-                // an effect (e.g., Surgical Probe extending Kolto Probe), which is
-                // handled in refresh_effects_by_action() via AbilityActivated signals.
+                // Skip duplicate log lines (same timestamp) to avoid corrupting timing
+                if existing.last_refreshed_at == timestamp {
+                    if let Some(c) = charges {
+                        existing.set_stacks(c);
+                    }
+                    continue;
+                }
+
+                // For DotTracker REFRESHES, validate that a refresh_ability was cast at this
+                // target within the recent window. This prevents lingering effects (which
+                // reapply with the same effect_id ~5 seconds after DOT expires) from
+                // incorrectly refreshing tracked DOTs. Initial applications are always valid.
+                //
+                // Skip this validation for effects refreshable by AoE abilities - those
+                // hit multiple targets and we only track the primary target's cast.
+                if def.display_target == DisplayTarget::DotTracker {
+                    // Check if any refresh_ability is an AoE ability (skip validation if so)
+                    let is_aoe_refreshable = def.refresh_abilities.iter().any(|refresh| {
+                        if let baras_types::AbilitySelector::Id(ability_id) = refresh.ability() {
+                            AOE_REFRESH_ABILITY_IDS.contains(ability_id)
+                        } else {
+                            false
+                        }
+                    });
+
+                    if !is_aoe_refreshable {
+                        const RECENT_CAST_WINDOW_MS: i64 = 1500;
+
+                        let has_recent_cast = def.refresh_abilities.iter().any(|refresh| {
+                            if let baras_types::AbilitySelector::Id(ability_id) = refresh.ability() {
+                                if let Some(&cast_time) =
+                                    self.recent_casts.get(&(*ability_id, target_id))
+                                {
+                                    let elapsed = (timestamp - cast_time).num_milliseconds();
+                                    return elapsed >= 0 && elapsed <= RECENT_CAST_WINDOW_MS;
+                                }
+                            }
+                            false
+                        });
+
+                        if !has_recent_cast {
+                            continue; // Skip refresh - likely lingering effect reapplication
+                        }
+                    }
+                }
+
                 existing.refresh(timestamp, duration);
                 if let Some(c) = charges {
                     existing.set_stacks(c);
@@ -555,6 +850,7 @@ impl EffectTracker {
                 }
 
                 self.active_effects.insert(key, effect);
+                self.ticking_count += 1;
                 should_register = true;
 
                 // Collect alert for effect start if configured
@@ -578,12 +874,10 @@ impl EffectTracker {
         self.fired_alerts.extend(pending_alerts);
 
         // Queue target for raid frame registration only when effect was created or refreshed.
+        // Only players belong on raid frames (not companions or NPCs)
         if should_register
             && is_from_local
-            && matches!(
-                target_entity_type,
-                EntityType::Player | EntityType::Companion
-            )
+            && target_entity_type == EntityType::Player
         {
             self.new_targets.push(NewTargetInfo {
                 entity_id: target_id,
@@ -595,6 +889,10 @@ impl EffectTracker {
     /// Refresh any tracked effects that have this action in their refresh_abilities.
     /// For raid frame effects, also creates the effect if it doesn't exist yet
     /// (handles late registration when initial application was missed).
+    ///
+    /// The `trigger_type` parameter specifies what kind of event triggered this refresh:
+    /// - `Activation`: AbilityActivated signal (instant refresh)
+    /// - `Heal`: HealingDone signal (refresh after heal lands, for cast-time abilities)
     fn refresh_effects_by_action(
         &mut self,
         action_id: i64,
@@ -605,6 +903,7 @@ impl EffectTracker {
         target_name: IStr,
         timestamp: NaiveDateTime,
         encounter: Option<&crate::encounter::CombatEncounter>,
+        trigger_type: RefreshTrigger,
     ) {
         // For AoE abilities (target_id == 0), we can't reliably detect which targets
         // were actually hit. Damage events from ongoing DOTs on other targets look
@@ -615,11 +914,10 @@ impl EffectTracker {
             return;
         }
 
-        // Check if target is a player (only players should be registered on raid frames)
-        // Note: This also allows companions since they wouldn't be in npcs map
-        let is_npc = encounter
-            .map(|e| e.npcs.contains_key(&target_id))
-            .unwrap_or(false);
+        // Only register actual players on raid frames (not companions or NPCs)
+        let is_player = encounter
+            .map(|e| e.players.contains_key(&target_id))
+            .unwrap_or(true);
 
         // Single-target case: refresh effect on specific target
         let action_name_str = crate::context::resolve(action_name);
@@ -641,52 +939,66 @@ impl EffectTracker {
             alert_text: Option<String>,
             alert_on_expire: bool,
             default_charges: Option<u8>,
+            /// Minimum stacks required for this refresh (None = any)
+            min_stacks: Option<u8>,
         }
 
         let refreshable_defs: Vec<_> = self
             .definitions
-            .enabled()
-            .filter(|def| def.can_refresh_with(action_id as u64, Some(action_name_str)))
-            // Only match definitions where source is local_player or any
-            // (this function is only called for local player abilities)
+            .find_refreshable_by(action_id as u64, Some(action_name_str))
+            .into_iter()
             .filter(|def| {
                 matches!(
                     def.source_filter(),
                     EntityFilter::LocalPlayer | EntityFilter::Any
                 )
             })
-            .map(|def| RefreshableEffect {
-                id: def.id.clone(),
-                name: def.name.clone(),
-                display_text: def.display_text().to_string(),
-                duration: self.effective_duration(def),
-                color: def.effective_color(),
-                display_target: def.display_target,
-                icon_ability_id: def.icon_ability_id.unwrap_or(action_id as u64),
-                show_at_secs: def.show_at_secs,
-                show_icon: def.show_icon,
-                display_source: def.display_source,
-                cooldown_ready_secs: def.cooldown_ready_secs,
-                audio: def.audio.clone(),
-                alert_text: def.alert_text.clone(),
-                alert_on_expire: def.alert_on == AlertTrigger::OnExpire,
-                default_charges: def.default_charges,
+            .filter_map(|def| {
+                // Find the matching RefreshAbility entry to get conditions
+                let refresh_ability = def.find_refresh_ability(action_id as u64, Some(action_name_str))?;
+
+                // Check if trigger type matches
+                if refresh_ability.trigger() != trigger_type {
+                    return None;
+                }
+
+                Some(RefreshableEffect {
+                    id: def.id.clone(),
+                    name: def.name.clone(),
+                    display_text: def.display_text().to_string(),
+                    duration: self.effective_duration(def),
+                    color: def.effective_color(),
+                    display_target: def.display_target,
+                    icon_ability_id: def.icon_ability_id.unwrap_or(action_id as u64),
+                    show_at_secs: def.show_at_secs,
+                    show_icon: def.show_icon,
+                    display_source: def.display_source,
+                    cooldown_ready_secs: def.cooldown_ready_secs,
+                    audio: def.audio.clone(),
+                    alert_text: def.alert_text.clone(),
+                    alert_on_expire: def.alert_on == AlertTrigger::OnExpire,
+                    default_charges: def.default_charges,
+                    min_stacks: refresh_ability.min_stacks(),
+                })
             })
             .collect();
 
         for def in refreshable_defs {
-            let key = EffectKey {
-                definition_id: def.id.clone(),
-                target_entity_id: target_id,
-            };
+            let key = EffectKey::new(&def.id, target_id);
 
             if let Some(effect) = self.active_effects.get_mut(&key) {
+                // Check min_stacks condition if specified
+                if let Some(min_stacks) = def.min_stacks {
+                    if effect.stacks < min_stacks {
+                        continue; // Skip refresh - not enough stacks
+                    }
+                }
+
                 // Existing effect - refresh duration
                 effect.refresh(timestamp, def.duration);
 
                 // Re-register for raid frames (in case user cleared the slot)
-                // Only register non-NPC entities (players/companions)
-                if def.display_target == DisplayTarget::RaidFrames && !is_npc {
+                if def.display_target == DisplayTarget::RaidFrames && is_player {
                     self.new_targets.push(NewTargetInfo {
                         entity_id: target_id,
                         name: target_name,
@@ -723,9 +1035,10 @@ impl EffectTracker {
                 }
 
                 self.active_effects.insert(key, effect);
+                self.ticking_count += 1;
 
-                // Queue target for raid frame registration (only non-NPCs)
-                if !is_npc {
+                // Queue target for raid frame registration (only players)
+                if is_player {
                     self.new_targets.push(NewTargetInfo {
                         entity_id: target_id,
                         name: target_name,
@@ -735,35 +1048,31 @@ impl EffectTracker {
         }
     }
 
-    /// Check if an ability has any refresh definitions (used for AoE detection)
-    fn has_refresh_definitions(&self, ability_id: i64) -> bool {
-        let ability_name_str: Option<&str> = None; // We only check by ID
-        self.definitions
-            .enabled()
-            .any(|def| def.can_refresh_with(ability_id as u64, ability_name_str))
-    }
-
-    /// Set up pending AoE refresh state when AbilityActivate has [=] target
-    fn setup_pending_aoe_refresh(&mut self, ability_id: i64, timestamp: NaiveDateTime) {
-        // Only track if this ability can refresh effects
-        if self.has_refresh_definitions(ability_id) {
+    /// Set up pending AoE refresh state when AbilityActivate has [=] target.
+    /// Only sets up state for specific AoE DOT abilities that don't generate
+    /// ApplyEffect events on refresh.
+    fn setup_pending_aoe_refresh(
+        &mut self,
+        ability_id: i64,
+        timestamp: NaiveDateTime,
+        primary_target: i64,
+    ) {
+        if AOE_REFRESH_ABILITY_IDS.contains(&(ability_id as u64)) {
             self.pending_aoe_refresh = Some(PendingAoeRefresh {
                 ability_id,
                 timestamp,
+                primary_target,
             });
-            // Clear any stale collecting state
             self.aoe_collecting = None;
         }
     }
 
     /// Handle damage event for AoE refresh correlation.
-    /// Returns true if the damage was processed as part of AoE refresh detection.
     fn handle_damage_for_aoe_refresh(
         &mut self,
         ability_id: i64,
         target_id: i64,
         timestamp: NaiveDateTime,
-        current_target_id: Option<i64>,
     ) {
         // Timeout for pending state (2 seconds - longer than any grenade travel time)
         const PENDING_TIMEOUT_MS: i64 = 2000;
@@ -805,12 +1114,8 @@ impl EffectTracker {
             return;
         }
 
-        // Check if this damage is on the primary target (current target)
-        let Some(primary_target) = current_target_id else {
-            return;
-        };
-
-        if target_id == primary_target {
+        // Check if this damage is on the primary target (stored at cast time)
+        if target_id == pending.primary_target {
             // This is our anchor! Start collecting targets
             self.aoe_collecting = Some(AoeRefreshCollecting {
                 ability_id,
@@ -827,11 +1132,10 @@ impl EffectTracker {
             return;
         };
 
-        // Get refresh definitions for this ability
         let refreshable_def_ids: Vec<_> = self
             .definitions
-            .enabled()
-            .filter(|def| def.can_refresh_with(collecting.ability_id as u64, None))
+            .find_refreshable_by(collecting.ability_id as u64, None)
+            .into_iter()
             .map(|def| (def.id.clone(), self.effective_duration(def)))
             .collect();
 
@@ -934,12 +1238,8 @@ impl EffectTracker {
                 existing.refresh(timestamp, duration);
 
                 // Re-register target in raid registry if they were removed
-                // Only register Player/Companion entities on raid frames
                 if existing.is_from_local_player
-                    && matches!(
-                        effect_target_type,
-                        EntityType::Player | EntityType::Companion
-                    )
+                    && effect_target_type == EntityType::Player
                 {
                     self.new_targets.push(NewTargetInfo {
                         entity_id: effect_target_id,
@@ -974,6 +1274,7 @@ impl EffectTracker {
                     def.alert_on == AlertTrigger::OnExpire,
                 );
                 self.active_effects.insert(key, effect);
+                self.ticking_count += 1;
             }
         }
     }
@@ -1033,15 +1334,17 @@ impl EffectTracker {
                     && !is_cooldown
                     && let Some(effect) = self.active_effects.get_mut(&key)
                 {
-                    // Skip removal if the effect was refreshed recently (within 1 second).
-                    // When a DoT is reapplied, the game sends ApplyEffect (new) then
-                    // RemoveEffect (old) - sometimes in the same batch, sometimes with
-                    // a slight delay. We don't want to remove the effect we just refreshed.
-                    let since_refresh = timestamp
+                    // Only honor removal if it occurred well AFTER the last refresh.
+                    // DOT reapplication sends ApplyEffect then RemoveEffect - sometimes
+                    // the RemoveEffect arrives up to ~1 second later (for the old DOT instance).
+                    // Use a 1 second window to ignore stale RemoveEffect signals.
+                    let since_refresh_ms = timestamp
                         .signed_duration_since(effect.last_refreshed_at)
                         .num_milliseconds();
-                    if since_refresh > 1000 {
-                        effect.mark_removed();
+                    if since_refresh_ms > 1000 {
+                        if effect.mark_removed() {
+                            self.ticking_count = self.ticking_count.saturating_sub(1);
+                        }
                     }
                 }
             } else if def.is_effect_removed_trigger()
@@ -1075,6 +1378,7 @@ impl EffectTracker {
                     def.alert_on == AlertTrigger::OnExpire,
                 );
                 self.active_effects.insert(key, effect);
+                self.ticking_count += 1;
             }
         }
     }
@@ -1123,20 +1427,18 @@ impl EffectTracker {
 
     /// Handle entity death - clear effects unless persist_past_death
     fn handle_entity_death(&mut self, entity_id: i64) {
-        // Get definition IDs that should persist past death
-        let persist_ids: std::collections::HashSet<_> = self
-            .definitions
-            .enabled()
-            .filter(|def| def.persist_past_death)
-            .map(|def| def.id.as_str())
-            .collect();
-
-        // Mark non-persisting effects on dead entity as removed
         for (key, effect) in self.active_effects.iter_mut() {
-            if effect.target_entity_id == entity_id
-                && !persist_ids.contains(key.definition_id.as_str())
-            {
-                effect.mark_removed();
+            if effect.target_entity_id != entity_id {
+                continue;
+            }
+            let persist = self
+                .definitions
+                .effects
+                .get(&key.definition_id)
+                .map(|def| def.persist_past_death)
+                .unwrap_or(false);
+            if !persist && effect.mark_removed() {
+                self.ticking_count = self.ticking_count.saturating_sub(1);
             }
         }
     }
@@ -1148,7 +1450,7 @@ impl EffectTracker {
         self.aoe_collecting = None;
 
         // Mark effects that don't track outside combat as removed
-        let outside_combat_ids: std::collections::HashSet<_> = self
+        let outside_combat_ids: HashSet<&str> = self
             .definitions
             .enabled()
             .filter(|def| def.track_outside_combat)
@@ -1157,7 +1459,9 @@ impl EffectTracker {
 
         for (key, effect) in self.active_effects.iter_mut() {
             if !outside_combat_ids.contains(key.definition_id.as_str()) {
-                effect.mark_removed();
+                if effect.mark_removed() {
+                    self.ticking_count = self.ticking_count.saturating_sub(1);
+                }
             }
         }
     }
@@ -1169,7 +1473,9 @@ impl EffectTracker {
         self.aoe_collecting = None;
 
         for (_key, effect) in self.active_effects.iter_mut() {
-            effect.mark_removed();
+            if effect.mark_removed() {
+                self.ticking_count = self.ticking_count.saturating_sub(1);
+            }
         }
     }
 
@@ -1212,6 +1518,27 @@ impl EffectTracker {
 }
 
 impl SignalHandler for EffectTracker {
+    fn handle_signals(
+        &mut self,
+        signals: &[GameSignal],
+        encounter: Option<&crate::encounter::CombatEncounter>,
+    ) {
+        for signal in signals {
+            self.handle_signal(signal, encounter);
+        }
+        // Only finalize AoE collection if we're past the collection window (10ms).
+        // This ensures secondary targets have time to arrive across multiple batches,
+        // while still finalizing promptly once the window has elapsed.
+        if let Some(ref collecting) = self.aoe_collecting {
+            if let Some(current_time) = self.current_game_time {
+                let elapsed_ms = (current_time - collecting.anchor_timestamp).num_milliseconds();
+                if elapsed_ms > 10 {
+                    self.finalize_aoe_refresh();
+                }
+            }
+        }
+    }
+
     fn handle_signal(
         &mut self,
         signal: &GameSignal,
@@ -1371,6 +1698,10 @@ impl SignalHandler for EffectTracker {
                         (*target_id, *target_name)
                     };
 
+                    // Record cast for DotTracker validation (prevents lingering effect issues)
+                    self.recent_casts
+                        .insert((*ability_id as u64, resolved_target), *timestamp);
+
                     self.refresh_effects_by_action(
                         *ability_id,
                         *ability_name,
@@ -1380,13 +1711,13 @@ impl SignalHandler for EffectTracker {
                         resolved_target_name,
                         *timestamp,
                         encounter,
+                        RefreshTrigger::Activation,
                     );
 
-                    // For AoE abilities ([=] target), set up pending state for damage correlation
+                    // For AoE abilities, set up pending state for damage correlation
                     // This allows us to detect and refresh effects on secondary targets too
-                    if is_self_or_empty {
-                        self.setup_pending_aoe_refresh(*ability_id, *timestamp);
-                    }
+                    // Check directly if this is an AoE refresh ability (don't rely on target_id)
+                    self.setup_pending_aoe_refresh(*ability_id, *timestamp, resolved_target);
                 }
             }
             GameSignal::DamageTaken {
@@ -1398,12 +1729,31 @@ impl SignalHandler for EffectTracker {
             } => {
                 // Only process for local player's damage
                 if self.local_player_id == Some(*source_id) {
-                    let current_target = encounter.and_then(|e| e.get_current_target(*source_id));
-                    self.handle_damage_for_aoe_refresh(
+                    self.handle_damage_for_aoe_refresh(*ability_id, *target_id, *timestamp);
+                }
+            }
+            GameSignal::HealingDone {
+                ability_id,
+                ability_name,
+                source_id,
+                source_name,
+                target_id,
+                target_name,
+                timestamp,
+                ..
+            } => {
+                // Only process for local player's heals (for refresh on heal completion)
+                if self.local_player_id == Some(*source_id) {
+                    self.refresh_effects_by_action(
                         *ability_id,
+                        *ability_name,
+                        *source_id,
+                        *source_name,
                         *target_id,
+                        *target_name,
                         *timestamp,
-                        current_target,
+                        encounter,
+                        RefreshTrigger::Heal,
                     );
                 }
             }

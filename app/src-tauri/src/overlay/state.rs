@@ -213,6 +213,11 @@ impl OverlayState {
         self.get_tx(OverlayType::DotTracker)
     }
 
+    /// Get the channel for notes overlay (convenience)
+    pub fn get_notes_tx(&self) -> Option<&Sender<OverlayCommand>> {
+        self.get_tx(OverlayType::Notes)
+    }
+
     /// Insert an overlay handle
     pub fn insert(&mut self, handle: OverlayHandle) {
         self.overlays.insert(handle.kind, handle);

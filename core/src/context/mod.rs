@@ -1,3 +1,4 @@
+mod area_index;
 mod background_tasks;
 mod config;
 mod error;
@@ -8,6 +9,9 @@ pub mod watcher;
 
 pub use error::{ConfigError, WatcherError};
 
+pub use area_index::{
+    FileAreaEntry, FileAreaIndex, LogAreaCache, default_cache_path, extract_areas_from_file,
+};
 pub use background_tasks::BackgroundTasks;
 pub use config::{
     AlertsOverlayConfig, AppConfig, AppConfigExt, BossHealthConfig, ChallengeColumns,

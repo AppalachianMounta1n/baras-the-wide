@@ -17,7 +17,7 @@ use baras_core::dsl::{AudioConfig, Trigger};
 use baras_core::effects::{
     AlertTrigger, DefinitionConfig, DisplayTarget, EFFECTS_DSL_VERSION, EffectDefinition,
 };
-use baras_types::AbilitySelector;
+use baras_types::RefreshAbility;
 
 use crate::service::ServiceHandle;
 use tracing::warn;
@@ -35,12 +35,14 @@ pub struct EffectListItem {
     pub display_text: Option<String>,
     /// Whether this effect has a user override (vs bundled-only)
     pub is_user_override: bool,
+    /// Whether this effect exists in the bundled defaults
+    pub is_bundled: bool,
 
     // Effect data
     pub enabled: bool,
     pub trigger: Trigger,
     pub ignore_effect_removed: bool,
-    pub refresh_abilities: Vec<AbilitySelector>,
+    pub refresh_abilities: Vec<RefreshAbility>,
     pub duration_secs: Option<f32>,
     pub is_refreshed_on_modify: bool,
     pub default_charges: Option<u8>,
@@ -74,12 +76,13 @@ pub struct EffectListItem {
 }
 
 impl EffectListItem {
-    fn from_definition(def: &EffectDefinition, is_user_override: bool) -> Self {
+    fn from_definition(def: &EffectDefinition, is_user_override: bool, is_bundled: bool) -> Self {
         Self {
             id: def.id.clone(),
             name: def.name.clone(),
             display_text: def.display_text.clone(),
             is_user_override,
+            is_bundled,
             enabled: def.enabled,
             trigger: def.trigger.clone(),
             ignore_effect_removed: def.ignore_effect_removed,
@@ -201,7 +204,7 @@ fn load_bundled_effects(app_handle: &AppHandle) -> HashMap<String, EffectDefinit
 }
 
 /// Load user effect overrides from single config file
-fn load_user_effects_file() -> Option<(u32, Vec<EffectDefinition>)> {
+pub(crate) fn load_user_effects_file() -> Option<(u32, Vec<EffectDefinition>)> {
     let path = get_user_effects_path()?;
     if !path.exists() {
         return None;
@@ -214,7 +217,7 @@ fn load_user_effects_file() -> Option<(u32, Vec<EffectDefinition>)> {
 }
 
 /// Save user effects to the config file
-fn save_user_effects(effects: &[EffectDefinition]) -> Result<(), String> {
+pub(crate) fn save_user_effects(effects: &[EffectDefinition]) -> Result<(), String> {
     let path = get_user_effects_path().ok_or("Cannot determine user effects path")?;
 
     let config = DefinitionConfig {
@@ -237,9 +240,13 @@ fn save_user_effects(effects: &[EffectDefinition]) -> Result<(), String> {
 }
 
 /// Load merged effects (bundled + user overrides) for UI display
-fn load_all_effects(app_handle: &AppHandle) -> Vec<(EffectDefinition, bool)> {
+/// Returns (effect, is_user_override, is_bundled)
+fn load_all_effects(app_handle: &AppHandle) -> Vec<(EffectDefinition, bool, bool)> {
     // Load bundled effects
     let bundled = load_bundled_effects(app_handle);
+
+    // Track which IDs are bundled
+    let bundled_ids: std::collections::HashSet<_> = bundled.keys().cloned().collect();
 
     // Load user overrides (if version matches)
     let user_effects: HashMap<String, EffectDefinition> =
@@ -271,12 +278,13 @@ fn load_all_effects(app_handle: &AppHandle) -> Vec<(EffectDefinition, bool)> {
         merged.insert(id, effect);
     }
 
-    // Convert to list with is_user_override flag
+    // Convert to list with is_user_override and is_bundled flags
     merged
         .into_iter()
         .map(|(id, effect)| {
             let is_user = user_ids.contains(&id);
-            (effect, is_user)
+            let is_bundled = bundled_ids.contains(&id);
+            (effect, is_user, is_bundled)
         })
         .collect()
 }
@@ -292,7 +300,7 @@ pub async fn get_effect_definitions(app_handle: AppHandle) -> Result<Vec<EffectL
 
     let items: Vec<_> = effects
         .iter()
-        .map(|(effect, is_user)| EffectListItem::from_definition(effect, *is_user))
+        .map(|(effect, is_user, is_bundled)| EffectListItem::from_definition(effect, *is_user, *is_bundled))
         .collect();
 
     Ok(items)
@@ -357,7 +365,7 @@ pub async fn create_effect_definition(
 
     // Check for duplicate ID across all effects
     let all_effects = load_all_effects(&app_handle);
-    if all_effects.iter().any(|(e, _)| e.id == effect.id) {
+    if all_effects.iter().any(|(e, _, _)| e.id == effect.id) {
         return Err(format!("Effect with ID '{}' already exists", effect.id));
     }
 
@@ -432,7 +440,7 @@ pub async fn duplicate_effect_definition(
     // Find the effect to duplicate
     let source = all_effects
         .iter()
-        .find(|(e, _)| e.id == effect_id)
+        .find(|(e, _, _)| e.id == effect_id)
         .ok_or_else(|| format!("Effect '{}' not found", effect_id))?;
 
     // Generate unique ID
@@ -440,7 +448,7 @@ pub async fn duplicate_effect_definition(
     let mut suffix = 1;
     loop {
         let new_id = format!("{}_copy{}", effect_id, suffix);
-        if !all_effects.iter().any(|(e, _)| e.id == new_id) {
+        if !all_effects.iter().any(|(e, _, _)| e.id == new_id) {
             new_effect.id = new_id;
             new_effect.name = format!("{} (Copy)", source.0.name);
             break;
@@ -460,7 +468,149 @@ pub async fn duplicate_effect_definition(
     // Reload definitions in the running service
     let _ = service.reload_effect_definitions().await;
 
-    Ok(EffectListItem::from_definition(&new_effect, true))
+    // Duplicated effect is always user-created (not bundled)
+    Ok(EffectListItem::from_definition(&new_effect, true, false))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Export/Import Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectImportDiff {
+    pub id: String,
+    pub name: String,
+    pub display_target: DisplayTarget,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectImportPreview {
+    pub effects_to_replace: Vec<EffectImportDiff>,
+    pub effects_to_add: Vec<EffectImportDiff>,
+    pub effects_unchanged: usize,
+    pub errors: Vec<String>,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Export/Import Commands
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Export user effect overrides as TOML
+#[tauri::command]
+pub async fn export_effects_toml() -> Result<String, String> {
+    let effects = load_user_effects_file()
+        .filter(|(v, _)| *v == EFFECTS_DSL_VERSION)
+        .map(|(_, effects)| effects)
+        .ok_or("No custom effect definitions to export")?;
+
+    if effects.is_empty() {
+        return Err("No custom effect definitions to export".to_string());
+    }
+
+    let config = DefinitionConfig {
+        version: EFFECTS_DSL_VERSION,
+        effects,
+    };
+
+    toml::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize effects: {}", e))
+}
+
+/// Preview effects import — parse TOML and diff against existing
+#[tauri::command]
+pub async fn preview_import_effects(
+    app_handle: AppHandle,
+    toml_content: String,
+) -> Result<EffectImportPreview, String> {
+    let config: DefinitionConfig = toml::from_str(&toml_content)
+        .map_err(|e| format!("Failed to parse TOML: {}", e))?;
+
+    let mut errors = Vec::new();
+
+    if config.version != EFFECTS_DSL_VERSION {
+        errors.push(format!(
+            "Version mismatch: file has version {}, expected {}",
+            config.version, EFFECTS_DSL_VERSION
+        ));
+    }
+
+    if config.effects.is_empty() {
+        errors.push("No effects found in file".to_string());
+    }
+
+    // Load current merged effects for diff
+    let current_effects = load_all_effects(&app_handle);
+    let current_ids: std::collections::HashSet<String> =
+        current_effects.iter().map(|(e, _, _)| e.id.clone()).collect();
+    let imported_ids: std::collections::HashSet<String> =
+        config.effects.iter().map(|e| e.id.clone()).collect();
+
+    let mut effects_to_replace = Vec::new();
+    let mut effects_to_add = Vec::new();
+
+    for effect in &config.effects {
+        let diff = EffectImportDiff {
+            id: effect.id.clone(),
+            name: effect.name.clone(),
+            display_target: effect.display_target,
+        };
+
+        if current_ids.contains(&effect.id) {
+            effects_to_replace.push(diff);
+        } else {
+            effects_to_add.push(diff);
+        }
+    }
+
+    let effects_unchanged = current_ids
+        .iter()
+        .filter(|id| !imported_ids.contains(*id))
+        .count();
+
+    Ok(EffectImportPreview {
+        effects_to_replace,
+        effects_to_add,
+        effects_unchanged,
+        errors,
+    })
+}
+
+/// Import effects from TOML, merging into user file
+#[tauri::command]
+pub async fn import_effects_toml(
+    service: State<'_, ServiceHandle>,
+    toml_content: String,
+) -> Result<(), String> {
+    let config: DefinitionConfig = toml::from_str(&toml_content)
+        .map_err(|e| format!("Failed to parse TOML: {}", e))?;
+
+    if config.version != EFFECTS_DSL_VERSION {
+        return Err(format!(
+            "Version mismatch: file has version {}, expected {}",
+            config.version, EFFECTS_DSL_VERSION
+        ));
+    }
+
+    // Load current user effects and merge
+    let mut user_effects: Vec<EffectDefinition> = load_user_effects_file()
+        .filter(|(v, _)| *v == EFFECTS_DSL_VERSION)
+        .map(|(_, e)| e)
+        .unwrap_or_default();
+
+    for imported in config.effects {
+        if let Some(existing) = user_effects.iter_mut().find(|e| e.id == imported.id) {
+            *existing = imported;
+        } else {
+            user_effects.push(imported);
+        }
+    }
+
+    save_user_effects(&user_effects)?;
+    let _ = service.reload_effect_definitions().await;
+
+    Ok(())
 }
 
 /// Generate an effect ID from name (snake_case, safe for TOML)
@@ -485,6 +635,10 @@ use zip::ZipArchive;
 
 /// Lazy-loaded icon name lookup cache
 static ICON_NAME_CACHE: std::sync::OnceLock<Mutex<HashMap<u64, String>>> =
+    std::sync::OnceLock::new();
+
+/// Lazy-loaded case-insensitive zip filename index: lowercase name → actual zip entry name
+static ZIP_NAME_INDEX: std::sync::OnceLock<HashMap<String, (PathBuf, String)>> =
     std::sync::OnceLock::new();
 
 /// Get or load the icon name mapping from CSV
@@ -516,7 +670,7 @@ fn get_icon_name_mapping(app_handle: &AppHandle) -> Option<&Mutex<HashMap<u64, S
                 let parts: Vec<&str> = line.splitn(3, ',').collect();
                 if parts.len() >= 3 {
                     if let Ok(ability_id) = parts[0].parse::<u64>() {
-                        let icon_name = parts[2].trim().to_lowercase();
+                        let icon_name = parts[2].trim().to_string();
                         if !icon_name.is_empty() {
                             map.insert(ability_id, icon_name);
                         }
@@ -557,20 +711,38 @@ pub async fn get_icon_preview(app_handle: AppHandle, ability_id: u64) -> Result<
                 .join("icons")
         });
 
-    // Try to load from ZIP files
+    // Build case-insensitive index on first call
     let zip_paths = [icons_dir.join("icons.zip"), icons_dir.join("icons2.zip")];
+    let index = ZIP_NAME_INDEX.get_or_init(|| {
+        let mut map = HashMap::new();
+        for zip_path in &zip_paths {
+            if let Ok(file) = std::fs::File::open(zip_path) {
+                let reader = std::io::BufReader::new(file);
+                if let Ok(mut archive) = ZipArchive::new(reader) {
+                    for i in 0..archive.len() {
+                        if let Ok(entry) = archive.by_index(i) {
+                            let name = entry.name().to_string();
+                            if name.ends_with(".png") {
+                                map.entry(name.to_lowercase())
+                                    .or_insert_with(|| (zip_path.clone(), name));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        map
+    });
 
-    let filename = format!("{}.png", icon_name);
-
-    for zip_path in &zip_paths {
+    let lookup_key = format!("{}.png", icon_name.to_lowercase());
+    if let Some((zip_path, actual_name)) = index.get(&lookup_key) {
         if let Ok(file) = std::fs::File::open(zip_path) {
             let reader = std::io::BufReader::new(file);
             if let Ok(mut archive) = ZipArchive::new(reader)
-                && let Ok(mut zip_file) = archive.by_name(&filename)
+                && let Ok(mut zip_file) = archive.by_name(actual_name)
             {
                 let mut png_data = Vec::new();
                 if zip_file.read_to_end(&mut png_data).is_ok() {
-                    // Return base64 encoded PNG
                     use base64::Engine;
                     let base64_data = base64::engine::general_purpose::STANDARD.encode(&png_data);
                     return Ok(format!("data:image/png;base64,{}", base64_data));

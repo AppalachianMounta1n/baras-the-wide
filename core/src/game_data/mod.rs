@@ -9,6 +9,8 @@ mod pvp_instance;
 mod raid_bosses;
 mod raids;
 mod shield_absorbs;
+mod attack_types;
+mod off_gcd_abilities;
 mod shield_effects;
 mod world_bosses;
 
@@ -24,4 +26,6 @@ pub use flashpoints::{FLASHPOINT_AREAS, get_flashpoint_name, is_flashpoint};
 pub use pvp_instance::is_pvp_area;
 pub use raids::{OPERATION_AREAS, get_operation_name, is_operation, is_world_boss};
 pub use shield_absorbs::{SHIELD_INFO, ShieldInfo, get_shield_info, is_known_shield};
+pub use attack_types::ATTACK_TYPES;
+pub use off_gcd_abilities::OFF_GCD_ABILITIES;
 pub use shield_effects::SHIELD_EFFECT_IDS;

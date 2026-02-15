@@ -82,6 +82,8 @@ pub struct EncounterSummary {
     pub is_phase_start: bool,
     #[serde(default)]
     pub npc_names: Vec<String>,
+    #[serde(default)]
+    pub challenges: Vec<ChallengeSummary>,
     // Line number tracking for per-encounter Parsely uploads
     #[serde(default)]
     pub area_entered_line: Option<u64>,
@@ -92,6 +94,26 @@ pub struct EncounterSummary {
     // Parsely link (set after successful upload)
     #[serde(default)]
     pub parsely_link: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChallengeSummary {
+    pub name: String,
+    pub metric: String,
+    pub total_value: i64,
+    pub event_count: u32,
+    pub duration_secs: f32,
+    pub per_second: Option<f32>,
+    pub by_player: Vec<ChallengePlayerSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChallengePlayerSummary {
+    pub entity_id: i64,
+    pub name: String,
+    pub value: i64,
+    pub percent: f32,
+    pub per_second: Option<f32>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,6 +197,10 @@ pub fn HistoryPanel(mut props: HistoryPanelProps) -> Element {
     // Fetch encounter history
     use_future(move || async move {
         if let Some(history) = api::get_encounter_history().await {
+            // Auto-expand the most recent encounter (last in list = newest)
+            if let Some(latest) = history.last() {
+                expanded_id.set(Some(latest.encounter_id));
+            }
             encounters.set(history);
         }
         loading.set(false);
@@ -190,9 +216,17 @@ pub fn HistoryPanel(mut props: HistoryPanelProps) -> Element {
                     || event_type.contains("TailingModeChanged")
                     || event_type.contains("FileLoaded"))
             {
+                let is_combat_ended = event_type.contains("CombatEnded");
                 spawn(async move {
                     if let Some(history) = api::get_encounter_history().await {
-                        // Use try_write to handle signal being dropped when component unmounts
+                        // Auto-expand the newest encounter on CombatEnded
+                        if is_combat_ended {
+                            if let Some(latest) = history.last() {
+                                let _ = expanded_id
+                                    .try_write()
+                                    .map(|mut w| *w = Some(latest.encounter_id));
+                            }
+                        }
                         let _ = encounters.try_write().map(|mut w| *w = history);
                     }
                 });
@@ -486,7 +520,11 @@ pub fn HistoryPanel(mut props: HistoryPanelProps) -> Element {
                                                         if is_expanded {
                                                             tr { class: "detail-row",
                                                                 td { colspan: "5",
-                                                                    EncounterDetail { encounter: (*enc).clone() }
+                                                                    EncounterDetail {
+                                                                        encounter: (*enc).clone(),
+                                                                        state: props.state,
+                                                                        encounter_idx: enc_id as u32,
+                                                                    }
                                                                 }
                                                             }
                                                         }
@@ -568,7 +606,11 @@ fn sort_metrics(metrics: &mut [PlayerMetrics], column: SortColumn, ascending: bo
 }
 
 #[component]
-fn EncounterDetail(encounter: EncounterSummary) -> Element {
+fn EncounterDetail(
+    encounter: EncounterSummary,
+    state: Signal<crate::types::UiSessionState>,
+    encounter_idx: u32,
+) -> Element {
     let mut sort_column = use_signal(|| SortColumn::Dps);
     let mut sort_ascending = use_signal(|| false); // Default descending for metrics
 
@@ -614,6 +656,17 @@ fn EncounterDetail(encounter: EncounterSummary) -> Element {
                         i { class: "fa-solid fa-flag-checkered" }
                         " {end_time}"
                     }
+                }
+                button {
+                    class: "btn btn-view-explorer",
+                    title: "View detailed breakdown in Data Explorer",
+                    onclick: move |_| {
+                        let mut s = state.write();
+                        s.active_tab = crate::types::MainTab::DataExplorer;
+                        s.data_explorer.selected_encounter = Some(encounter_idx);
+                    },
+                    i { class: "fa-solid fa-magnifying-glass-chart" }
+                    " View in Explorer"
                 }
                 if !npc_list.is_empty() {
                     span { class: "detail-item npc-list",
@@ -704,6 +757,96 @@ fn EncounterDetail(encounter: EncounterSummary) -> Element {
                                     td { class: "metric-value hps", "{player.effective_heal_pct:.1}%" }
                                     td { class: "metric-value hps", "{format_number(player.abs)}" }
                                     td { class: "metric-value apm", "{player.apm:.1}" }
+                                }
+                            }
+                        }
+                        {
+                            let tot_dps: i64 = sorted_metrics.iter().map(|p| p.dps).sum();
+                            let tot_dmg: i64 = sorted_metrics.iter().map(|p| p.total_damage).sum();
+                            let tot_tps: i64 = sorted_metrics.iter().map(|p| p.tps).sum();
+                            let tot_taken: i64 = sorted_metrics.iter().map(|p| p.total_damage_taken).sum();
+                            let tot_dtps: i64 = sorted_metrics.iter().map(|p| p.dtps).sum();
+                            let tot_hps: i64 = sorted_metrics.iter().map(|p| p.hps).sum();
+                            let tot_ehps: i64 = sorted_metrics.iter().map(|p| p.ehps).sum();
+                            let tot_heal: i64 = sorted_metrics.iter().map(|p| p.total_healing).sum();
+                            let tot_eheal: i64 = sorted_metrics.iter().map(|p| p.total_healing_effective).sum();
+                            let eff_pct = if tot_heal > 0 { tot_eheal as f32 / tot_heal as f32 * 100.0 } else { 0.0 };
+                            let tot_abs: i64 = sorted_metrics.iter().map(|p| p.abs).sum();
+                            rsx! {
+                                tfoot {
+                                    tr { class: "totals-row",
+                                        td { class: "player-name totals-label", "Total" }
+                                        td { class: "metric-value dps", "{format_number(tot_dps)}" }
+                                        td { class: "metric-value dps", "{format_number(tot_dmg)}" }
+                                        td { class: "metric-value tps", "{format_number(tot_tps)}" }
+                                        td { class: "metric-value dtps", "{format_number(tot_taken)}" }
+                                        td { class: "metric-value dtps", "{format_number(tot_dtps)}" }
+                                        td { class: "metric-value hps", "{format_number(tot_hps)}" }
+                                        td { class: "metric-value hps", "{format_number(tot_ehps)}" }
+                                        td { class: "metric-value hps", "{eff_pct:.1}%" }
+                                        td { class: "metric-value hps", "{format_number(tot_abs)}" }
+                                        td { class: "metric-value apm", "—" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Challenge results
+            if !encounter.challenges.is_empty() {
+                div { class: "challenge-results",
+                    h4 { class: "challenge-results-header",
+                        i { class: "fa-solid fa-trophy" }
+                        " Challenges"
+                    }
+                    div { class: "challenge-cards",
+                        for challenge in encounter.challenges.iter() {
+                            {
+                                let duration_str = format_duration(challenge.duration_secs as i64);
+                                let per_sec_str = challenge.per_second
+                                    .map(|ps| format_number(ps as i64))
+                                    .unwrap_or_default();
+
+                                rsx! {
+                                    div { class: "challenge-card",
+                                        div { class: "challenge-card-header",
+                                            span { class: "challenge-name", "{challenge.name}" }
+                                            span { class: "challenge-total",
+                                                "{format_number(challenge.total_value)}"
+                                                if !per_sec_str.is_empty() {
+                                                    span { class: "text-muted", " ({per_sec_str}/s)" }
+                                                }
+                                            }
+                                            span { class: "challenge-duration text-muted", "{duration_str}" }
+                                        }
+                                        if !challenge.by_player.is_empty() {
+                                            div { class: "challenge-players",
+                                                for player in challenge.by_player.iter() {
+                                                    {
+                                                        let ps_str = player.per_second
+                                                            .map(|ps| format_number(ps as i64))
+                                                            .unwrap_or_default();
+                                                        rsx! {
+                                                            div { class: "challenge-player-row",
+                                                                div {
+                                                                    class: "challenge-bar-fill",
+                                                                    style: "width: {player.percent:.1}%",
+                                                                }
+                                                                span { class: "challenge-player-name", "{player.name}" }
+                                                                if !ps_str.is_empty() {
+                                                                    span { class: "challenge-player-ps", "{ps_str}/s" }
+                                                                }
+                                                                span { class: "challenge-player-value", "{format_number(player.value)}" }
+                                                                span { class: "challenge-player-pct", "{player.percent:.1}%" }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

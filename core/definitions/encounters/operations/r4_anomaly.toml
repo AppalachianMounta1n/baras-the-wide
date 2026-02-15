@@ -372,3 +372,116 @@ is_kill_target = true
 name = "Watchdog"
 ids = [4488524292161536]
 is_boss = true
+
+[[boss.entities]]
+name = "Attractors"
+ids = [4598389555593216, 4598393850560512]
+
+[[boss.phases]]
+id = "dominique_dom"
+name = "Dom"
+
+[boss.phases.start_trigger]
+type = "combat_start"
+
+[[boss.phases]]
+id = "dominique_dom_generators"
+name = "Dom Generators"
+
+[boss.phases.start_trigger]
+type = "ability_cast"
+abilities = [4598093202849792]
+source = "boss"
+target = "any"
+
+[[boss.phases]]
+id = "dominique_watchdog"
+name = "Watchdog"
+
+[boss.phases.start_trigger]
+type = "npc_appears"
+selector = ["Watchdog"]
+
+[[boss.phases]]
+id = "dominique_dom_attractors"
+name = "Dom+Attractors"
+display_text = "Dom+Attractors"
+start_trigger = { type = "any_of", conditions = [
+  { type = "boss_hp_below", hp_percent = 1.0, selector = [
+    "Watchdog",
+  ] },
+  { type = "npc_appears", selector = [
+    "Attractors",
+  ] },
+] }
+counter_condition = { counter_id = "dom_attractor_appearance", operator = "lt", value = 2 }
+
+[[boss.counters]]
+id = "dom_attractor_appearance"
+name = "Attractor Spawns"
+increment_on = { type = "npc_appears", selector = ["Attractors"] }
+
+[[boss.phases]]
+id = "dominique_burn"
+name = "Burn"
+display_text = "Burn"
+
+[boss.phases.start_trigger]
+type = "boss_hp_below"
+hp_percent = 23.0
+selector = ["Lady Dominique"]
+
+[[boss.timer]]
+id = "dominique_orange_circle"
+name = "Orange circle"
+is_alert = true
+alert_text = "You have orange circle"
+color = [224, 112, 0, 255]
+phases = ["dominique_dom", "dominique_dom_generators"]
+difficulties = ["story", "veteran"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "effect_applied"
+effects = [4574715695857998]
+source = "boss"
+target = "local_player"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "dominique_yellow_circle"
+name = "Yellow circle"
+is_alert = true
+alert_text = "You have yellow circle"
+color = [255, 234, 0, 255]
+phases = ["dominique_dom"]
+difficulties = ["story", "veteran"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "effect_applied"
+effects = [4574698515988786]
+source = "boss"
+target = "local_player"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.challenges]]
+id = "dominique_burn"
+name = "Burn"
+metric = "damage"
+enabled = true
+columns = "total_percent"
+
+[[boss.challenges.conditions]]
+type = "phase"
+phase_ids = ["dominique_burn"]

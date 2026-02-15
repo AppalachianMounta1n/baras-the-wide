@@ -139,6 +139,60 @@ ids = [4245686841245696]
 is_boss = true
 triggers_encounter = true
 
+[[boss.phases]]
+id = "holding_pens_pursuit_droid"
+name = "Pursuit Droid"
+
+[boss.phases.start_trigger]
+type = "effect_applied"
+effects = [4389447986577664]
+target = "any_player"
+
+[boss.phases.start_trigger.source]
+selector = ["Czerka Pursuit Droid"]
+
+[boss.phases.end_trigger]
+type = "ability_cast"
+abilities = [4389426511740928]
+source = "boss"
+target = "any"
+
+[[boss.phases]]
+id = "holding_pens_encounter"
+name = "Encounter"
+
+[boss.phases.start_trigger]
+type = "any_of"
+
+[[boss.phases.start_trigger.conditions]]
+type = "combat_start"
+
+[[boss.phases.start_trigger.conditions]]
+type = "phase_ended"
+phase_id = "holding_pens_pursuit_droid"
+
+[[boss.challenge]]
+id = "holding_pens_pursuit_dps"
+name = "Pursuit Droid DPS"
+metric = "damage"               # See metrics below
+enabled = true
+color = [255, 100, 100, 255]
+columns = "total_per_second"    # See column modes below
+
+[[boss.challenge.conditions]]
+type = "phase"
+phase_ids = ["holding_pens_pursuit_droid"]
+
+[[boss.challenge.conditions]]
+type = "target"
+match = { selector = ["Czerka Pursuit Droid"] }
+
+[[boss.counter]]
+id = "holding_pens_droid_stealth"
+name = "Droid Stealth-outs"
+increment_on = { type = "effect_removed", effects = [4390573268008960] }
+initial_value = 0
+
 [[boss.timer]]
 id = "hold_pens_droid_1st"
 name = "Droid First"
@@ -160,6 +214,7 @@ trigger = { type = "effect_applied", effects = [
 ], source = { selector = [
   "Czerka Pursuit Droid",
 ] } }
+counter_condition = { counter_id = "holding_pens_droid_stealth", operator = "gte", value = 1 }
 difficulties = ["master"]
 
 [[boss.timer]]
@@ -168,6 +223,28 @@ name = "Flare Duration"
 duration_secs = 20.0
 trigger = { type = "ability_cast", abilities = [4250840802000896] }
 difficulties = ["story", "veteran", "master"]
+
+[[boss.timer]]
+id = "holding_pens_pursuit_target"
+name = "Pursuit Target"
+is_alert = true
+alert_text = "Droid is targeting you"
+color = [255, 0, 51, 255]
+difficulties = ["master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "effect_applied"
+effects = [4389430806708224]
+source = "any"
+target = "local_player"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Boss 3: Lake add rush
@@ -205,6 +282,14 @@ difficulties = ["story", "veteran", "master"]
 id = "trandos"
 name = "Trandoshans"
 difficulties = ["story", "veteran", "master"]
+# On Master, fight ends when Ultimate Hunter casts Dying Light (effect removed) with players alive
+has_victory_trigger = true
+victory_trigger = { type = "effect_removed", effects = [
+  4381085685252434,
+], source = { selector = [
+  "Ultimate Hunter",
+] } }
+victory_trigger_difficulties = ["master"]
 
 [[boss.entities]]
 name = "Titax"
@@ -230,7 +315,6 @@ is_boss = true
 name = "Ultimate Hunter"
 ids = [4381150109761536]
 is_boss = true
-is_kill_target = true
 
 [[boss.phases]]
 id = "trandos_first_four"

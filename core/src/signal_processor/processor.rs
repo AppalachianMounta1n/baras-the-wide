@@ -67,6 +67,7 @@ impl EventProcessor {
         signals.extend(self.emit_effect_signals(&event));
         signals.extend(self.emit_action_signals(&event));
         signals.extend(self.emit_damage_signals(&event));
+        signals.extend(self.emit_healing_signals(&event));
 
         // Check if current phase's end_trigger fired (emits PhaseEndTriggered signal)
         signals.extend(phase::check_phase_end_triggers(&event, cache, &signals));
@@ -89,14 +90,20 @@ impl EventProcessor {
         ));
 
         // Update combat time and check for TimeElapsed phase transitions
-        signals.extend(phase::check_time_phase_transitions(cache, event.timestamp));
+        // Skip during grace window to prevent inflating combat_time_secs/phase durations
+        if !cache.is_in_grace_window() {
+            signals.extend(phase::check_time_phase_transitions(cache, event.timestamp));
+        }
 
         // Victory trigger detection (for special encounters like Coratanni)
         // Must happen after signals are emitted to support HP-based victory triggers
         self.handle_victory_trigger(&event, &signals, cache);
 
         // Process challenge metrics (accumulates values, polled with combat data)
-        challenge::process_challenge_events(&event, cache);
+        // Skip during grace window to prevent accumulating metrics after combat ends
+        if !cache.is_in_grace_window() {
+            challenge::process_challenge_events(&event, cache);
+        }
 
         // ═══════════════════════════════════════════════════════════════════════
         // PHASE 3: Combat State Machine
@@ -555,6 +562,7 @@ impl EventProcessor {
     /// Check for victory trigger on special encounters (e.g., Coratanni, Terror from Beyond).
     /// Updates encounter.victory_triggered when the trigger fires.
     /// Supports all trigger types including ability casts, HP thresholds, and composite triggers.
+    /// Optionally filtered by difficulty (e.g., Trandoshan Squad only has victory trigger on Master).
     fn handle_victory_trigger(
         &self,
         event: &CombatEvent,
@@ -564,13 +572,36 @@ impl EventProcessor {
         let Some(enc) = cache.current_encounter() else {
             return;
         };
+
         let Some(idx) = enc.active_boss_idx() else {
             return;
         };
 
         let boss_def = &enc.boss_definitions()[idx];
-        if !boss_def.has_victory_trigger || enc.victory_triggered {
+
+        if !boss_def.has_victory_trigger {
             return;
+        }
+        if enc.victory_triggered {
+            return;
+        }
+
+        // Check if victory trigger applies to current difficulty
+        if !boss_def.victory_trigger_difficulties.is_empty() {
+            let difficulty_matches = enc
+                .difficulty
+                .as_ref()
+                .map(|d| {
+                    boss_def
+                        .victory_trigger_difficulties
+                        .iter()
+                        .any(|vd| d.matches_config_key(vd))
+                })
+                .unwrap_or(true); // Default to true if difficulty unknown
+
+            if !difficulty_matches {
+                return; // Victory trigger doesn't apply to this difficulty
+            }
         }
 
         // Check if trigger matches (needs immutable borrow)
@@ -747,6 +778,38 @@ impl EventProcessor {
         }
 
         vec![GameSignal::DamageTaken {
+            ability_id: event.action.action_id,
+            ability_name: event.action.name,
+            source_id: event.source_entity.log_id,
+            source_entity_type: event.source_entity.entity_type,
+            source_name: event.source_entity.name,
+            source_npc_id: event.source_entity.class_id,
+            target_id: event.target_entity.log_id,
+            target_entity_type: event.target_entity.entity_type,
+            target_name: event.target_entity.name,
+            target_npc_id: event.target_entity.class_id,
+            timestamp: event.timestamp,
+        }]
+    }
+
+    /// Emit signals for healing events (for effect refresh on heal completion).
+    /// Pure transformation - no encounter state modification.
+    fn emit_healing_signals(&self, event: &CombatEvent) -> Vec<GameSignal> {
+        // Only emit for heals during APPLYEFFECT
+        if event.effect.type_id != effect_type_id::APPLYEFFECT
+            || event.effect.effect_id != effect_id::HEAL
+        {
+            return Vec::new();
+        }
+
+        // Ensure we have valid source and target
+        if event.source_entity.entity_type == EntityType::Empty
+            || event.target_entity.entity_type == EntityType::Empty
+        {
+            return Vec::new();
+        }
+
+        vec![GameSignal::HealingDone {
             ability_id: event.action.action_id,
             ability_name: event.action.name,
             source_id: event.source_entity.log_id,

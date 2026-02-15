@@ -11,6 +11,7 @@ use crate::dsl::Trigger;
 // Re-export from shared modules
 pub use crate::dsl::EntityFilter;
 pub use crate::dsl::{AbilitySelector, EffectSelector};
+pub use baras_types::{RefreshAbility, RefreshTrigger};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Effect Definitions
@@ -91,9 +92,10 @@ pub struct EffectDefinition {
     #[serde(default, alias = "fixed_duration")]
     pub ignore_effect_removed: bool,
 
-    /// Abilities (ID or name) that can refresh this effect's duration
+    /// Abilities (ID or name) that can refresh this effect's duration.
+    /// Supports both simple selectors and conditional refresh with min_stacks/trigger.
     #[serde(default)]
-    pub refresh_abilities: Vec<AbilitySelector>,
+    pub refresh_abilities: Vec<RefreshAbility>,
 
     /// Whether or not the effect will refresh on ModifyCharges events
     #[serde(default)]
@@ -226,7 +228,19 @@ impl EffectDefinition {
     pub fn can_refresh_with(&self, ability_id: u64, ability_name: Option<&str>) -> bool {
         self.refresh_abilities
             .iter()
-            .any(|s| s.matches(ability_id, ability_name))
+            .any(|r| r.matches(ability_id, ability_name))
+    }
+
+    /// Find the RefreshAbility entry that matches the given ability.
+    /// Returns None if no match found.
+    pub fn find_refresh_ability(
+        &self,
+        ability_id: u64,
+        ability_name: Option<&str>,
+    ) -> Option<&RefreshAbility> {
+        self.refresh_abilities
+            .iter()
+            .find(|r| r.matches(ability_id, ability_name))
     }
 
     /// Get the source filter from the trigger

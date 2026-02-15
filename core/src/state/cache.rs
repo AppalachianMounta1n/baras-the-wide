@@ -203,6 +203,14 @@ impl SessionCache {
         self.encounters.len()
     }
 
+    /// Returns true if the current encounter is in the PostCombat grace window state.
+    /// Used to skip accumulation/time updates for events during the grace window.
+    pub fn is_in_grace_window(&self) -> bool {
+        self.current_encounter().map_or(false, |enc| {
+            matches!(enc.state, EncounterState::PostCombat { .. })
+        })
+    }
+
     // --- Boss Health ---
 
     /// Get current health of all bosses from the current encounter

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 
-use crate::api;
+use crate::api::{self, BossNotesInfo};
 use crate::components::{
     DataExplorerPanel, EffectEditorPanel, EncounterEditorPanel, HistoryPanel,
     HotkeyInput, ParselyUploadModal, SettingsPanel, ToastFrame, ToastSeverity, use_parsely_upload,
@@ -52,6 +52,7 @@ pub fn App() -> Element {
     let mut effects_b_enabled = use_signal(|| false);
     let mut cooldowns_enabled = use_signal(|| false);
     let mut dot_tracker_enabled = use_signal(|| false);
+    let mut notes_enabled = use_signal(|| false);
     let mut overlays_visible = use_signal(|| true);
     let mut move_mode = use_signal(|| false);
     let mut rearrange_mode = use_signal(|| false);
@@ -63,6 +64,10 @@ pub fn App() -> Element {
     let mut is_live_tailing = use_signal(|| true);
     let mut session_info = use_signal(|| None::<SessionInfo>);
     let mut session_ended = use_signal(|| false); // True when player logged out but data preserved
+
+    // Boss notes selector state
+    let mut area_bosses = use_signal(Vec::<BossNotesInfo>::new);
+    let mut selected_boss_id = use_signal(|| None::<String>);
 
     // File browser state
     let mut file_browser_open = use_signal(|| false);
@@ -90,6 +95,7 @@ pub fn App() -> Element {
     let mut log_dir_size = use_signal(|| 0u64);
     let mut log_file_count = use_signal(|| 0usize);
     let mut auto_delete_empty = use_signal(|| false);
+    let mut auto_delete_small = use_signal(|| false);
     let mut auto_delete_old = use_signal(|| false);
     let mut retention_days = use_signal(|| 21u32);
     let mut cleanup_status = use_signal(String::new);
@@ -142,6 +148,7 @@ pub fn App() -> Element {
             profile_names.set(config.profiles.iter().map(|p| p.name.clone()).collect());
             active_profile.set(config.active_profile_name);
             auto_delete_empty.set(config.auto_delete_empty_files);
+            auto_delete_small.set(config.auto_delete_small_files);
             auto_delete_old.set(config.auto_delete_old_files);
             retention_days.set(config.log_retention_days);
             hide_small_log_files.set(config.hide_small_log_files);
@@ -189,6 +196,7 @@ pub fn App() -> Element {
                 &mut effects_b_enabled,
                 &mut cooldowns_enabled,
                 &mut dot_tracker_enabled,
+                &mut notes_enabled,
                 &mut overlays_visible,
                 &mut move_mode,
                 &mut rearrange_mode,
@@ -233,6 +241,8 @@ pub fn App() -> Element {
         session_info.set(api::get_session_info().await);
         is_watching.set(api::get_watching_status().await);
         is_live_tailing.set(api::is_live_tailing().await);
+        // Also fetch initial boss list for current area
+        area_bosses.set(api::get_area_bosses_for_notes().await);
 
         // Listen for updates (no more polling!)
         let closure = Closure::new(move |_event: JsValue| {
@@ -248,6 +258,9 @@ pub fn App() -> Element {
                 let _ = session_info.try_write().map(|mut w| *w = info);
                 let _ = is_watching.try_write().map(|mut w| *w = watching);
                 let _ = is_live_tailing.try_write().map(|mut w| *w = tailing);
+                // Refresh boss list for current area (in case area changed)
+                let bosses = api::get_area_bosses_for_notes().await;
+                let _ = area_bosses.try_write().map(|mut w| *w = bosses);
             });
         });
         api::tauri_listen("session-updated", &closure).await;
@@ -399,6 +412,7 @@ pub fn App() -> Element {
     let effects_b_on = effects_b_enabled();
     let cooldowns_on = cooldowns_enabled();
     let dot_tracker_on = dot_tracker_enabled();
+    let notes_on = notes_enabled();
     let any_enabled = enabled_map.values().any(|&v| v)
         || personal_on
         || raid_on
@@ -410,7 +424,8 @@ pub fn App() -> Element {
         || effects_a_on
         || effects_b_on
         || cooldowns_on
-        || dot_tracker_on;
+        || dot_tracker_on
+        || notes_on;
     let is_visible = overlays_visible();
     let is_move_mode = move_mode();
     let is_rearrange = rearrange_mode();
@@ -584,31 +599,36 @@ pub fn App() -> Element {
                             value: active_profile().unwrap_or_default(),
                             onchange: move |e| {
                                 let selected = e.value();
+                                if selected.is_empty() { return; }
+                                let previous = active_profile();
+                                active_profile.set(Some(selected.clone()));
                                 let mut toast = use_toast();
                                 spawn(async move {
-                                    if !selected.is_empty() {
-                                        if let Err(err) = api::load_profile(&selected).await {
-                                            toast.show(format!("Failed to load profile: {}", err), ToastSeverity::Normal);
-                                        } else {
-                                            active_profile.set(Some(selected));
-                                            if let Some(cfg) = api::get_config().await {
-                                                overlay_settings.set(cfg.overlay_settings);
-                                            }
-                                            api::refresh_overlay_settings().await;
-                                            if let Some(status) = api::get_overlay_status().await {
-                                                apply_status(&status, &mut metric_overlays_enabled, &mut personal_enabled,
-                                                    &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
-                                                    &mut timers_b_enabled, &mut challenges_enabled, &mut alerts_enabled,
-                                                    &mut effects_a_enabled, &mut effects_b_enabled,
-                                                    &mut cooldowns_enabled, &mut dot_tracker_enabled,
-                                                    &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
-                                            }
+                                    if let Err(err) = api::load_profile(&selected).await {
+                                        active_profile.set(previous);
+                                        toast.show(format!("Failed to load profile: {}", err), ToastSeverity::Normal);
+                                    } else {
+                                        if let Some(cfg) = api::get_config().await {
+                                            overlay_settings.set(cfg.overlay_settings);
+                                        }
+                                        api::refresh_overlay_settings().await;
+                                        if let Some(status) = api::get_overlay_status().await {
+                                            apply_status(&status, &mut metric_overlays_enabled, &mut personal_enabled,
+                                                &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
+                                                &mut timers_b_enabled, &mut challenges_enabled, &mut alerts_enabled,
+                                                &mut effects_a_enabled, &mut effects_b_enabled,
+                                                &mut cooldowns_enabled, &mut dot_tracker_enabled, &mut notes_enabled,
+                                                &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
                                         }
                                     }
                                 });
                             },
                             for name in profile_names().iter() {
-                                option { value: "{name}", "{name}" }
+                                option {
+                                    value: "{name}",
+                                    selected: active_profile().as_deref() == Some(name.as_str()),
+                                    "{name}"
+                                }
                             }
                         }
                     }
@@ -707,7 +727,7 @@ pub fn App() -> Element {
                 button {
                     class: if ui_state.read().active_tab == MainTab::EncounterBuilder { "tab-btn active" } else { "tab-btn" },
                     onclick: move |_| ui_state.write().active_tab = MainTab::EncounterBuilder,
-                    i { class: "fa-solid fa-skull" }
+                    i { class: "fa-solid fa-hammer" }
                     " Encounter Builder"
                 }
                 button {
@@ -790,53 +810,59 @@ pub fn App() -> Element {
                                     }
                                 }
 
-                                // Parsely upload button
-                                if !current_file.is_empty() {
-                                    {
-                                        let path = current_file.clone();
-                                        let upload_result = upload_status().get(&path).cloned();
-                                        rsx! {
-                                            div { class: "session-upload-group",
-                                                button {
-                                                    class: "btn btn-session-upload",
-                                                    title: "Upload to Parsely",
-                                                    onclick: {
-                                                        let p = path.clone();
-                                                        move |_| {
-                                                            // Extract filename from path
-                                                            let filename = p.split('/').last()
-                                                                .or_else(|| p.split('\\').last())
-                                                                .unwrap_or("combat.txt")
-                                                                .to_string();
-                                                            parsely_upload.open_file(p.clone(), filename);
-                                                        }
-                                                    },
-                                                    i { class: "fa-solid fa-cloud-arrow-up" }
-                                                    " Parsely"
-                                                }
-                                                // Show upload result inline
-                                                if let Some((success, ref msg)) = upload_result {
-                                                    if success {
-                                                        button {
-                                                            class: "btn btn-session-upload-result",
-                                                            title: "Open in browser",
-                                                            onclick: {
-                                                                let url = msg.clone();
-                                                                move |_| {
-                                                                    let u = url.clone();
-                                                                    spawn(async move { api::open_url(&u).await; });
-                                                                }
-                                                            },
-                                                            i { class: "fa-solid fa-external-link-alt" }
-                                                        }
-                                                    } else {
-                                                        span { class: "upload-error", title: "{msg}",
-                                                            i { class: "fa-solid fa-triangle-exclamation" }
-                                                        }
+                                // Right side: player stats + Parsely upload
+                                div { class: "session-toolbar-right",
+                                    // Player stats for effect duration calculations
+                                    PlayerStatsBar {}
+
+                                    // Parsely upload button
+                                    if !current_file.is_empty() {
+                                        {
+                                            let path = current_file.clone();
+                                            let upload_result = upload_status().get(&path).cloned();
+                                            rsx! {
+                                                div { class: "session-upload-group",
+                                                    button {
+                                                        class: "btn btn-session-upload",
+                                                        title: "Upload to Parsely",
+                                                        onclick: {
+                                                            let p = path.clone();
+                                                            move |_| {
+                                                                // Extract filename from path
+                                                                let filename = p.split('/').last()
+                                                                    .or_else(|| p.split('\\').last())
+                                                                    .unwrap_or("combat.txt")
+                                                                    .to_string();
+                                                                parsely_upload.open_file(p.clone(), filename);
+                                                            }
+                                                        },
+                                                        i { class: "fa-solid fa-cloud-arrow-up" }
+                                                        " Parsely"
                                                     }
+                                                    // Show upload result inline
+                                                    if let Some((success, ref msg)) = upload_result {
+                                                        if success {
+                                                            button {
+                                                                class: "btn btn-session-upload-result",
+                                                                title: "Open in browser",
+                                                                onclick: {
+                                                                    let url = msg.clone();
+                                                                    move |_| {
+                                                                        let u = url.clone();
+                                                                        spawn(async move { api::open_url(&u).await; });
+                                                                    }
+                                                                },
+                                                                i { class: "fa-solid fa-external-link-alt" }
+                                                            }
+                                                        } else {
+                                                            span { class: "upload-error", title: "{msg}",
+                                                                i { class: "fa-solid fa-triangle-exclamation" }
+                                                            }
+                                                        }
                                                 }
                                             }
                                         }
+                                    }
                                     }
                                 }
                             }
@@ -913,12 +939,46 @@ pub fn App() -> Element {
                                     }
                                 }
                             }
+
+                            // Boss notes selector (only show if there are bosses with notes in current area)
+                            {
+                                let bosses_with_notes: Vec<_> = area_bosses().iter()
+                                    .filter(|b| b.has_notes)
+                                    .cloned()
+                                    .collect();
+                                if !bosses_with_notes.is_empty() {
+                                    rsx! {
+                                        div { class: "session-notes-selector",
+                                            span { class: "label", "Notes:" }
+                                            select {
+                                                class: "notes-boss-select",
+                                                onchange: move |evt| {
+                                                    let boss_id = evt.value();
+                                                    if !boss_id.is_empty() {
+                                                        selected_boss_id.set(Some(boss_id.clone()));
+                                                        spawn(async move {
+                                                            let _ = api::select_boss_notes(&boss_id).await;
+                                                        });
+                                                    }
+                                                },
+                                                option { value: "", "Select boss..." }
+                                                for boss in bosses_with_notes.iter() {
+                                                    option {
+                                                        value: "{boss.id}",
+                                                        selected: selected_boss_id().as_ref() == Some(&boss.id),
+                                                        "{boss.name}"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    rsx! {}
+                                }
+                            }
                         }
                     }
                     }
-
-                    // Player stats for GCD/timing calculations
-                    PlayerStatsBar {}
 
                     div { class: "history-container-large", HistoryPanel { state: ui_state } }
                 }
@@ -935,7 +995,7 @@ pub fn App() -> Element {
                                 title: "Open overlay appearance and behavior settings",
                                 onclick: move |_| settings_open.set(!settings_open()),
                                 i { class: "fa-solid fa-screwdriver-wrench" }
-                                span { " Settings" }
+                                span { " Customize" }
                             }
                             div { class: "profile-selector",
                                 if profile_names().is_empty() {
@@ -974,31 +1034,36 @@ pub fn App() -> Element {
                                         value: active_profile().unwrap_or_default(),
                                         onchange: move |e| {
                                             let selected = e.value();
+                                            if selected.is_empty() { return; }
+                                            let previous = active_profile();
+                                            active_profile.set(Some(selected.clone()));
                                             let mut toast = use_toast();
                                             spawn(async move {
-                                                if !selected.is_empty() {
-                                                    if let Err(err) = api::load_profile(&selected).await {
-                                                        toast.show(format!("Failed to load profile: {}", err), ToastSeverity::Normal);
-                                                    } else {
-                                                        active_profile.set(Some(selected));
-                                                        if let Some(cfg) = api::get_config().await {
-                                                            overlay_settings.set(cfg.overlay_settings);
-                                                        }
-                                                        api::refresh_overlay_settings().await;
-                                                        if let Some(status) = api::get_overlay_status().await {
-                                                            apply_status(&status, &mut metric_overlays_enabled, &mut personal_enabled,
-                                                                &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
-                                                                &mut timers_b_enabled, &mut challenges_enabled, &mut alerts_enabled,
-                                                                &mut effects_a_enabled, &mut effects_b_enabled,
-                                                                &mut cooldowns_enabled, &mut dot_tracker_enabled,
-                                                                &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
-                                                        }
+                                                if let Err(err) = api::load_profile(&selected).await {
+                                                    active_profile.set(previous);
+                                                    toast.show(format!("Failed to load profile: {}", err), ToastSeverity::Normal);
+                                                } else {
+                                                    if let Some(cfg) = api::get_config().await {
+                                                        overlay_settings.set(cfg.overlay_settings);
+                                                    }
+                                                    api::refresh_overlay_settings().await;
+                                                    if let Some(status) = api::get_overlay_status().await {
+                                                        apply_status(&status, &mut metric_overlays_enabled, &mut personal_enabled,
+                                                            &mut raid_enabled, &mut boss_health_enabled, &mut timers_enabled,
+                                                            &mut timers_b_enabled, &mut challenges_enabled, &mut alerts_enabled,
+                                                            &mut effects_a_enabled, &mut effects_b_enabled,
+                                                            &mut cooldowns_enabled, &mut dot_tracker_enabled, &mut notes_enabled,
+                                                            &mut overlays_visible, &mut move_mode, &mut rearrange_mode);
                                                     }
                                                 }
                                             });
                                         },
                                         for name in profile_names().iter() {
-                                            option { value: "{name}", "{name}" }
+                                            option {
+                                                value: "{name}",
+                                                selected: active_profile().as_deref() == Some(name.as_str()),
+                                                "{name}"
+                                            }
                                         }
                                     }
                                     if active_profile().is_some() {
@@ -1070,150 +1135,171 @@ pub fn App() -> Element {
                             }
                         }
 
-                        // General overlays
-                        h4 { class: "subsection-title", "General" }
-                        div { class: "overlay-grid",
-                            button {
-                                class: if personal_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Shows your personal combat statistics",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::Personal, personal_on).await {
-                                        personal_enabled.set(!personal_on);
+                        // Overlay categories in columns
+                        div { class: "overlay-categories",
+                            // General column
+                            div { class: "overlay-category",
+                                h4 { class: "category-title", "General" }
+                                div { class: "category-buttons",
+                                    button {
+                                        class: if personal_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Shows your personal combat statistics",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::Personal, personal_on).await {
+                                                personal_enabled.set(!personal_on);
+                                            }
+                                        }); },
+                                        "Personal Stats"
                                     }
-                                }); },
-                                "Personal Stats"
-                            }
-                            button {
-                                class: if raid_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Displays party/raid member health bars with effect tracking",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::Raid, raid_on).await {
-                                        raid_enabled.set(!raid_on);
-                                        if raid_on { rearrange_mode.set(false); }
+                                    button {
+                                        class: if raid_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Displays party/raid member health bars with effect tracking",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::Raid, raid_on).await {
+                                                raid_enabled.set(!raid_on);
+                                                if raid_on { rearrange_mode.set(false); }
+                                            }
+                                        }); },
+                                        "Raid Frames"
                                     }
-                                }); },
-                                "Raid Frames"
-                            }
-                            button {
-                                class: if alerts_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Shows combat alerts and notifications",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::Alerts, alerts_on).await {
-                                        alerts_enabled.set(!alerts_on);
+                                    button {
+                                        class: if alerts_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Shows combat alerts and notifications",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::Alerts, alerts_on).await {
+                                                alerts_enabled.set(!alerts_on);
+                                            }
+                                        }); },
+                                        "Alerts"
                                     }
-                                }); },
-                                "Alerts"
+                                }
                             }
-                        }
 
-                        // Encounter overlays
-                        h4 { class: "subsection-title", "Encounter" }
-                        div { class: "overlay-grid",
-                            button {
-                                class: if boss_health_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Shows boss health bars and cast timers",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::BossHealth, boss_health_on).await {
-                                        boss_health_enabled.set(!boss_health_on);
+                            // Encounter column
+                            div { class: "overlay-category",
+                                h4 { class: "category-title", "Encounter" }
+                                div { class: "category-buttons",
+                                    button {
+                                        class: if boss_health_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Shows boss health bars and cast timers",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::BossHealth, boss_health_on).await {
+                                                boss_health_enabled.set(!boss_health_on);
+                                            }
+                                        }); },
+                                        "Boss Health"
                                     }
-                                }); },
-                                "Boss Health"
-                            }
-                            button {
-                                class: if challenges_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Tracks raid challenge objectives and progress",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::Challenges, challenges_on).await {
-                                        challenges_enabled.set(!challenges_on);
+                                    button {
+                                        class: if challenges_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Tracks raid challenge objectives and progress",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::Challenges, challenges_on).await {
+                                                challenges_enabled.set(!challenges_on);
+                                            }
+                                        }); },
+                                        "Challenges"
                                     }
-                                }); },
-                                "Challenges"
-                            }
-                            button {
-                                class: if timers_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Displays encounter-specific timers and phase markers (Group A)",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::TimersA, timers_on).await {
-                                        timers_enabled.set(!timers_on);
+                                    button {
+                                        class: if timers_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Displays encounter-specific timers and phase markers (Group A)",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::TimersA, timers_on).await {
+                                                timers_enabled.set(!timers_on);
+                                            }
+                                        }); },
+                                        "Timers A"
                                     }
-                                }); },
-                                "Timers A"
-                            }
-                            button {
-                                class: if timers_b_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Displays encounter-specific timers and phase markers (Group B)",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::TimersB, timers_b_on).await {
-                                        timers_b_enabled.set(!timers_b_on);
+                                    button {
+                                        class: if timers_b_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Displays encounter-specific timers and phase markers (Group B)",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::TimersB, timers_b_on).await {
+                                                timers_b_enabled.set(!timers_b_on);
+                                            }
+                                        }); },
+                                        "Timers B"
                                     }
-                                }); },
-                                "Timers B"
+                                    button {
+                                        class: if notes_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Displays encounter notes written in the Encounter Editor",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::Notes, notes_on).await {
+                                                notes_enabled.set(!notes_on);
+                                            }
+                                        }); },
+                                        "Notes"
+                                    }
+                                }
                             }
-                        }
 
-                        // Effects overlays
-                        h4 { class: "subsection-title", "Effects" }
-                        div { class: "overlay-grid",
-                            button {
-                                class: if effects_a_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Displays tracked buffs and effects (Group A)",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::EffectsA, effects_a_on).await {
-                                        effects_a_enabled.set(!effects_a_on);
+                            // Effects column
+                            div { class: "overlay-category",
+                                h4 { class: "category-title", "Effects" }
+                                div { class: "category-buttons",
+                                    button {
+                                        class: if effects_a_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Displays tracked buffs and effects (Group A)",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::EffectsA, effects_a_on).await {
+                                                effects_a_enabled.set(!effects_a_on);
+                                            }
+                                        }); },
+                                        "Effects A"
                                     }
-                                }); },
-                                "Effects A"
-                            }
-                            button {
-                                class: if effects_b_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Displays tracked buffs and effects (Group B)",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::EffectsB, effects_b_on).await {
-                                        effects_b_enabled.set(!effects_b_on);
+                                    button {
+                                        class: if effects_b_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Displays tracked buffs and effects (Group B)",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::EffectsB, effects_b_on).await {
+                                                effects_b_enabled.set(!effects_b_on);
+                                            }
+                                        }); },
+                                        "Effects B"
                                     }
-                                }); },
-                                "Effects B"
-                            }
-                            button {
-                                class: if cooldowns_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Tracks ability cooldowns",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::Cooldowns, cooldowns_on).await {
-                                        cooldowns_enabled.set(!cooldowns_on);
+                                    button {
+                                        class: if cooldowns_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Tracks ability cooldowns",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::Cooldowns, cooldowns_on).await {
+                                                cooldowns_enabled.set(!cooldowns_on);
+                                            }
+                                        }); },
+                                        "Cooldowns"
                                     }
-                                }); },
-                                "Cooldowns"
-                            }
-                            button {
-                                class: if dot_tracker_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                title: "Tracks damage-over-time effects on targets",
-                                onclick: move |_| { spawn(async move {
-                                    if api::toggle_overlay(OverlayType::DotTracker, dot_tracker_on).await {
-                                        dot_tracker_enabled.set(!dot_tracker_on);
+                                    button {
+                                        class: if dot_tracker_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                        title: "Tracks damage-over-time effects on targets",
+                                        onclick: move |_| { spawn(async move {
+                                            if api::toggle_overlay(OverlayType::DotTracker, dot_tracker_on).await {
+                                                dot_tracker_enabled.set(!dot_tracker_on);
+                                            }
+                                        }); },
+                                        "DOT Tracker"
                                     }
-                                }); },
-                                "DOT Tracker"
+                                }
                             }
-                        }
 
-                        // Metric overlays
-                        h4 { class: "subsection-title", "Metrics" }
-                        div { class: "overlay-grid",
-                            for mt in MetricType::all() {
-                                {
-                                    let ot = *mt;
-                                    let is_on = enabled_map.get(&ot).copied().unwrap_or(false);
-                                    rsx! {
-                                        button {
-                                            class: if is_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
-                                            onclick: move |_| { spawn(async move {
-                                                if api::toggle_overlay(OverlayType::Metric(ot), is_on).await {
-                                                    let mut map = metric_overlays_enabled();
-                                                    map.insert(ot, !is_on);
-                                                    metric_overlays_enabled.set(map);
+                            // Metrics column
+                            div { class: "overlay-category",
+                                h4 { class: "category-title", "Metrics" }
+                                div { class: "category-buttons",
+                                    for mt in MetricType::all() {
+                                        {
+                                            let ot = *mt;
+                                            let is_on = enabled_map.get(&ot).copied().unwrap_or(false);
+                                            rsx! {
+                                                button {
+                                                    class: if is_on { "btn btn-overlay btn-active" } else { "btn btn-overlay" },
+                                                    onclick: move |_| { spawn(async move {
+                                                        if api::toggle_overlay(OverlayType::Metric(ot), is_on).await {
+                                                            let mut map = metric_overlays_enabled();
+                                                            map.insert(ot, !is_on);
+                                                            metric_overlays_enabled.set(map);
+                                                        }
+                                                    }); },
+                                                    "{ot.label()}"
                                                 }
-                                            }); },
-                                            "{ot.label()}"
+                                            }
                                         }
                                     }
                                 }
@@ -1390,6 +1476,27 @@ pub fn App() -> Element {
                                 }
 
                                 div { class: "setting-row",
+                                    label { "Auto-delete small files (<1MB)" }
+                                    input {
+                                        r#type: "checkbox",
+                                        checked: auto_delete_small(),
+                                        onchange: move |e| {
+                                            let checked = e.checked();
+                                            auto_delete_small.set(checked);
+                                            let mut toast = use_toast();
+                                            spawn(async move {
+                                                if let Some(mut cfg) = api::get_config().await {
+                                                    cfg.auto_delete_small_files = checked;
+                                                    if let Err(err) = api::update_config(&cfg).await {
+                                                        toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    }
+                                }
+
+                                div { class: "setting-row",
                                     label { "Delete old files" }
                                     input {
                                         r#type: "checkbox",
@@ -1414,12 +1521,12 @@ pub fn App() -> Element {
                                     label { "Retention days" }
                                     input {
                                         r#type: "number",
-                                        min: "1",
+                                        min: "7",
                                         max: "365",
                                         value: "{retention_days()}",
                                         onchange: move |e| {
                                             if let Ok(days) = e.value().parse::<u32>() {
-                                                let days = days.clamp(1, 365);
+                                                let days = days.clamp(7, 365);
                                                 retention_days.set(days);
                                                 let mut toast = use_toast();
                                                 spawn(async move {
@@ -1440,13 +1547,14 @@ pub fn App() -> Element {
                                         class: "btn btn-control",
                                         onclick: move |_| {
                                             let del_empty = auto_delete_empty();
+                                            let del_small = auto_delete_small();
                                             let del_old = auto_delete_old();
                                             let days = retention_days();
                                             spawn(async move {
                                                 cleanup_status.set("Cleaning...".to_string());
                                                 let retention = if del_old { Some(days) } else { None };
-                                                let (empty, old) = api::cleanup_logs(del_empty, retention).await;
-                                                cleanup_status.set(format!("Deleted {} empty, {} old files", empty, old));
+                                                let (empty, small, old) = api::cleanup_logs(del_empty, del_small, retention).await;
+                                                cleanup_status.set(format!("Deleted {} empty, {} small, {} old files", empty, small, old));
                                                 log_dir_size.set(api::get_log_directory_size().await);
                                                 log_file_count.set(api::get_log_file_count().await);
                                             });
@@ -1698,6 +1806,8 @@ pub fn App() -> Element {
                                     span { class: "save-status", "{parsely_save_status}" }
                                 }
                             }
+
+                            StarParseImportSection {}
                             } // settings-content
                         }
                     }
@@ -1721,7 +1831,7 @@ pub fn App() -> Element {
                             input {
                                 class: "file-browser-search",
                                 r#type: "text",
-                                placeholder: "Filter by name or date...",
+                                placeholder: "Filter by name, date, day, or operation...",
                                 value: "{file_browser_filter}",
                                 oninput: move |e| file_browser_filter.set(e.value()),
                             }
@@ -1775,7 +1885,15 @@ pub fn App() -> Element {
                                         }
                                         let name = f.character_name.as_deref().unwrap_or("").to_lowercase();
                                         let date = f.date.to_lowercase();
-                                        name.contains(&filter) || date.contains(&filter)
+                                        let day = f.day_of_week.to_lowercase();
+                                        // Also check area names for operation search
+                                        let areas_match = f.areas.as_ref().map_or(false, |areas| {
+                                            areas.iter().any(|a| {
+                                                a.display.to_lowercase().contains(&filter)
+                                                    || a.area_name.to_lowercase().contains(&filter)
+                                            })
+                                        });
+                                        name.contains(&filter) || date.contains(&filter) || day.contains(&filter) || areas_match
                                     }).cloned().collect();
                                     rsx! {
                                         for file in filtered.iter() {
@@ -1784,6 +1902,7 @@ pub fn App() -> Element {
                                         let path_for_upload = file.path.clone();
                                         let char_name = file.character_name.clone().unwrap_or_else(|| "Unknown".to_string());
                                         let date = file.date.clone();
+                                        let day_of_week = file.day_of_week.clone();
                                         let size_str = if file.file_size >= 1024 * 1024 {
                                             format!("{:.1}mb", file.file_size as f64 / (1024.0 * 1024.0))
                                         } else {
@@ -1801,11 +1920,66 @@ pub fn App() -> Element {
                                                     (false, false) => "file-item",
                                                 },
                                                 div { class: "file-info",
-                                                    span { class: "file-date", "{date}" }
+                                                    span { class: "file-date",
+                                                        "{date}"
+                                                        if !day_of_week.is_empty() {
+                                                            span { class: "file-day", " - {day_of_week}" }
+                                                        }
+                                                    }
                                                     div { class: "file-meta",
                                                         span { class: "file-char", "{char_name}" }
                                                         span { class: "file-sep", " • " }
                                                         span { class: "file-size", "{size_str}" }
+                                                    }
+                                                    // Show areas/operations visited in this file
+                                                    // Only show areas with difficulty (actual instances, not open world)
+                                                    {
+                                                        // Helper to get difficulty CSS class from difficulty string
+                                                        fn difficulty_class(difficulty: &str) -> &'static str {
+                                                            let lower = difficulty.to_lowercase();
+                                                            // 4-player content (flashpoints) gets blue
+                                                            if lower.contains("4 player") {
+                                                                "area-tag diff-fp"
+                                                            // 8/16 player operations get colored by difficulty
+                                                            } else if lower.contains("master") {
+                                                                "area-tag diff-nim"
+                                                            } else if lower.contains("veteran") {
+                                                                "area-tag diff-hm"
+                                                            } else if lower.contains("story") {
+                                                                "area-tag diff-sm"
+                                                            } else {
+                                                                "area-tag"
+                                                            }
+                                                        }
+
+                                                        let instanced_areas: Vec<_> = file.areas.as_ref()
+                                                            .map(|areas| areas.iter().filter(|a| !a.difficulty.is_empty()).collect())
+                                                            .unwrap_or_default();
+                                                        let area_count = instanced_areas.len();
+                                                        rsx! {
+                                                            if !instanced_areas.is_empty() {
+                                                                details { class: "file-areas",
+                                                                    summary {
+                                                                        // Show first 3 badges in summary
+                                                                        for area in instanced_areas.iter().take(3) {
+                                                                            span { class: "{difficulty_class(&area.difficulty)}", "{area.display}" }
+                                                                        }
+                                                                        // Show "+N more" if there are more than 3
+                                                                        if area_count > 3 {
+                                                                            span { class: "area-tag area-more", "+{area_count - 3} more" }
+                                                                        }
+                                                                    }
+                                                                    // When expanded, show all areas
+                                                                    if area_count > 3 {
+                                                                        ul { class: "area-list",
+                                                                            for area in instanced_areas.iter() {
+                                                                                li { class: "{difficulty_class(&area.difficulty)}", "{area.display}" }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                     // Show upload result for this file
                                                     if let Some((success, ref msg)) = upload_result {
@@ -2008,6 +2182,11 @@ fn PlayerStatsBar() -> Element {
                     }
                 }
             }
+            span {
+                class: "stats-help-icon",
+                title: "Alacrity and Latency affect duration of certain HoTs and effects",
+                i { class: "fa-solid fa-circle-question" }
+            }
         }
     }
 }
@@ -2031,6 +2210,7 @@ fn apply_status(
     effects_b_enabled: &mut Signal<bool>,
     cooldowns_enabled: &mut Signal<bool>,
     dot_tracker_enabled: &mut Signal<bool>,
+    notes_enabled: &mut Signal<bool>,
     overlays_visible: &mut Signal<bool>,
     move_mode: &mut Signal<bool>,
     rearrange_mode: &mut Signal<bool>,
@@ -2051,7 +2231,153 @@ fn apply_status(
     effects_b_enabled.set(status.effects_b_enabled);
     cooldowns_enabled.set(status.cooldowns_enabled);
     dot_tracker_enabled.set(status.dot_tracker_enabled);
+    notes_enabled.set(status.notes_enabled);
     overlays_visible.set(status.overlays_visible);
     move_mode.set(status.move_mode);
     rearrange_mode.set(status.rearrange_mode);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StarParse Import
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Clone, PartialEq)]
+enum ImportState {
+    Idle,
+    Previewing,
+    Ready(String, crate::types::StarParsePreview),
+    Importing,
+    Done(crate::types::StarParseImportResult),
+    Error(String),
+}
+
+#[component]
+fn StarParseImportSection() -> Element {
+    let toast = use_toast();
+    let mut state = use_signal(|| ImportState::Idle);
+
+    rsx! {
+        div { class: "settings-section",
+            h4 { "Import" }
+            p { class: "hint", "Import timers and effects from StarParse XML exports." }
+
+            match state() {
+                ImportState::Idle | ImportState::Error(_) => rsx! {
+                    if let ImportState::Error(ref msg) = state() {
+                        p { class: "hint hint-warning", "{msg}" }
+                    }
+                    button {
+                        class: "btn",
+                        onclick: move |_| {
+                            let mut state = state.clone();
+                            let mut toast = toast.clone();
+                            spawn(async move {
+                                let Some(path) = api::open_xml_file_dialog().await else {
+                                    return;
+                                };
+                                state.set(ImportState::Previewing);
+                                match api::preview_starparse_import(&path).await {
+                                    Ok(preview) => state.set(ImportState::Ready(path, preview)),
+                                    Err(e) => {
+                                        toast.show(format!("Failed to parse XML: {}", e), ToastSeverity::Normal);
+                                        state.set(ImportState::Error(e));
+                                    }
+                                }
+                            });
+                        },
+                        "Import StarParse XML..."
+                    }
+                },
+                ImportState::Previewing => rsx! {
+                    p { class: "hint", "Parsing XML..." }
+                },
+                ImportState::Ready(ref path, ref preview) => {
+                    let path = path.clone();
+                    let preview = preview.clone();
+                    rsx! {
+                        div { class: "import-preview",
+                            if preview.encounter_timers > 0 {
+                                p {
+                                    strong { "{preview.encounter_timers}" }
+                                    " encounter timers across "
+                                    strong { "{preview.operations.len()}" }
+                                    " operations"
+                                }
+                            }
+                            if preview.effect_timers > 0 {
+                                p {
+                                    strong { "{preview.effect_timers}" }
+                                    " personal effects"
+                                }
+                            }
+                            if preview.skipped_builtin > 0 {
+                                p { class: "hint",
+                                    "{preview.skipped_builtin} built-in timers skipped"
+                                }
+                            }
+                            if preview.skipped_unsupported_effects > 0 {
+                                p { class: "hint hint-warning",
+                                    "{preview.skipped_unsupported_effects} personal timers skipped (non-effect triggers not supported)"
+                                }
+                            }
+                            if !preview.unmapped_bosses.is_empty() {
+                                p { class: "hint hint-warning",
+                                    "Unmapped bosses: {preview.unmapped_bosses.join(\", \")}"
+                                }
+                            }
+                            div { class: "button-row",
+                                button {
+                                    class: "btn btn-primary",
+                                    onclick: move |_| {
+                                        let path = path.clone();
+                                        let mut state = state.clone();
+                                        let mut toast = toast.clone();
+                                        spawn(async move {
+                                            state.set(ImportState::Importing);
+                                            match api::import_starparse_timers(&path).await {
+                                                Ok(result) => {
+                                                    toast.show(
+                                                        format!(
+                                                            "Imported {} encounter timers and {} effects",
+                                                            result.encounter_timers_imported,
+                                                            result.effects_imported,
+                                                        ),
+                                                        ToastSeverity::Normal,
+                                                    );
+                                                    state.set(ImportState::Done(result));
+                                                }
+                                                Err(e) => {
+                                                    toast.show(format!("Import failed: {}", e), ToastSeverity::Normal);
+                                                    state.set(ImportState::Error(e));
+                                                }
+                                            }
+                                        });
+                                    },
+                                    "Confirm Import"
+                                }
+                                button {
+                                    class: "btn",
+                                    onclick: move |_| state.set(ImportState::Idle),
+                                    "Cancel"
+                                }
+                            }
+                        }
+                    }
+                },
+                ImportState::Importing => rsx! {
+                    p { class: "hint", "Importing..." }
+                },
+                ImportState::Done(ref result) => rsx! {
+                    p { class: "hint",
+                        "Imported {result.encounter_timers_imported} encounter timers and {result.effects_imported} effects to {result.files_written} files"
+                    }
+                    button {
+                        class: "btn",
+                        onclick: move |_| state.set(ImportState::Idle),
+                        "Import Another"
+                    }
+                },
+            }
+        }
+    }
 }

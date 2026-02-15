@@ -29,8 +29,8 @@ use baras_core::{
 };
 use baras_overlay::{
     BossHealthData, ChallengeData, ChallengeEntry, Color, CooldownData, CooldownEntry, DotEntry,
-    DotTarget, DotTrackerData, EffectABEntry, EffectsABData, PersonalStats, PlayerContribution,
-    PlayerRole, RaidEffect, RaidFrame, RaidFrameData, TimerData, TimerEntry,
+    DotTarget, DotTrackerData, EffectABEntry, EffectsABData, NotesData, PersonalStats,
+    PlayerContribution, PlayerRole, RaidEffect, RaidFrame, RaidFrameData, TimerData, TimerEntry,
 };
 
 use crate::audio::{AudioEvent, AudioSender, AudioService};
@@ -117,6 +117,10 @@ pub enum ServiceCommand {
     ResumeLiveTailing,
     /// Trigger immediate raid frame data refresh (after registry changes)
     RefreshRaidFrames,
+    /// Send specific boss notes to the overlay
+    SendNotesToOverlay(NotesData),
+    /// Reload area definitions for a new area (triggers notes update)
+    ReloadAreaDefinitions(i64),
 }
 
 /// Updates sent to the overlay system
@@ -144,6 +148,8 @@ pub enum OverlayUpdate {
     CooldownsUpdated(CooldownData),
     /// DOTs on enemy targets
     DotTrackerUpdated(DotTrackerData),
+    /// Encounter notes (sent when entering an area with boss definitions)
+    NotesUpdated(NotesData),
     /// Clear all overlay data (sent when switching files)
     ClearAllData,
     /// Local player entered conversation - temporarily hide overlays
@@ -181,6 +187,8 @@ struct CombatSignalHandler {
     session_event_tx: std::sync::mpsc::Sender<SessionEvent>,
     /// Channel for overlay updates (to clear overlays on combat end)
     overlay_tx: mpsc::Sender<OverlayUpdate>,
+    /// Channel for service commands (to reload area definitions on area change)
+    cmd_tx: mpsc::Sender<ServiceCommand>,
     /// Local player entity ID (set on first DisciplineChanged)
     local_player_id: Option<i64>,
 }
@@ -191,12 +199,14 @@ impl CombatSignalHandler {
         trigger_tx: mpsc::Sender<MetricsTrigger>,
         session_event_tx: std::sync::mpsc::Sender<SessionEvent>,
         overlay_tx: mpsc::Sender<OverlayUpdate>,
+        cmd_tx: mpsc::Sender<ServiceCommand>,
     ) -> Self {
         Self {
             shared,
             trigger_tx,
             session_event_tx,
             overlay_tx,
+            cmd_tx,
             local_player_id: None,
         }
     }
@@ -264,11 +274,33 @@ impl SignalHandler for CombatSignalHandler {
             GameSignal::AreaEntered { area_id, .. } => {
                 // Note: Boss definitions are loaded synchronously in process_event via definition_loader
                 let current = self.shared.current_area_id.load(Ordering::SeqCst);
-                if *area_id != current && *area_id != 0 {
+                if *area_id != current {
                     self.shared
                         .current_area_id
                         .store(*area_id, Ordering::SeqCst);
                     let _ = self.session_event_tx.send(SessionEvent::AreaChanged);
+                    // Trigger area definition reload (will send notes or clear them)
+                    let _ = self.cmd_tx.try_send(ServiceCommand::ReloadAreaDefinitions(*area_id));
+                }
+            }
+            GameSignal::BossEncounterDetected {
+                definition_idx,
+                boss_name,
+                ..
+            } => {
+                // Send notes for this specific boss to the overlay
+                if let Some(enc) = _encounter {
+                    if let Some(def) = enc.boss_definitions().get(*definition_idx) {
+                        if let Some(notes) = &def.notes {
+                            if !notes.is_empty() {
+                                let notes_data = NotesData {
+                                    text: notes.clone(),
+                                    boss_name: boss_name.clone(),
+                                };
+                                let _ = self.overlay_tx.try_send(OverlayUpdate::NotesUpdated(notes_data));
+                            }
+                        }
+                    }
                 }
             }
             _ => {}
@@ -359,6 +391,9 @@ impl CombatService {
         // Initialize icon cache for ability icons
         let icon_cache = Self::init_icon_cache(&app_handle);
 
+        // Clone area_index before moving it into the service (needed for background indexer)
+        let area_index_for_scanner = area_index.clone();
+
         let service = Self {
             app_handle: app_handle.clone(),
             shared: shared.clone(),
@@ -377,7 +412,10 @@ impl CombatService {
             pending_file: None,
         };
 
-        let handle = ServiceHandle { cmd_tx, shared, app_handle };
+        let handle = ServiceHandle { cmd_tx, shared: shared.clone(), app_handle: app_handle.clone() };
+
+        // Spawn background area indexer to populate file area cache
+        Self::spawn_area_indexer(shared, area_index_for_scanner, app_handle);
 
         (service, handle)
     }
@@ -422,6 +460,152 @@ impl CombatService {
         }
 
         index
+    }
+
+    /// Spawn a background task to index areas in log files.
+    /// This scans files that aren't already in the cache (except the newest file).
+    /// Runs silently in background without blocking normal app operations.
+    fn spawn_area_indexer(
+        shared: Arc<SharedState>,
+        area_index: Arc<baras_core::boss::AreaIndex>,
+        app_handle: AppHandle,
+    ) {
+        use baras_core::context::{
+            FileAreaIndex, LogAreaCache, default_cache_path, extract_areas_from_file,
+        };
+        use std::collections::HashSet;
+
+        tauri::async_runtime::spawn(async move {
+            // Small delay to let app finish initializing - don't block startup
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+            // Load existing cache from disk
+            let cache_path = match default_cache_path() {
+                Some(p) => p,
+                None => {
+                    warn!("Could not determine area cache path");
+                    return;
+                }
+            };
+
+            let mut cache = LogAreaCache::load_from_disk(&cache_path);
+            debug!(
+                cached_files = cache.len(),
+                "Loaded area cache from disk"
+            );
+
+            // Update shared state with loaded cache (brief write lock)
+            // Don't prune here - stale entries are harmless and pruning is slow
+            {
+                let mut area_cache = shared.area_cache.write().await;
+                *area_cache = cache.clone();
+            }
+            // Don't emit event here - let frontend use its initial load
+
+            // Get known area IDs from boss definitions
+            let known_area_ids: HashSet<i64> = area_index.keys().copied().collect();
+            if known_area_ids.is_empty() {
+                debug!("No area definitions found, skipping area indexing");
+                return;
+            }
+
+            // Collect file paths to scan quickly, then release lock
+            let files_to_scan: Vec<(PathBuf, std::time::SystemTime)> = {
+                let index = shared.directory_index.read().await;
+                let newest_path = index.newest_file().map(|f| f.path.clone());
+                index
+                    .entries()
+                    .iter()
+                    .filter_map(|e| {
+                        // Skip empty files
+                        if e.is_empty {
+                            return None;
+                        }
+                        // Skip the newest file (it's being actively written)
+                        if Some(&e.path) == newest_path.as_ref() {
+                            return None;
+                        }
+                        // Get modification time
+                        let modified = std::fs::metadata(&e.path)
+                            .and_then(|m| m.modified())
+                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                        // Check if needs update
+                        if cache.needs_update(&e.path, modified) {
+                            Some((e.path.clone(), modified))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            };
+            // Lock released here
+
+            if files_to_scan.is_empty() {
+                debug!("All files already indexed, nothing to scan");
+                return;
+            }
+
+            debug!(
+                files_to_scan = files_to_scan.len(),
+                "Starting background area indexing"
+            );
+
+            // Scan files without holding any locks
+            let mut scanned = 0;
+            for (path, modified) in files_to_scan {
+                let modified_secs = modified
+                    .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+
+                match extract_areas_from_file(&path, &known_area_ids) {
+                    Ok(areas) => {
+                        cache.insert(
+                            path.clone(),
+                            FileAreaIndex {
+                                modified_secs,
+                                areas,
+                            },
+                        );
+                        scanned += 1;
+                    }
+                    Err(e) => {
+                        debug!(path = %path.display(), error = %e, "Failed to extract areas from file");
+                    }
+                }
+
+                // Yield periodically to avoid starving other tasks
+                if scanned % 10 == 0 {
+                    tokio::task::yield_now().await;
+                }
+            }
+
+            // Prune entries for deleted files (lazy cleanup)
+            let cache_size_before = cache.len();
+            cache.prune_missing();
+            let pruned = cache_size_before - cache.len();
+            if pruned > 0 {
+                debug!(pruned, "Pruned stale entries from area cache");
+            }
+
+            // Save updated cache and notify frontend if anything changed
+            if scanned > 0 || pruned > 0 {
+                // Brief write lock to update shared state
+                {
+                    let mut area_cache = shared.area_cache.write().await;
+                    *area_cache = cache.clone();
+                }
+
+                if let Err(e) = cache.save_to_disk(&cache_path) {
+                    warn!(error = %e, "Failed to save area cache to disk");
+                } else {
+                    info!(scanned, pruned, "Area indexing complete, cache saved");
+                }
+
+                // Notify frontend that area data is now available
+                let _ = app_handle.emit("log-files-changed", ());
+            }
+        });
     }
 
     /// Load boss definitions for a specific area, merging with custom overlays
@@ -625,6 +809,27 @@ impl CombatService {
 
     /// Run the service event loop
     pub async fn run(mut self) {
+        // Auto-cleanup log files on startup based on user settings
+        {
+            let config = self.shared.config.read().await;
+            let delete_empty = config.auto_delete_empty_files;
+            let delete_small = config.auto_delete_small_files;
+            let retention = if config.auto_delete_old_files {
+                Some(config.log_retention_days)
+            } else {
+                None
+            };
+            drop(config);
+
+            if delete_empty || delete_small || retention.is_some() {
+                let mut index = self.shared.directory_index.write().await;
+                let (empty, small, old) = index.cleanup(delete_empty, delete_small, retention);
+                if empty > 0 || small > 0 || old > 0 {
+                    tracing::info!(empty_deleted = empty, small_deleted = small, old_deleted = old, "Startup log cleanup");
+                }
+            }
+        }
+
         self.start_watcher().await;
 
         loop {
@@ -699,6 +904,29 @@ impl CombatService {
                         .overlay_tx
                         .try_send(OverlayUpdate::EffectsUpdated(data));
                 }
+                ServiceCommand::SendNotesToOverlay(notes_data) => {
+                    // Send specific boss notes to the overlay
+                    let _ = self.overlay_tx.try_send(OverlayUpdate::NotesUpdated(notes_data));
+                }
+                ServiceCommand::ReloadAreaDefinitions(area_id) => {
+                    // Reload definitions for the new area and update notes overlay
+                    if area_id == 0 {
+                        // Left raid area (fleet, etc.) - clear notes
+                        let _ = self.overlay_tx.try_send(OverlayUpdate::NotesUpdated(NotesData::default()));
+                    } else if let Some(bosses) = self.load_area_definitions(area_id) {
+                        // Send notes from new area's boss definitions
+                        self.send_notes_from_bosses(&bosses);
+                        // Also load definitions into the session
+                        let session_guard = self.shared.session.read().await;
+                        if let Some(session) = session_guard.as_ref() {
+                            let mut session = session.write().await;
+                            session.load_boss_definitions(bosses);
+                        }
+                    } else {
+                        // No definitions for this area - clear notes
+                        let _ = self.overlay_tx.try_send(OverlayUpdate::NotesUpdated(NotesData::default()));
+                    }
+                }
             }
         }
     }
@@ -713,18 +941,63 @@ impl CombatService {
         }
     }
 
-    /// Reload timer and boss definitions from disk and update the active session
+    /// Reload timer and boss definitions from disk and update the active session.
+    /// Invalidates the timer cache first to ensure definitions actually reload.
     async fn reload_timer_definitions(&mut self) {
         self.area_index = Arc::new(Self::build_area_index(&self.app_handle));
 
         let current_area = self.shared.current_area_id.load(Ordering::SeqCst);
-        if current_area != 0
-            && let Some(bosses) = self.load_area_definitions(current_area)
-            && let Some(session) = self.shared.session.read().await.as_ref()
-        {
-            let mut session = session.write().await;
-            session.load_boss_definitions(bosses);
+        if current_area == 0 {
+            return;
         }
+        
+        let Some(bosses) = self.load_area_definitions(current_area) else {
+            return;
+        };
+        
+        // Send notes from boss definitions to overlay (first boss with notes)
+        self.send_notes_from_bosses(&bosses);
+        
+        let session_guard = self.shared.session.read().await;
+        let Some(session) = session_guard.as_ref() else {
+            return;
+        };
+        
+        let mut session = session.write().await;
+        // Invalidate timer cache to ensure definitions actually reload
+        // (bypasses fingerprint optimization for user-triggered reloads)
+        if let Some(timer_mgr) = session.timer_manager() {
+            if let Ok(mut mgr) = timer_mgr.lock() {
+                mgr.invalidate_definitions_cache();
+            }
+        }
+        session.load_boss_definitions(bosses);
+    }
+
+    /// Send notes from boss definitions to the notes overlay (only in live mode)
+    fn send_notes_from_bosses(&self, bosses: &[BossEncounterDefinition]) {
+        // Only send notes in live tailing mode (not for historical files)
+        if !self.shared.is_live_tailing.load(Ordering::SeqCst) {
+            return;
+        }
+        
+        // Find the first boss with notes (or aggregate all notes)
+        // For now, send notes from first boss that has them
+        for boss in bosses {
+            if let Some(notes) = &boss.notes {
+                if !notes.is_empty() {
+                    let notes_data = NotesData {
+                        text: notes.clone(),
+                        boss_name: boss.name.clone(),
+                    };
+                    let _ = self.overlay_tx.try_send(OverlayUpdate::NotesUpdated(notes_data));
+                    return;
+                }
+            }
+        }
+        
+        // No notes found - send empty to clear the overlay
+        let _ = self.overlay_tx.try_send(OverlayUpdate::NotesUpdated(NotesData::default()));
     }
 
     async fn on_directory_changed(&mut self) {
@@ -750,6 +1023,14 @@ impl CombatService {
             let mut index = self.shared.directory_index.write().await;
             index.add_file(&path);
         }
+
+        // Trigger area indexer to scan any files that aren't indexed yet
+        // (the previous "newest" file is now complete and should be indexed)
+        Self::spawn_area_indexer(
+            self.shared.clone(),
+            self.area_index.clone(),
+            self.app_handle.clone(),
+        );
 
         // Notify frontend that file list changed
         let _ = self.app_handle.emit("log-files-changed", ());
@@ -1003,6 +1284,7 @@ impl CombatService {
             trigger_tx.clone(),
             session_event_tx.clone(),
             self.overlay_tx.clone(),
+            self.cmd_tx.clone(),
         );
         session.add_signal_handler(Box::new(handler));
 
@@ -1134,6 +1416,11 @@ impl CombatService {
                                 generation = generation_count,
                                 "Imported state from subprocess"
                             );
+                            
+                            // Sync current_area_id from subprocess so timer definition reloads work
+                            if parse_result.area.area_id != 0 {
+                                self.shared.current_area_id.store(parse_result.area.area_id, Ordering::SeqCst);
+                            }
 
                             // Check if there's an incomplete encounter (parquet file exists but no summary)
                             // If so, we'll continue with that encounter ID instead of creating a new one
@@ -1191,6 +1478,8 @@ impl CombatService {
                         // Load boss definitions for initial area (before releasing lock)
                         if parse_result.area.area_id != 0 {
                             if let Some(bosses) = self.load_area_definitions(parse_result.area.area_id) {
+                                // Send notes to overlay
+                                self.send_notes_from_bosses(&bosses);
                                 session_guard.load_boss_definitions(bosses);
                             }
                         }
@@ -1342,7 +1631,7 @@ impl CombatService {
                 if matches!(trigger, MetricsTrigger::CombatStarted) {
                     // Poll during active combat
                     while shared.in_combat.load(Ordering::SeqCst) {
-                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
                         if let Some(data) = calculate_combat_data(&shared).await
                             && !data.metrics.is_empty()
@@ -1739,7 +2028,10 @@ async fn calculate_combat_data(shared: &Arc<SharedState>) -> Option<CombatData> 
                     .map(|def| def.name.clone())
             });
             let overall_duration = encounter.combat_time_secs.max(1.0);
-            let current_time = chrono::Local::now().naive_local();
+            // Use exit time when in PostCombat (grace window) so duration doesn't keep ticking
+            let current_time = encounter
+                .exit_combat_time
+                .unwrap_or_else(|| chrono::Local::now().naive_local());
 
             let entries: Vec<ChallengeEntry> = encounter
                 .challenge_tracker
@@ -2491,14 +2783,29 @@ async fn build_dot_tracker_data(
 // DTOs for Tauri IPC
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Area visit info for display in file browser
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AreaVisitInfo {
+    /// Display string: "AreaName Difficulty" (e.g., "Dxun NiM 8")
+    pub display: String,
+    /// Raw area name
+    pub area_name: String,
+    /// Difficulty string (may be empty)
+    pub difficulty: String,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct LogFileInfo {
     pub path: PathBuf,
     pub display_name: String,
     pub character_name: Option<String>,
     pub date: String,
+    /// Day of week (e.g., "Sunday")
+    pub day_of_week: String,
     pub is_empty: bool,
     pub file_size: u64,
+    /// Areas/operations visited in this file (None if not yet indexed)
+    pub areas: Option<Vec<AreaVisitInfo>>,
 }
 
 /// Unified combat data for metric overlays

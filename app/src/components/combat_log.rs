@@ -53,6 +53,9 @@ pub struct CombatLogProps {
     pub initial_search: Option<String>,
     /// Persisted state signal (survives tab switches, includes show_ids!)
     pub state: Signal<CombatLogSessionState>,
+    /// Optional callback to update the parent's time range (e.g. from context menu)
+    #[props(default)]
+    pub on_range_change: Option<EventHandler<TimeRange>>,
 }
 
 /// Format time as M:SS.dd (relative to combat start)
@@ -250,6 +253,10 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
     let mut find_matches = use_signal(Vec::<CombatLogFindMatch>::new);
     let mut find_current_idx = use_signal(|| 0usize);
     let mut highlighted_row = use_signal(|| None::<u64>);
+
+    // Context menu state for right-click "Set as range start/end"
+    let mut context_menu_pos = use_signal(|| None::<(f64, f64)>);
+    let mut context_menu_time = use_signal(|| 0.0f32);
 
     // Data state
     let mut rows = use_signal(Vec::<CombatLogRow>::new);
@@ -663,7 +670,7 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                     if !sources_grouped.friendly.is_empty() {
                         optgroup { label: "Friendly",
                             option { value: "__ALL_FRIENDLY__", "All Friendly" }
-                            for name in sources_grouped.friendly.iter() {
+                            for name in sources_grouped.friendly.iter().filter(|n| !n.is_empty()) {
                                 option { value: "{name}", "{name}" }
                             }
                         }
@@ -671,7 +678,7 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                     if !sources_grouped.npcs.is_empty() {
                         optgroup { label: "NPCs",
                             option { value: "__ALL_NPCS__", "All NPCs" }
-                            for name in sources_grouped.npcs.iter() {
+                            for name in sources_grouped.npcs.iter().filter(|n| !n.is_empty()) {
                                 option { value: "{name}", "{name}" }
                             }
                         }
@@ -690,7 +697,7 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                     if !targets_grouped.friendly.is_empty() {
                         optgroup { label: "Friendly",
                             option { value: "__ALL_FRIENDLY__", "All Friendly" }
-                            for name in targets_grouped.friendly.iter() {
+                            for name in targets_grouped.friendly.iter().filter(|n| !n.is_empty()) {
                                 option { value: "{name}", "{name}" }
                             }
                         }
@@ -698,7 +705,7 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                     if !targets_grouped.npcs.is_empty() {
                         optgroup { label: "NPCs",
                             option { value: "__ALL_NPCS__", "All NPCs" }
-                            for name in targets_grouped.npcs.iter() {
+                            for name in targets_grouped.npcs.iter().filter(|n| !n.is_empty()) {
                                 option { value: "{name}", "{name}" }
                             }
                         }
@@ -712,6 +719,24 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                     placeholder: "Filter... (use OR)",
                     value: "{search_text}",
                     oninput: move |e| search_text.set(e.value()),
+                }
+
+                // Clear all filters button
+                button {
+                    class: "log-clear-filters",
+                    r#type: "button",
+                    title: "Reset all filters to defaults",
+                    onclick: move |_| {
+                        source_filter.set(None);
+                        target_filter.set(None);
+                        search_text.set(String::new());
+                        filter_damage.set(true);
+                        filter_healing.set(true);
+                        filter_actions.set(true);
+                        filter_effects.set(true);
+                        filter_other.set(true);
+                    },
+                    "Clear Filters"
                 }
 
                 // Find group (searches all data via backend)
@@ -1002,7 +1027,7 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                             resize_start_width.set(*col_target.read());
                         },
                     }
-                    div { class: "log-cell log-ability", style: "width: {col_ability}px; min-width: {col_ability}px;", "Ability" }
+                    div { class: "log-cell log-ability", style: "width: {col_ability}px; min-width: {col_ability}px;", "Ability/Effect" }
                     div {
                         class: "log-resize-handle",
                         onmousedown: move |e| {
@@ -1074,9 +1099,19 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                     div {
                         style: "position: absolute; top: {start_idx as f64 * ROW_HEIGHT}px; width: 100%;",
                         for row in visible_rows.iter() {
+                            {
+                            let row_time = row.time_secs;
+                            rsx! {
                             div {
                                 key: "{row.row_idx}",
                                 class: "{row_class(&row, highlighted_row_idx)}",
+                                oncontextmenu: move |e: MouseEvent| {
+                                    if props.on_range_change.is_some() {
+                                        e.prevent_default();
+                                        context_menu_pos.set(Some((e.client_coordinates().x, e.client_coordinates().y)));
+                                        context_menu_time.set(row_time);
+                                    }
+                                },
                                 div { class: "log-cell log-time", style: "width: {col_time}px; min-width: {col_time}px;",
                                     if absolute_time {
                                         "{format_time_absolute(row.timestamp_ms)}"
@@ -1103,13 +1138,30 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                                     if row.ability_id != 0 {
                                         AbilityIcon { key: "{row.ability_id}", ability_id: row.ability_id, size: 16 }
                                     }
-                                    if !row.ability_name.is_empty() {
-                                        "{row.ability_name}"
-                                    } else {
-                                        "{row.effect_name}"
-                                    }
-                                    if show_ids_val && row.ability_id != 0 {
-                                        span { class: "log-id-suffix", " [{row.ability_id}]" }
+                                    // For effect gained/lost events, show the effect name (the buff/debuff)
+                                    // For other events (damage, heal, activation), show the ability name
+                                    {
+                                        let is_effect_event = (row.effect_type_id == EFFECT_TYPE_APPLYEFFECT || row.effect_type_id == EFFECT_TYPE_REMOVEEFFECT)
+                                            && row.effect_id != EFFECT_DAMAGE && row.effect_id != EFFECT_HEAL
+                                            && !row.effect_name.is_empty();
+                                        let display_name = if is_effect_event {
+                                            row.effect_name.as_str()
+                                        } else if !row.ability_name.is_empty() {
+                                            row.ability_name.as_str()
+                                        } else {
+                                            row.effect_name.as_str()
+                                        };
+                                        let display_id = if is_effect_event {
+                                            row.effect_id
+                                        } else {
+                                            row.ability_id
+                                        };
+                                        rsx! {
+                                            "{display_name}"
+                                            if show_ids_val && display_id != 0 {
+                                                span { class: "log-id-suffix", " [{display_id}]" }
+                                            }
+                                        }
                                     }
                                 }
                                 div { class: "log-cell log-value", style: "width: {col_value}px; min-width: {col_value}px;",
@@ -1131,6 +1183,45 @@ pub fn CombatLog(props: CombatLogProps) -> Element {
                                     }
                                 }
                             }
+                            } // rsx!
+                            } // let row_time block
+                        }
+                    }
+                }
+            }
+
+            // Context menu for "Set as range start/end"
+            if let Some((x, y)) = *context_menu_pos.read() {
+                if props.on_range_change.is_some() {
+                    // Transparent backdrop for click-outside dismissal
+                    div {
+                        style: "position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 999;",
+                        onclick: move |_| context_menu_pos.set(None),
+                    }
+                    div {
+                        class: "log-context-menu",
+                        style: "position: fixed; left: {x}px; top: {y}px; z-index: 1000;",
+                        div {
+                            class: "context-menu-item",
+                            onclick: move |_| {
+                                let t = *context_menu_time.read();
+                                if let Some(ref handler) = props.on_range_change {
+                                    handler.call(TimeRange::new(t, props.time_range.end));
+                                }
+                                context_menu_pos.set(None);
+                            },
+                            "Set as range start"
+                        }
+                        div {
+                            class: "context-menu-item",
+                            onclick: move |_| {
+                                let t = *context_menu_time.read();
+                                if let Some(ref handler) = props.on_range_change {
+                                    handler.call(TimeRange::new(props.time_range.start, t));
+                                }
+                                context_menu_pos.set(None);
+                            },
+                            "Set as range end"
                         }
                     }
                 }

@@ -1670,6 +1670,16 @@ pub static FLASHPOINT_BOSS_DATA: &[(i64, BossInfo)] = &[
             is_kill_target: true,
         },
     ),
+    (
+        3279302019776512,
+        BossInfo {
+            content_type: ContentType::Flashpoint,
+            operation: "Czerka Corporate Labs",
+            boss: "Chief Zokar",
+            difficulty: Some(Difficulty::Master4),
+            is_kill_target: true,
+        },
+    ),
     // Rasmus Blys
     (
         3279306314743808,

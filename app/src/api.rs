@@ -22,6 +22,9 @@ extern "C" {
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "dialog"], js_name = "open")]
     pub async fn open_dialog(options: JsValue) -> JsValue;
 
+    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "dialog"], js_name = "save")]
+    pub async fn save_dialog(options: JsValue) -> JsValue;
+
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "app"], js_name = "getVersion")]
     pub async fn get_version() -> JsValue;
 }
@@ -221,6 +224,38 @@ pub async fn refresh_log_index() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Boss Notes Selection
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Boss info for notes selector
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct BossNotesInfo {
+    pub id: String,
+    pub name: String,
+    pub has_notes: bool,
+}
+
+/// Get list of bosses with notes status for the current area
+pub async fn get_area_bosses_for_notes() -> Vec<BossNotesInfo> {
+    let result = invoke("get_area_bosses_for_notes", JsValue::NULL).await;
+    from_js(result).unwrap_or_default()
+}
+
+/// Send notes for a specific boss to the overlay
+pub async fn select_boss_notes(boss_id: &str) -> Result<(), String> {
+    let args = js_sys::Object::new();
+    js_set(&args, "bossId", &JsValue::from_str(boss_id));
+    let result = invoke("select_boss_notes", args.into()).await;
+    if result.is_null() || result.is_undefined() {
+        Ok(())
+    } else if let Some(err) = result.as_string() {
+        Err(err)
+    } else {
+        Ok(())
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Log Management Commands
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -241,17 +276,18 @@ pub async fn get_log_files() -> JsValue {
     invoke("get_log_files", JsValue::NULL).await
 }
 
-/// Clean up log files. Returns (empty_deleted, old_deleted).
-pub async fn cleanup_logs(delete_empty: bool, retention_days: Option<u32>) -> (u32, u32) {
+/// Clean up log files. Returns (empty_deleted, small_deleted, old_deleted).
+pub async fn cleanup_logs(delete_empty: bool, delete_small: bool, retention_days: Option<u32>) -> (u32, u32, u32) {
     let args = js_sys::Object::new();
     js_set(&args, "deleteEmpty", &JsValue::from_bool(delete_empty));
+    js_set(&args, "deleteSmall", &JsValue::from_bool(delete_small));
     if let Some(days) = retention_days {
         js_set(&args, "retentionDays", &JsValue::from_f64(days as f64));
     } else {
         js_set(&args, "retentionDays", &JsValue::NULL);
     }
     let result = invoke("cleanup_logs", args.into()).await;
-    from_js(result).unwrap_or((0, 0))
+    from_js(result).unwrap_or((0, 0, 0))
 }
 
 /// Refresh file sizes in the directory index (fast stat-only)
@@ -473,6 +509,125 @@ pub async fn create_area(area: &NewAreaRequest) -> Result<String, String> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Encounter Export/Import
+// ─────────────────────────────────────────────────────────────────────────────
+
+use crate::types::{ExportResult, ImportPreview};
+
+/// Export encounter definition(s) — returns TOML content and whether source is bundled
+pub async fn export_encounter_toml(
+    boss_id: Option<&str>,
+    file_path: &str,
+) -> Result<ExportResult, String> {
+    let obj = js_sys::Object::new();
+    match boss_id {
+        Some(id) => js_set(&obj, "bossId", &JsValue::from_str(id)),
+        None => js_set(&obj, "bossId", &JsValue::NULL),
+    }
+    js_set(&obj, "filePath", &JsValue::from_str(file_path));
+    let result = try_invoke("export_encounter_toml", obj.into()).await?;
+    from_js(result).ok_or_else(|| "Failed to parse export result".to_string())
+}
+
+/// Save exported content to a file path
+pub async fn save_export_file(path: &str, content: &str) -> Result<(), String> {
+    let obj = js_sys::Object::new();
+    js_set(&obj, "path", &JsValue::from_str(path));
+    js_set(&obj, "content", &JsValue::from_str(content));
+    try_invoke("save_export_file", obj.into()).await?;
+    Ok(())
+}
+
+/// Preview an import (parse + diff against target area)
+pub async fn preview_import_encounter(
+    toml_content: &str,
+    target_file_path: Option<&str>,
+) -> Result<ImportPreview, String> {
+    let obj = js_sys::Object::new();
+    js_set(&obj, "tomlContent", &JsValue::from_str(toml_content));
+    match target_file_path {
+        Some(p) => js_set(&obj, "targetFilePath", &JsValue::from_str(p)),
+        None => js_set(&obj, "targetFilePath", &JsValue::NULL),
+    }
+    let result = try_invoke("preview_import_encounter", obj.into()).await?;
+    from_js(result).ok_or_else(|| "Failed to parse import preview".to_string())
+}
+
+/// Execute an import (merge into target area)
+pub async fn import_encounter_toml(
+    toml_content: &str,
+    target_file_path: Option<&str>,
+) -> Result<(), String> {
+    let obj = js_sys::Object::new();
+    js_set(&obj, "tomlContent", &JsValue::from_str(toml_content));
+    match target_file_path {
+        Some(p) => js_set(&obj, "targetFilePath", &JsValue::from_str(p)),
+        None => js_set(&obj, "targetFilePath", &JsValue::NULL),
+    }
+    try_invoke("import_encounter_toml", obj.into()).await?;
+    Ok(())
+}
+
+/// Open a native save dialog, returns the selected file path or None
+pub async fn save_file_dialog(default_name: &str) -> Option<String> {
+    let options = js_sys::Object::new();
+    js_set(&options, "defaultPath", &JsValue::from_str(default_name));
+
+    // Add .toml filter
+    let filter = js_sys::Object::new();
+    js_set(&filter, "name", &JsValue::from_str("TOML files"));
+    let exts = js_sys::Array::new();
+    exts.push(&JsValue::from_str("toml"));
+    js_set(&filter, "extensions", &exts);
+    let filters = js_sys::Array::new();
+    filters.push(&filter);
+    js_set(&options, "filters", &filters);
+
+    let result = save_dialog(options.into()).await;
+    result.as_string()
+}
+
+/// Open a native file dialog for .toml files, returns the file path or None
+pub async fn open_toml_file_dialog() -> Option<String> {
+    let options = js_sys::Object::new();
+
+    let filter = js_sys::Object::new();
+    js_set(&filter, "name", &JsValue::from_str("TOML files"));
+    let exts = js_sys::Array::new();
+    exts.push(&JsValue::from_str("toml"));
+    js_set(&filter, "extensions", &exts);
+    let filters = js_sys::Array::new();
+    filters.push(&filter);
+    js_set(&options, "filters", &filters);
+
+    let result = open_dialog(options.into()).await;
+    result.as_string()
+}
+
+/// Read a file's text content via backend
+pub async fn read_import_file(path: &str) -> Result<String, String> {
+    let result = try_invoke("read_import_file", build_args("path", &path)).await?;
+    result.as_string().ok_or_else(|| "Failed to read file".to_string())
+}
+
+/// Update boss notes
+pub async fn update_boss_notes(
+    boss_id: &str,
+    file_path: &str,
+    notes: Option<String>,
+) -> Result<(), String> {
+    let obj = js_sys::Object::new();
+    js_set(&obj, "bossId", &JsValue::from_str(boss_id));
+    js_set(&obj, "filePath", &JsValue::from_str(file_path));
+    match notes {
+        Some(ref n) => js_set(&obj, "notes", &JsValue::from_str(n)),
+        None => js_set(&obj, "notes", &JsValue::NULL),
+    }
+    try_invoke("update_boss_notes", obj.into()).await?;
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Effect Editor Commands
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -513,6 +668,75 @@ pub async fn create_effect_definition(effect: &EffectListItem) -> Result<EffectL
     let args = build_args("effect", effect);
     let result = try_invoke("create_effect_definition", args).await?;
     from_js(result).ok_or_else(|| "Failed to deserialize created effect".to_string())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Effect Export/Import
+// ─────────────────────────────────────────────────────────────────────────────
+
+use crate::types::EffectImportPreview;
+
+/// Export user effect overrides as TOML string
+pub async fn export_effects_toml() -> Result<String, String> {
+    let result = try_invoke("export_effects_toml", JsValue::NULL).await?;
+    result
+        .as_string()
+        .ok_or_else(|| "Failed to get export content".to_string())
+}
+
+/// Preview effects import — parse TOML and diff against existing
+pub async fn preview_import_effects(toml_content: &str) -> Result<EffectImportPreview, String> {
+    let result = try_invoke(
+        "preview_import_effects",
+        build_args("tomlContent", &toml_content),
+    )
+    .await?;
+    from_js(result).ok_or_else(|| "Failed to parse import preview".to_string())
+}
+
+/// Import effects from TOML content, merging into user file
+pub async fn import_effects_toml(toml_content: &str) -> Result<(), String> {
+    try_invoke(
+        "import_effects_toml",
+        build_args("tomlContent", &toml_content),
+    )
+    .await?;
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StarParse Import
+// ─────────────────────────────────────────────────────────────────────────────
+
+use crate::types::{StarParseImportResult, StarParsePreview};
+
+/// Open a native file dialog for .xml files (StarParse export)
+pub async fn open_xml_file_dialog() -> Option<String> {
+    let options = js_sys::Object::new();
+
+    let filter = js_sys::Object::new();
+    js_set(&filter, "name", &JsValue::from_str("XML files"));
+    let exts = js_sys::Array::new();
+    exts.push(&JsValue::from_str("xml"));
+    js_set(&filter, "extensions", &exts);
+    let filters = js_sys::Array::new();
+    filters.push(&filter);
+    js_set(&options, "filters", &filters);
+
+    let result = open_dialog(options.into()).await;
+    result.as_string()
+}
+
+/// Preview a StarParse XML import (parse + count timers/effects)
+pub async fn preview_starparse_import(path: &str) -> Result<StarParsePreview, String> {
+    let result = try_invoke("preview_starparse_import", build_args("path", &path)).await?;
+    from_js(result).ok_or_else(|| "Failed to parse preview".to_string())
+}
+
+/// Import StarParse timers and effects from XML file
+pub async fn import_starparse_timers(path: &str) -> Result<StarParseImportResult, String> {
+    let result = try_invoke("import_starparse_timers", build_args("path", &path)).await?;
+    from_js(result).ok_or_else(|| "Failed to parse import result".to_string())
 }
 
 /// Get icon preview as base64 data URL for an ability ID.
@@ -595,6 +819,12 @@ pub async fn set_encounter_parsely_link(encounter_id: u64, link: &str) -> Result
 // Audio File Picker
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// List available sound files from bundled and user directories
+pub async fn list_sound_files() -> Vec<String> {
+    let result = invoke("list_sound_files", JsValue::NULL).await;
+    from_js(result).unwrap_or_default()
+}
+
 /// Open a file picker for audio files, returns the selected path or None
 pub async fn pick_audio_file() -> Option<String> {
     let result = invoke("pick_audio_file", JsValue::NULL).await;
@@ -624,9 +854,10 @@ pub async fn install_update() -> Result<(), String> {
 
 // Re-export query types from shared types crate
 pub use baras_types::{
-    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow, DataTab,
-    EffectChartData, EffectWindow, EncounterTimeline, EntityBreakdown, GroupedEntityNames,
-    PhaseSegment, PlayerDeath, RaidOverviewRow, TimeRange, TimeSeriesPoint,
+    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow,
+    DamageTakenSummary, DataTab, EffectChartData, EffectWindow, EncounterTimeline,
+    EntityBreakdown, GcdSlot, GroupedEntityNames, HpPoint, PhaseSegment, PlayerDeath,
+    RaidOverviewRow, RotationAnalysis, RotationCycle, RotationEvent, TimeRange, TimeSeriesPoint,
 };
 
 /// Query ability breakdown for an encounter and data tab.
@@ -804,6 +1035,35 @@ pub async fn query_hps_over_time(
     from_js(result)
 }
 
+/// Query EHPS (effective healing) over time with specified bucket size.
+pub async fn query_ehps_over_time(
+    encounter_idx: Option<u32>,
+    bucket_ms: i64,
+    source_name: Option<&str>,
+    time_range: Option<&TimeRange>,
+) -> Option<Vec<TimeSeriesPoint>> {
+    let obj = js_sys::Object::new();
+    if let Some(idx) = encounter_idx {
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
+    } else {
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
+    }
+    js_set(&obj, "bucketMs", &JsValue::from_f64(bucket_ms as f64));
+    if let Some(name) = source_name {
+        js_set(&obj, "sourceName", &JsValue::from_str(name));
+    } else {
+        js_set(&obj, "sourceName", &JsValue::NULL);
+    }
+    if let Some(tr) = time_range {
+        let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
+        js_set(&obj, "timeRange", &tr_js);
+    } else {
+        js_set(&obj, "timeRange", &JsValue::NULL);
+    }
+    let result = invoke("query_ehps_over_time", obj.into()).await;
+    from_js(result)
+}
+
 /// Query DTPS over time with specified bucket size.
 pub async fn query_dtps_over_time(
     encounter_idx: Option<u32>,
@@ -830,6 +1090,35 @@ pub async fn query_dtps_over_time(
         js_set(&obj, "timeRange", &JsValue::NULL);
     }
     let result = invoke("query_dtps_over_time", obj.into()).await;
+    from_js(result)
+}
+
+/// Query HP% over time with specified bucket size.
+pub async fn query_hp_over_time(
+    encounter_idx: Option<u32>,
+    bucket_ms: i64,
+    target_name: Option<&str>,
+    time_range: Option<&TimeRange>,
+) -> Option<Vec<HpPoint>> {
+    let obj = js_sys::Object::new();
+    if let Some(idx) = encounter_idx {
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
+    } else {
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
+    }
+    js_set(&obj, "bucketMs", &JsValue::from_f64(bucket_ms as f64));
+    if let Some(name) = target_name {
+        js_set(&obj, "targetName", &JsValue::from_str(name));
+    } else {
+        js_set(&obj, "targetName", &JsValue::NULL);
+    }
+    if let Some(tr) = time_range {
+        let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
+        js_set(&obj, "timeRange", &tr_js);
+    } else {
+        js_set(&obj, "timeRange", &JsValue::NULL);
+    }
+    let result = invoke("query_hp_over_time", obj.into()).await;
     from_js(result)
 }
 
@@ -1072,6 +1361,65 @@ pub async fn query_player_deaths(encounter_idx: Option<u32>) -> Option<Vec<Playe
         js_set(&obj, "encounterIdx", &JsValue::NULL);
     }
     let result = invoke("query_player_deaths", obj.into()).await;
+    from_js(result)
+}
+
+/// Query damage taken summary (damage type breakdown + mitigation stats).
+pub async fn query_damage_taken_summary(
+    encounter_idx: Option<u32>,
+    entity_name: &str,
+    time_range: Option<&TimeRange>,
+    entity_types: Option<&[&str]>,
+) -> Option<DamageTakenSummary> {
+    let obj = js_sys::Object::new();
+    if let Some(idx) = encounter_idx {
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
+    } else {
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
+    }
+    js_set(&obj, "entityName", &JsValue::from_str(entity_name));
+    if let Some(tr) = time_range {
+        let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
+        js_set(&obj, "timeRange", &tr_js);
+    } else {
+        js_set(&obj, "timeRange", &JsValue::NULL);
+    }
+    if let Some(types) = entity_types {
+        let types_js = serde_wasm_bindgen::to_value(types).unwrap_or(JsValue::NULL);
+        js_set(&obj, "entityTypes", &types_js);
+    } else {
+        js_set(&obj, "entityTypes", &JsValue::NULL);
+    }
+    let result = invoke("query_damage_taken_summary", obj.into()).await;
+    from_js(result)
+}
+
+/// Query rotation analysis for a player in an encounter.
+pub async fn query_rotation(
+    encounter_idx: Option<u32>,
+    source_name: &str,
+    anchor_ability_id: i64,
+    time_range: Option<&TimeRange>,
+) -> Option<RotationAnalysis> {
+    let obj = js_sys::Object::new();
+    if let Some(idx) = encounter_idx {
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
+    } else {
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
+    }
+    js_set(&obj, "sourceName", &JsValue::from_str(source_name));
+    js_set(
+        &obj,
+        "anchorAbilityId",
+        &JsValue::from_f64(anchor_ability_id as f64),
+    );
+    if let Some(tr) = time_range {
+        let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
+        js_set(&obj, "timeRange", &tr_js);
+    } else {
+        js_set(&obj, "timeRange", &JsValue::NULL);
+    }
+    let result = invoke("query_rotation", obj.into()).await;
     from_js(result)
 }
 

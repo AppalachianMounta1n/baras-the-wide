@@ -45,9 +45,10 @@ pub async fn get_log_file_count(handle: State<'_, ServiceHandle>) -> Result<usiz
 pub async fn cleanup_logs(
     handle: State<'_, ServiceHandle>,
     delete_empty: bool,
+    delete_small: bool,
     retention_days: Option<u32>,
-) -> Result<(u32, u32), String> {
-    Ok(handle.cleanup_logs(delete_empty, retention_days).await)
+) -> Result<(u32, u32, u32), String> {
+    Ok(handle.cleanup_logs(delete_empty, delete_small, retention_days).await)
 }
 
 #[tauri::command]
@@ -106,6 +107,54 @@ pub async fn resume_live_tailing(handle: State<'_, ServiceHandle>) -> Result<(),
 pub fn is_live_tailing(handle: State<'_, ServiceHandle>) -> Result<bool, String> {
     Ok(handle.is_live_tailing())
 }
+/// List available sound files from both bundled and user directories
+#[tauri::command]
+pub async fn list_sound_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    use std::collections::BTreeSet;
+    use tauri::Manager;
+
+    let mut files = BTreeSet::new();
+
+    // Bundled sounds dir
+    let bundled = app
+        .path()
+        .resolve("definitions/sounds", tauri::path::BaseDirectory::Resource)
+        .ok()
+        .filter(|p: &std::path::PathBuf| p.exists())
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(2)
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("core/definitions/sounds")
+        });
+
+    // User sounds dir
+    let user = dirs::config_dir()
+        .map(|p| p.join("baras").join("sounds"))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    for dir in [&bundled, &user] {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                        if ext.eq_ignore_ascii_case("mp3") || ext.eq_ignore_ascii_case("wav") {
+                            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                                files.insert(name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(files.into_iter().collect())
+}
+
 #[tauri::command]
 pub async fn pick_audio_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;

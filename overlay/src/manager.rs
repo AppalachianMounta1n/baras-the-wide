@@ -179,9 +179,41 @@ impl OverlayWindow {
         }
     }
 
+    /// Draw text at the specified position with bold/italic styling
+    pub fn draw_text_styled(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        font_size: f32,
+        color: Color,
+        bold: bool,
+        italic: bool,
+    ) {
+        let width = self.platform.width();
+        let height = self.platform.height();
+        if let Some(buffer) = self.platform.pixel_buffer() {
+            self.renderer.draw_text_styled(
+                buffer, width, height, text, x, y, font_size, color, bold, italic,
+            );
+        }
+    }
+
     /// Measure text dimensions
     pub fn measure_text(&mut self, text: &str, font_size: f32) -> (f32, f32) {
         self.renderer.measure_text(text, font_size)
+    }
+
+    /// Measure text dimensions with style options
+    pub fn measure_text_styled(
+        &mut self,
+        text: &str,
+        font_size: f32,
+        bold: bool,
+        italic: bool,
+    ) -> (f32, f32) {
+        self.renderer
+            .measure_text_styled(text, font_size, bold, italic)
     }
 
     /// Draw an RGBA image at the specified position with scaling

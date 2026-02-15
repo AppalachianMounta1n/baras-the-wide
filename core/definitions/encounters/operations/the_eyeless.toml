@@ -9,7 +9,7 @@ difficulties = ["story", "veteran"]
 
 [[boss.entities]]
 name = "The Eyeless"
-ids = [3328380611067904, 25425000358450]
+ids = [3328380611067904, 3328372021133312, 3319090596806656, 3328376316100608]
 is_boss = true
 is_kill_target = true
 

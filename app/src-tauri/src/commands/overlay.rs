@@ -39,6 +39,8 @@ pub struct OverlayStatusResponse {
     pub cooldowns_enabled: bool,
     pub dot_tracker_running: bool,
     pub dot_tracker_enabled: bool,
+    pub notes_running: bool,
+    pub notes_enabled: bool,
     pub overlays_visible: bool,
     pub move_mode: bool,
     pub rearrange_mode: bool,
@@ -124,6 +126,7 @@ pub async fn get_overlay_status(
         effects_b_running,
         cooldowns_running,
         dot_tracker_running,
+        notes_running,
         move_mode,
         rearrange_mode,
     ) = {
@@ -141,6 +144,7 @@ pub async fn get_overlay_status(
             s.is_running(OverlayType::EffectsB),
             s.is_running(OverlayType::Cooldowns),
             s.is_running(OverlayType::DotTracker),
+            s.is_running(OverlayType::Notes),
             s.move_mode,
             s.rearrange_mode,
         )
@@ -157,7 +161,7 @@ pub async fn get_overlay_status(
     let personal_enabled = config.overlay_settings.is_enabled("personal");
     let raid_enabled = config.overlay_settings.is_enabled("raid");
     let boss_health_enabled = config.overlay_settings.is_enabled("boss_health");
-    let timers_enabled = config.overlay_settings.is_enabled("timers");
+    let timers_enabled = config.overlay_settings.is_enabled("timers_a");
     let timers_b_enabled = config.overlay_settings.is_enabled("timers_b");
     let challenges_enabled = config.overlay_settings.is_enabled("challenges");
     let alerts_enabled = config.overlay_settings.is_enabled("alerts");
@@ -165,6 +169,7 @@ pub async fn get_overlay_status(
     let effects_b_enabled = config.overlay_settings.is_enabled("effects_b");
     let cooldowns_enabled = config.overlay_settings.is_enabled("cooldowns");
     let dot_tracker_enabled = config.overlay_settings.is_enabled("dot_tracker");
+    let notes_enabled = config.overlay_settings.is_enabled("notes");
 
     Ok(OverlayStatusResponse {
         running: running_metric_types,
@@ -191,6 +196,8 @@ pub async fn get_overlay_status(
         cooldowns_enabled,
         dot_tracker_running,
         dot_tracker_enabled,
+        notes_running,
+        notes_enabled,
         overlays_visible: config.overlay_settings.overlays_visible,
         move_mode,
         rearrange_mode,

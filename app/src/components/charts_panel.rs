@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local as spawn;
 
-use crate::api::{self, EffectChartData, EffectWindow, TimeRange, TimeSeriesPoint};
+use crate::api::{self, EffectChartData, EffectWindow, HpPoint, TimeRange, TimeSeriesPoint};
 use crate::components::ability_icon::AbilityIcon;
 use crate::components::class_icons::get_class_icon;
 use crate::utils::js_set;
@@ -61,7 +61,7 @@ fn resize_chart(chart: &JsValue) {
 }
 
 fn resize_all_charts() {
-    for id in ["chart-dps", "chart-hps", "chart-dtps"] {
+    for id in ["chart-dps", "chart-hps", "chart-dtps", "chart-hp"] {
         if let Some(window) = web_sys::window()
             && let Some(document) = window.document()
             && let Some(element) = document.get_element_by_id(id)
@@ -119,8 +119,10 @@ fn merge_effect_windows(mut windows: Vec<EffectWindow>) -> Vec<EffectWindow> {
 
 fn build_time_series_option(
     data: &[TimeSeriesPoint],
+    secondary_data: Option<&[TimeSeriesPoint]>,
     title: &str,
     color: &str,
+    secondary_color: Option<&str>,
     fill_color: &str,
     effect_windows: &[(i64, EffectWindow, &str)], // (effect_id, window, color)
     y_axis_name: &str,
@@ -363,9 +365,231 @@ fn build_time_series_option(
     js_set(&avg_series, "data", &avg_arr);
 
     series_arr.push(&avg_series);
+
+    // Optional secondary series (e.g., EHPS alongside raw HPS)
+    if let (Some(sec_data), Some(sec_color)) = (secondary_data, secondary_color) {
+        // Build secondary sparse lookup
+        let sec_sparse: std::collections::HashMap<i64, f64> = sec_data
+            .iter()
+            .map(|p| (p.bucket_start_ms, p.total_value))
+            .collect();
+
+        // Generate secondary average from the same time spine
+        let mut sec_avg_data: Vec<(f64, f64)> = Vec::with_capacity(num_buckets);
+        let mut sec_cumulative = 0.0;
+        for i in 0..num_buckets {
+            let time_ms = min_time_ms + (i as i64) * bucket_ms;
+            let time_secs = time_ms as f64 / 1000.0;
+            let value = sec_sparse.get(&time_ms).copied().unwrap_or(0.0);
+            sec_cumulative += value;
+            let elapsed_in_range = (i as f64) + 1.0;
+            let avg = (sec_cumulative / elapsed_in_range).round();
+            sec_avg_data.push((time_secs, avg));
+        }
+
+        let sec_series = js_sys::Object::new();
+        js_set(&sec_series, "type", &JsValue::from_str("line"));
+        js_set(&sec_series, "name", &JsValue::from_str("Effective"));
+        js_set(&sec_series, "smooth", &JsValue::TRUE);
+        js_set(&sec_series, "symbol", &JsValue::from_str("none"));
+        js_set(&sec_series, "yAxisIndex", &JsValue::from_f64(1.0));
+
+        let sec_line_style = js_sys::Object::new();
+        js_set(&sec_line_style, "color", &JsValue::from_str(sec_color));
+        js_set(&sec_line_style, "width", &JsValue::from_f64(2.5));
+        js_set(&sec_series, "lineStyle", &sec_line_style);
+
+        let sec_arr = js_sys::Array::new();
+        for (x, y) in sec_avg_data {
+            let pair = js_sys::Array::new();
+            pair.push(&JsValue::from_f64(x));
+            pair.push(&JsValue::from_f64(y));
+            sec_arr.push(&pair);
+        }
+        js_set(&sec_series, "data", &sec_arr);
+        series_arr.push(&sec_series);
+    }
+
     js_set(&obj, "series", &series_arr);
 
     // Animation
+    js_set(&obj, "animation", &JsValue::FALSE);
+
+    obj.into()
+}
+
+/// Build a simplified HP% chart option — single y-axis (0–100%), gold line, gradient fill.
+/// Data points carry [time_secs, hp_pct, current_hp, max_hp] for rich tooltips.
+fn build_hp_chart_option(
+    data: &[HpPoint],
+    effect_windows: &[(i64, EffectWindow, &str)],
+) -> JsValue {
+    let obj = js_sys::Object::new();
+
+    // Title
+    let title_obj = js_sys::Object::new();
+    js_set(&title_obj, "text", &JsValue::from_str("HP%"));
+    js_set(&title_obj, "left", &JsValue::from_str("center"));
+    let title_style = js_sys::Object::new();
+    js_set(&title_style, "color", &JsValue::from_str("#e0e0e0"));
+    js_set(&title_style, "fontSize", &JsValue::from_f64(12.0));
+    js_set(&title_obj, "textStyle", &title_style);
+    js_set(&obj, "title", &title_obj);
+
+    // Grid
+    let grid = js_sys::Object::new();
+    js_set(&grid, "left", &JsValue::from_str("60"));
+    js_set(&grid, "right", &JsValue::from_str("20"));
+    js_set(&grid, "top", &JsValue::from_str("35"));
+    js_set(&grid, "bottom", &JsValue::from_str("25"));
+    js_set(&obj, "grid", &grid);
+
+    let min_time_ms = data.iter().map(|p| p.bucket_start_ms).min().unwrap_or(0);
+    let max_time_ms = data.iter().map(|p| p.bucket_start_ms).max().unwrap_or(0);
+    let min_time_secs = min_time_ms as f64 / 1000.0;
+    let max_time_secs = max_time_ms as f64 / 1000.0;
+
+    // X-Axis
+    let x_axis = js_sys::Object::new();
+    js_set(&x_axis, "type", &JsValue::from_str("value"));
+    js_set(&x_axis, "min", &JsValue::from_f64(min_time_secs));
+    js_set(&x_axis, "max", &JsValue::from_f64(max_time_secs));
+    let axis_label = js_sys::Object::new();
+    js_set(&axis_label, "color", &JsValue::from_str("#888"));
+    let formatter = js_sys::Function::new_with_args(
+        "v",
+        "var m = Math.floor(v / 60); var s = Math.floor(v % 60); return m + ':' + (s < 10 ? '0' : '') + s;",
+    );
+    js_set(&axis_label, "formatter", &formatter);
+    js_set(&x_axis, "axisLabel", &axis_label);
+    let x_split = js_sys::Object::new();
+    js_set(&x_split, "show", &JsValue::FALSE);
+    js_set(&x_axis, "splitLine", &x_split);
+    js_set(&obj, "xAxis", &x_axis);
+
+    // Single Y-Axis (0–100%)
+    let y_axis = js_sys::Object::new();
+    js_set(&y_axis, "type", &JsValue::from_str("value"));
+    js_set(&y_axis, "name", &JsValue::from_str("HP%"));
+    js_set(&y_axis, "min", &JsValue::from_f64(0.0));
+    js_set(&y_axis, "max", &JsValue::from_f64(100.0));
+    let y_label = js_sys::Object::new();
+    js_set(&y_label, "color", &JsValue::from_str("#f1c40f"));
+    js_set(&y_axis, "axisLabel", &y_label);
+    let y_split = js_sys::Object::new();
+    js_set(&y_split, "show", &JsValue::FALSE);
+    js_set(&y_axis, "splitLine", &y_split);
+    js_set(&obj, "yAxis", &y_axis);
+
+    // Tooltip — shows HP% and absolute HP (e.g. "1:38  58.8%  (145,234 / 247,000)")
+    let tooltip = js_sys::Object::new();
+    js_set(&tooltip, "trigger", &JsValue::from_str("axis"));
+    let tip_formatter = js_sys::Function::new_with_args(
+        "params",
+        concat!(
+            "var p = Array.isArray(params) ? params[0] : params;",
+            "if (!p) return '';",
+            "var v = p.value;",
+            "var t = v[0];",
+            "var m = Math.floor(t / 60);",
+            "var s = Math.floor(t % 60);",
+            "var time = m + ':' + (s < 10 ? '0' : '') + s;",
+            "var pct = v[1].toFixed(1) + '%';",
+            "var hp = Math.round(v[2]).toLocaleString();",
+            "var max = Math.round(v[3]).toLocaleString();",
+            "return time + '  ' + pct + '  (' + hp + ' / ' + max + ')';",
+        ),
+    );
+    js_set(&tooltip, "formatter", &tip_formatter);
+    js_set(&obj, "tooltip", &tooltip);
+
+    // Build data: each point is [time_secs, hp_pct, current_hp, max_hp]
+    let series_arr = js_sys::Array::new();
+    let series = js_sys::Object::new();
+    js_set(&series, "type", &JsValue::from_str("line"));
+    js_set(&series, "name", &JsValue::from_str("HP%"));
+    js_set(&series, "smooth", &JsValue::TRUE);
+    js_set(&series, "symbol", &JsValue::from_str("none"));
+    // Tell ECharts to encode y from dimension 1 (hp_pct)
+    let encode = js_sys::Object::new();
+    js_set(&encode, "x", &JsValue::from_f64(0.0));
+    js_set(&encode, "y", &JsValue::from_f64(1.0));
+    js_set(&series, "encode", &encode);
+
+    let line_style = js_sys::Object::new();
+    js_set(&line_style, "color", &JsValue::from_str("#f1c40f"));
+    js_set(&line_style, "width", &JsValue::from_f64(2.0));
+    js_set(&series, "lineStyle", &line_style);
+
+    // Gradient fill
+    let area_style = js_sys::Object::new();
+    js_set(
+        &area_style,
+        "color",
+        &JsValue::from_str("rgba(241, 196, 15, 0.15)"),
+    );
+    js_set(&series, "areaStyle", &area_style);
+
+    // Data is already forward-filled by the backend query
+    let data_arr = js_sys::Array::new();
+    for p in data {
+        let point = js_sys::Array::new();
+        point.push(&JsValue::from_f64(p.bucket_start_ms as f64 / 1000.0));
+        point.push(&JsValue::from_f64(p.hp_pct));
+        point.push(&JsValue::from_f64(p.current_hp as f64));
+        point.push(&JsValue::from_f64(p.max_hp as f64));
+        data_arr.push(&point);
+    }
+    js_set(&series, "data", &data_arr);
+
+    // Mark areas for effect windows
+    let mark_area = js_sys::Object::new();
+    let mark_data = js_sys::Array::new();
+
+    let mut effect_order: Vec<i64> = Vec::new();
+    let mut grouped: std::collections::HashMap<i64, (Vec<EffectWindow>, &str)> =
+        std::collections::HashMap::new();
+    for (eid, window, win_color) in effect_windows.iter() {
+        if !effect_order.contains(eid) {
+            effect_order.push(*eid);
+        }
+        grouped
+            .entry(*eid)
+            .or_insert_with(|| (Vec::new(), *win_color))
+            .0
+            .push(window.clone());
+    }
+
+    let num_effects = effect_order.len();
+    for (lane_idx, eid) in effect_order.iter().enumerate() {
+        if let Some((windows, win_color)) = grouped.remove(eid) {
+            let merged = merge_effect_windows(windows);
+            let lane_height = 100.0 / num_effects as f64;
+            let y_bottom = lane_idx as f64 * lane_height;
+            let y_top = (lane_idx + 1) as f64 * lane_height;
+
+            for window in merged {
+                let region = js_sys::Array::new();
+                let start = js_sys::Object::new();
+                js_set(&start, "xAxis", &JsValue::from_f64(window.start_secs as f64));
+                js_set(&start, "yAxis", &JsValue::from_f64(y_top));
+                let region_style = js_sys::Object::new();
+                js_set(&region_style, "color", &JsValue::from_str(win_color));
+                js_set(&start, "itemStyle", &region_style);
+                let end = js_sys::Object::new();
+                js_set(&end, "xAxis", &JsValue::from_f64(window.end_secs as f64));
+                js_set(&end, "yAxis", &JsValue::from_f64(y_bottom));
+                region.push(&start);
+                region.push(&end);
+                mark_data.push(&region);
+            }
+        }
+    }
+    js_set(&mark_area, "data", &mark_data);
+    js_set(&series, "markArea", &mark_area);
+
+    series_arr.push(&series);
+    js_set(&obj, "series", &series_arr);
     js_set(&obj, "animation", &JsValue::FALSE);
 
     obj.into()
@@ -398,6 +622,9 @@ pub struct ChartsPanelProps {
     pub duration_secs: f32,
     /// Time range filter
     pub time_range: TimeRange,
+    /// Local player name for default selection
+    #[props(default)]
+    pub local_player: Option<String>,
 }
 
 #[component]
@@ -408,15 +635,13 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
     // Mirror encounter_idx prop into a signal for reactivity
     let mut encounter_idx_signal = use_signal(|| props.encounter_idx);
 
-    // Sync props to signals when they change (use_effect for proper reactivity)
-    use_effect({
-        let time_range = props.time_range.clone();
-        let encounter_idx = props.encounter_idx;
-        move || {
-            time_range_signal.set(time_range.clone());
-            encounter_idx_signal.set(encounter_idx);
-        }
-    });
+    // Update signals when props change (runs on every render with new props)
+    if *time_range_signal.read() != props.time_range {
+        time_range_signal.set(props.time_range.clone());
+    }
+    if *encounter_idx_signal.read() != props.encounter_idx {
+        encounter_idx_signal.set(props.encounter_idx);
+    }
 
     // Entity selection (default to none - show aggregated data)
     let mut selected_entity = use_signal(|| None::<String>);
@@ -427,11 +652,14 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
     let mut show_dps = use_signal(|| true);
     let mut show_hps = use_signal(|| true);
     let mut show_dtps = use_signal(|| true);
+    let mut show_hp = use_signal(|| true);
 
     // Time series data
     let mut dps_data = use_signal(Vec::<TimeSeriesPoint>::new);
     let mut hps_data = use_signal(Vec::<TimeSeriesPoint>::new);
+    let mut ehps_data = use_signal(Vec::<TimeSeriesPoint>::new);
     let mut dtps_data = use_signal(Vec::<TimeSeriesPoint>::new);
+    let mut hp_data = use_signal(Vec::<HpPoint>::new);
 
     // Effect data
     let mut active_effects = use_signal(Vec::<EffectChartData>::new);
@@ -443,6 +671,9 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
 
     // Loading state
     let mut loading = use_signal(|| false);
+
+    // Epoch counter to discard stale async results
+    let mut load_epoch = use_signal(|| 0u32);
 
     // Bucket size for time series (1 second)
     let bucket_ms: i64 = 1000;
@@ -457,9 +688,13 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
         "rgba(255, 180, 100, 0.35)", // Orange
     ];
 
+    // Local player name for default selection
+    let local_player = props.local_player.clone();
+
     // Load entities on mount and auto-select first player (with retry for race conditions)
     use_effect(move || {
         let idx = encounter_idx_signal();
+        let local_name = local_player.clone();
         spawn(async move {
             // Retry up to 3 seconds if data not ready
             for attempt in 0..10 {
@@ -469,9 +704,12 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
                         .filter(|r| r.entity_type == "Player" || r.entity_type == "Companion")
                         .collect();
                     if !players.is_empty() {
-                        // Auto-select first player
-                        if let Some(first) = players.first() {
-                            selected_entity.set(Some(first.name.clone()));
+                        // Auto-select local player, fall back to first player
+                        let pick = local_name.as_deref()
+                            .and_then(|name| players.iter().find(|p| p.name == name))
+                            .or(players.first());
+                        if let Some(p) = pick {
+                            selected_entity.set(Some(p.name.clone()));
                         }
                         // Store class icons lookup
                         let icons: HashMap<String, String> = players
@@ -501,10 +739,16 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
         let tr = time_range_signal.read().clone();
         let entity = selected_entity.read().clone();
 
+        // Wait for entity auto-selection before loading
+        let Some(entity) = entity else { return };
+
+        // Bump load_epoch to invalidate any in-flight tasks
+        let current_gen = *load_epoch.peek() + 1;
+        load_epoch.set(current_gen);
+
         spawn(async move {
             loading.set(true);
 
-            // Fetch all three time series
             let tr_opt = if tr.start == 0.0 && tr.end == 0.0 {
                 None
             } else {
@@ -512,22 +756,39 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
             };
 
             if let Some(data) =
-                api::query_dps_over_time(idx, bucket_ms, entity.as_deref(), tr_opt).await
+                api::query_dps_over_time(idx, bucket_ms, Some(&entity), tr_opt).await
             {
+                if *load_epoch.read() != current_gen { return; }
                 dps_data.set(data);
             }
             if let Some(data) =
-                api::query_hps_over_time(idx, bucket_ms, entity.as_deref(), tr_opt).await
+                api::query_hps_over_time(idx, bucket_ms, Some(&entity), tr_opt).await
             {
+                if *load_epoch.read() != current_gen { return; }
                 hps_data.set(data);
             }
             if let Some(data) =
-                api::query_dtps_over_time(idx, bucket_ms, entity.as_deref(), tr_opt).await
+                api::query_ehps_over_time(idx, bucket_ms, Some(&entity), tr_opt).await
             {
+                if *load_epoch.read() != current_gen { return; }
+                ehps_data.set(data);
+            }
+            if let Some(data) =
+                api::query_dtps_over_time(idx, bucket_ms, Some(&entity), tr_opt).await
+            {
+                if *load_epoch.read() != current_gen { return; }
                 dtps_data.set(data);
             }
+            if let Some(data) =
+                api::query_hp_over_time(idx, bucket_ms, Some(&entity), tr_opt).await
+            {
+                if *load_epoch.read() != current_gen { return; }
+                hp_data.set(data);
+            }
 
-            loading.set(false);
+            if *load_epoch.read() == current_gen {
+                loading.set(false);
+            }
         });
     });
 
@@ -538,6 +799,8 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
         let tr = time_range_signal.read().clone();
         let entity = selected_entity.read().clone();
 
+        let Some(entity) = entity else { return };
+
         spawn(async move {
             let tr_opt = if tr.start == 0.0 && tr.end == 0.0 {
                 None
@@ -546,7 +809,7 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
             };
 
             if let Some(data) =
-                api::query_effect_uptime(idx, entity.as_deref(), tr_opt, duration).await
+                api::query_effect_uptime(idx, Some(&entity), tr_opt, duration).await
             {
                 let (active, passive): (Vec<_>, Vec<_>) =
                     data.into_iter().partition(|e| e.is_active);
@@ -595,9 +858,12 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
         let show_dps_val = *show_dps.read();
         let show_hps_val = *show_hps.read();
         let show_dtps_val = *show_dtps.read();
+        let show_hp_val = *show_hp.read();
         let dps = dps_data.read().clone();
         let hps = hps_data.read().clone();
+        let ehps = ehps_data.read().clone();
         let dtps = dtps_data.read().clone();
+        let hp = hp_data.read().clone();
         let windows = effect_windows.read().clone();
 
         // Dispose hidden charts immediately to prevent overlap
@@ -610,6 +876,9 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
         if !show_dtps_val {
             dispose_chart("chart-dtps");
         }
+        if !show_hp_val {
+            dispose_chart("chart-hp");
+        }
 
         spawn(async move {
             // Delay to ensure DOM elements exist after render
@@ -621,8 +890,10 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
             {
                 let option = build_time_series_option(
                     &dps,
+                    None,
                     "DPS",
                     "#e74c3c",
+                    None,
                     "rgba(231, 76, 60, 0.15)",
                     &windows,
                     "DPS",
@@ -634,10 +905,13 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
                 && !hps.is_empty()
                 && let Some(chart) = init_chart("chart-hps")
             {
+                let ehps_ref = if !ehps.is_empty() { Some(ehps.as_slice()) } else { None };
                 let option = build_time_series_option(
                     &hps,
+                    ehps_ref,
                     "HPS",
                     "#2ecc71",
+                    Some("#3498db"),
                     "rgba(46, 204, 113, 0.15)",
                     &windows,
                     "HPS",
@@ -651,12 +925,22 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
             {
                 let option = build_time_series_option(
                     &dtps,
+                    None,
                     "DTPS",
                     "#e67e22",
+                    None,
                     "rgba(230, 126, 34, 0.15)",
                     &windows,
                     "DTPS",
                 );
+                set_chart_option(&chart, &option);
+            }
+
+            if show_hp_val
+                && !hp.is_empty()
+                && let Some(chart) = init_chart("chart-hp")
+            {
+                let option = build_hp_chart_option(&hp, &windows);
                 set_chart_option(&chart, &option);
             }
 
@@ -688,6 +972,7 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
         dispose_chart("chart-dps");
         dispose_chart("chart-hps");
         dispose_chart("chart-dtps");
+        dispose_chart("chart-hp");
     });
 
     let entity_list = entities.read().clone();
@@ -698,6 +983,7 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
     let dps_empty = dps_data.read().is_empty();
     let hps_empty = hps_data.read().is_empty();
     let dtps_empty = dtps_data.read().is_empty();
+    let hp_empty = hp_data.read().is_empty();
 
     rsx! {
         div { class: "charts-panel",
@@ -768,6 +1054,14 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
                             }
                             span { class: "toggle-dtps", "DTPS" }
                         }
+                        label {
+                            input {
+                                r#type: "checkbox",
+                                checked: *show_hp.read(),
+                                onchange: move |e| show_hp.set(e.checked())
+                            }
+                            span { class: "toggle-hp", "HP%" }
+                        }
                     }
                 }
             }
@@ -801,6 +1095,13 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
                             div { class: "chart-empty", "No damage taken in fight" }
                         } else {
                             div { id: "chart-dtps", class: "chart-container" }
+                        }
+                    }
+                    if *show_hp.read() {
+                        if hp_empty && !*loading.read() {
+                            div { class: "chart-empty", "No HP data in fight" }
+                        } else {
+                            div { id: "chart-hp", class: "chart-container" }
                         }
                     }
                 }

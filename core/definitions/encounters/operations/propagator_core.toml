@@ -21,7 +21,16 @@ is_kill_target = true
 id = "propagator_lethal_strike"
 name = "Lethal Strike"
 trigger = { type = "ability_cast", abilities = [4826160261234688] }
-duration_secs = 30.0
+cancel_trigger = { type = "ability_cast", abilities = [4832241934925824] }
+duration_secs = 32.0
+color = [237, 33, 33, 255]
+
+[[boss.timer]]
+id = "propagator_lethal_strike_rc"
+name = "Lethal Strike After Recovery"
+display_text = "Lethal Strike"
+trigger = { type = "effect_removed", effects = [4832241934926105] }
+duration_secs = 13.0
 color = [237, 33, 33, 255]
 
 [[boss.timer]]

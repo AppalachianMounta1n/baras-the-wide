@@ -6,6 +6,10 @@
 [area]
 name = "Objective Meridian"
 id = 833571547775793
+<<<<<<< HEAD
+=======
+area_type = "flashpoint"
+>>>>>>> 01460beeb42931974ef64e4b000edf3b06a9246c
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Republic Boss 1: Vulture Squad Armored Units 14 and 02

@@ -156,6 +156,12 @@ impl TimerManager {
         self.boss_npc_class_ids.clear();
     }
 
+    /// Clear the definitions fingerprint, forcing the next load to actually reload.
+    /// Call this before load_boss_definitions when user explicitly triggers a reload.
+    pub fn invalidate_definitions_cache(&mut self) {
+        self.definitions_fingerprint = 0;
+    }
+
     /// Compute a fingerprint for a set of boss definitions.
     /// Used to detect if definitions actually changed vs. redundant reloads.
     fn compute_boss_fingerprint(bosses: &[BossEncounterDefinition]) -> u64 {
@@ -351,7 +357,15 @@ impl TimerManager {
     /// Pass the current encounter context to allow timer restarts.
     pub fn tick(&mut self, encounter: Option<&crate::encounter::CombatEncounter>) {
         if let Some(ts) = self.last_timestamp {
-            self.process_expirations(ts, encounter);
+            let effective_time = self
+                .active_timers
+                .values()
+                .filter(|t| t.remaining_secs_realtime() <= 0.0)
+                .map(|t| t.expires_at)
+                .max()
+                .map_or(ts, |max_expires| max_expires.max(ts));
+
+            self.process_expirations(effective_time, encounter);
         }
     }
 

@@ -32,6 +32,11 @@ impl LogFileMetaData {
     pub fn formatted_datetime(&self) -> String {
         self.created_at.format("%Y-%m-%d %-H:%M").to_string()
     }
+
+    /// Day of week for display (e.g., "Sunday")
+    pub fn day_of_week(&self) -> String {
+        self.created_at.format("%A").to_string()
+    }
 }
 
 #[derive(Default)]
@@ -163,12 +168,23 @@ impl DirectoryIndex {
             .collect()
     }
 
-    /// Get all empty files (excluding the most recent)
+    /// Get all empty files (excluding the most recent and files created within 48h)
     pub fn empty_files(&self) -> Vec<&LogFileMetaData> {
         let newest = self.newest_file().map(|e| &e.path);
+        let cutoff = chrono::Local::now().naive_local() - chrono::Duration::hours(48);
         self.entries
             .values()
-            .filter(|e| e.is_empty && Some(&e.path) != newest)
+            .filter(|e| e.is_empty && Some(&e.path) != newest && e.created_at < cutoff)
+            .collect()
+    }
+
+    /// Get files under 1MB, excluding files created within 48h
+    pub fn small_files(&self) -> Vec<&LogFileMetaData> {
+        const SMALL_THRESHOLD: u64 = 1_000_000;
+        let cutoff = chrono::Local::now().naive_local() - chrono::Duration::hours(48);
+        self.entries
+            .values()
+            .filter(|e| !e.is_empty && e.file_size < SMALL_THRESHOLD && e.created_at < cutoff)
             .collect()
     }
 
@@ -190,9 +206,15 @@ impl DirectoryIndex {
         self.entries.values().map(|e| e.file_size).sum()
     }
 
-    /// Clean up log files based on settings. Returns (empty_deleted, old_deleted).
-    pub fn cleanup(&mut self, delete_empty: bool, retention_days: Option<u32>) -> (u32, u32) {
+    /// Clean up log files based on settings. Returns (empty_deleted, small_deleted, old_deleted).
+    pub fn cleanup(
+        &mut self,
+        delete_empty: bool,
+        delete_small: bool,
+        retention_days: Option<u32>,
+    ) -> (u32, u32, u32) {
         let mut empty_deleted = 0u32;
+        let mut small_deleted = 0u32;
         let mut old_deleted = 0u32;
 
         // Collect paths to delete (can't modify while iterating)
@@ -200,17 +222,25 @@ impl DirectoryIndex {
 
         // Find empty files to delete
         if delete_empty {
-            let empty = self.empty_files();
-            for entry in empty {
+            for entry in self.empty_files() {
                 to_delete.push(entry.path.clone());
             }
         }
 
-        // Find old files to delete
-        if let Some(days) = retention_days {
+        // Find small files to delete (< 1MB, not from today)
+        if delete_small {
+            for entry in self.small_files() {
+                if !to_delete.contains(&entry.path) {
+                    to_delete.push(entry.path.clone());
+                }
+            }
+        }
+
+        // Find old files to delete (0 = no-op, minimum 7 days)
+        if let Some(days) = retention_days.filter(|&d| d > 0) {
+            let days = days.max(7);
             let today = chrono::Local::now().date_naive();
-            let old = self.entries_older_than(days, today);
-            for entry in old {
+            for entry in self.entries_older_than(days, today) {
                 if !to_delete.contains(&entry.path) {
                     to_delete.push(entry.path.clone());
                 }
@@ -219,18 +249,22 @@ impl DirectoryIndex {
 
         // Delete files and update index
         for path in to_delete {
-            let was_empty = self.entries.get(&path).map(|e| e.is_empty).unwrap_or(false);
+            let entry = self.entries.get(&path);
+            let was_empty = entry.map(|e| e.is_empty).unwrap_or(false);
+            let was_small = entry.map(|e| !e.is_empty && e.file_size < 1_000_000).unwrap_or(false);
             if fs::remove_file(&path).is_ok() {
                 self.entries.remove(&path);
                 if was_empty {
                     empty_deleted += 1;
+                } else if was_small {
+                    small_deleted += 1;
                 } else {
                     old_deleted += 1;
                 }
             }
         }
 
-        (empty_deleted, old_deleted)
+        (empty_deleted, small_deleted, old_deleted)
     }
 
     /// Update file sizes for all entries without re-parsing content (fast stat-only)

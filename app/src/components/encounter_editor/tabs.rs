@@ -13,6 +13,7 @@ use crate::types::{
 use super::challenges::ChallengesTab;
 use super::counters::CountersTab;
 use super::entities::EntitiesTab;
+use super::notes::NotesTab;
 use super::phases::PhasesTab;
 use super::timers::TimersTab;
 
@@ -24,6 +25,7 @@ pub enum BossTab {
     Counters,
     Challenges,
     Entities,
+    Notes,
 }
 
 impl BossTab {
@@ -34,6 +36,7 @@ impl BossTab {
             Self::Counters => "Counters",
             Self::Challenges => "Challenges",
             Self::Entities => "Entities",
+            Self::Notes => "Notes",
         }
     }
 
@@ -44,6 +47,7 @@ impl BossTab {
             Self::Counters,
             Self::Challenges,
             Self::Entities,
+            Self::Notes,
         ]
     }
 
@@ -60,6 +64,7 @@ impl BossTab {
             "Counters" => Self::Counters,
             "Challenges" => Self::Challenges,
             "Entities" => Self::Entities,
+            "Notes" => Self::Notes,
             _ => Self::Timers, // Default
         }
     }
@@ -163,6 +168,7 @@ pub fn BossTabs(
                             BossTab::Counters => format!(" ({})", counter_count),
                             BossTab::Challenges => format!(" ({})", challenge_count),
                             BossTab::Entities => format!(" ({})", entity_count),
+                            BossTab::Notes => String::new(), // No count for notes
                         };
 
                         rsx! {
@@ -238,6 +244,17 @@ pub fn BossTabs(
                             on_change: move |updated_entities: Vec<EntityDefinition>| {
                                 let mut bwp = boss_with_path.clone();
                                 bwp.boss.entities = updated_entities;
+                                on_boss_change.call(bwp);
+                            },
+                            on_status: on_status,
+                        }
+                    },
+                    BossTab::Notes => rsx! {
+                        NotesTab {
+                            boss_with_path: boss_with_path.clone(),
+                            on_change: move |updated_notes: Option<String>| {
+                                let mut bwp = boss_with_path.clone();
+                                bwp.boss.notes = updated_notes;
                                 on_boss_change.call(bwp);
                             },
                             on_status: on_status,

@@ -237,6 +237,10 @@ pub fn ParselyUploadModal() -> Element {
                                     ParselyUploadType::File { path, .. } => path.clone(),
                                     ParselyUploadType::Encounter { path, .. } => path.clone(),
                                 };
+                                let display_name = match &upload_req.upload_type {
+                                    ParselyUploadType::File { filename, .. } => filename.clone(),
+                                    ParselyUploadType::Encounter { encounter_name, .. } => encounter_name.clone(),
+                                };
 
                                 let result = match upload_req.upload_type {
                                     ParselyUploadType::File { path, .. } => {
@@ -314,12 +318,17 @@ pub fn ParselyUploadModal() -> Element {
                                 match result {
                                     Ok(resp) if resp.success => {
                                         if let Some(link) = resp.link {
-                                            toast.show_persistent(
-                                                format!("Uploaded to Parsely: {}", link),
-                                                ToastSeverity::Success
+                                            toast.show_with_link(
+                                                format!("Uploaded {}: ", display_name),
+                                                link,
+                                                ToastSeverity::Success,
+                                                15_000,
                                             );
                                         } else {
-                                            toast.show_persistent("Uploaded to Parsely", ToastSeverity::Success);
+                                            toast.show(
+                                                format!("Uploaded {}", display_name),
+                                                ToastSeverity::Success,
+                                            );
                                         }
                                     }
                                     Ok(resp) => {

@@ -12,13 +12,13 @@ use baras_core::context::{AppConfig, AppConfigExt, resolve};
 use baras_core::encounter::EncounterState;
 use baras_core::game_data::Discipline;
 use baras_core::query::{
-    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow, DataTab,
-    EffectChartData, EffectWindow, EncounterTimeline, EntityBreakdown, PlayerDeath,
-    RaidOverviewRow, TimeRange, TimeSeriesPoint,
+    AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow,
+    DamageTakenSummary, DataTab, EffectChartData, EffectWindow, EncounterTimeline,
+    EntityBreakdown, HpPoint, PlayerDeath, RaidOverviewRow, TimeRange, TimeSeriesPoint,
 };
 use tauri::{AppHandle, Emitter};
 
-use super::{CombatData, LogFileInfo, ServiceCommand, SessionInfo};
+use super::{AreaVisitInfo, CombatData, LogFileInfo, ServiceCommand, SessionInfo};
 use crate::state::SharedState;
 
 /// Handle to communicate with the combat service and query state
@@ -95,16 +95,35 @@ impl ServiceHandle {
     /// Get log file entries for the UI
     pub async fn log_files(&self) -> Vec<LogFileInfo> {
         let index = self.shared.directory_index.read().await;
+        let area_cache = self.shared.area_cache.read().await;
+
         index
             .entries()
             .into_iter()
-            .map(|e| LogFileInfo {
-                path: e.path.clone(),
-                display_name: e.display_name(),
-                character_name: e.character_name.clone(),
-                date: e.formatted_datetime(),
-                is_empty: e.is_empty,
-                file_size: e.file_size,
+            .map(|e| {
+                // Look up areas from the cache
+                let areas = area_cache.get(&e.path).map(|file_index| {
+                    file_index
+                        .areas
+                        .iter()
+                        .map(|a| AreaVisitInfo {
+                            display: a.display_name(),
+                            area_name: a.area_name.clone(),
+                            difficulty: a.difficulty_name.clone(),
+                        })
+                        .collect()
+                });
+
+                LogFileInfo {
+                    path: e.path.clone(),
+                    display_name: e.display_name(),
+                    character_name: e.character_name.clone(),
+                    date: e.formatted_datetime(),
+                    day_of_week: e.day_of_week(),
+                    is_empty: e.is_empty,
+                    file_size: e.file_size,
+                    areas,
+                }
             })
             .collect()
     }
@@ -121,14 +140,15 @@ impl ServiceHandle {
         index.len()
     }
 
-    /// Clean up log files based on provided settings. Returns (empty_deleted, old_deleted).
+    /// Clean up log files based on provided settings. Returns (empty_deleted, small_deleted, old_deleted).
     pub async fn cleanup_logs(
         &self,
         delete_empty: bool,
+        delete_small: bool,
         retention_days: Option<u32>,
-    ) -> (u32, u32) {
+    ) -> (u32, u32, u32) {
         let mut index = self.shared.directory_index.write().await;
-        index.cleanup(delete_empty, retention_days)
+        index.cleanup(delete_empty, delete_small, retention_days)
     }
 
     /// Refresh file sizes in the directory index (fast stat-only, no re-parsing)
@@ -461,6 +481,49 @@ impl ServiceHandle {
             .await
     }
 
+    /// Query damage taken summary (damage type breakdown + mitigation stats).
+    pub async fn query_damage_taken_summary(
+        &self,
+        encounter_idx: Option<u32>,
+        entity_name: String,
+        time_range: Option<TimeRange>,
+        entity_types: Option<Vec<String>>,
+    ) -> Result<DamageTakenSummary, String> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref().ok_or("No active session")?;
+        let session = session.read().await;
+
+        if let Some(idx) = encounter_idx {
+            let dir = session.encounters_dir().ok_or("No encounters directory")?;
+            let path = dir.join(baras_core::storage::encounter_filename(idx));
+            if !path.exists() {
+                return Err(format!("Encounter file not found: {:?}", path));
+            }
+            self.shared.query_context.register_parquet(&path).await?;
+        } else {
+            let writer = session
+                .encounter_writer()
+                .ok_or("No live encounter buffer")?;
+            let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
+            self.shared.query_context.register_batch(batch).await?;
+        }
+
+        let types_ref: Option<Vec<&str>> = entity_types
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
+        self.shared
+            .query_context
+            .query()
+            .await
+            .query()
+            .query_damage_taken_summary(
+                &entity_name,
+                time_range.as_ref(),
+                types_ref.as_deref(),
+            )
+            .await
+    }
+
     /// Query breakdown by entity for a specific encounter and data tab.
     pub async fn query_entity_breakdown(
         &self,
@@ -721,6 +784,42 @@ impl ServiceHandle {
             .await
     }
 
+    /// Query EHPS (effective healing) over time for a specific encounter.
+    pub async fn query_ehps_over_time(
+        &self,
+        encounter_idx: Option<u32>,
+        bucket_ms: i64,
+        source_name: Option<String>,
+        time_range: Option<TimeRange>,
+    ) -> Result<Vec<TimeSeriesPoint>, String> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref().ok_or("No active session")?;
+        let session = session.read().await;
+
+        if let Some(idx) = encounter_idx {
+            let dir = session.encounters_dir().ok_or("No encounters directory")?;
+            let path = dir.join(baras_core::storage::encounter_filename(idx));
+            if !path.exists() {
+                return Err(format!("Encounter file not found: {:?}", path));
+            }
+            self.shared.query_context.register_parquet(&path).await?;
+        } else {
+            let writer = session
+                .encounter_writer()
+                .ok_or("No live encounter buffer")?;
+            let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
+            self.shared.query_context.register_batch(batch).await?;
+        }
+
+        self.shared
+            .query_context
+            .query()
+            .await
+            .query()
+            .ehps_over_time(bucket_ms, source_name.as_deref(), time_range.as_ref())
+            .await
+    }
+
     /// Query DTPS over time for a specific encounter.
     pub async fn query_dtps_over_time(
         &self,
@@ -754,6 +853,42 @@ impl ServiceHandle {
             .await
             .query()
             .dtps_over_time(bucket_ms, target_name.as_deref(), time_range.as_ref())
+            .await
+    }
+
+    /// Query HP% over time for a specific encounter.
+    pub async fn query_hp_over_time(
+        &self,
+        encounter_idx: Option<u32>,
+        bucket_ms: i64,
+        target_name: Option<String>,
+        time_range: Option<TimeRange>,
+    ) -> Result<Vec<HpPoint>, String> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref().ok_or("No active session")?;
+        let session = session.read().await;
+
+        if let Some(idx) = encounter_idx {
+            let dir = session.encounters_dir().ok_or("No encounters directory")?;
+            let path = dir.join(baras_core::storage::encounter_filename(idx));
+            if !path.exists() {
+                return Err(format!("Encounter file not found: {:?}", path));
+            }
+            self.shared.query_context.register_parquet(&path).await?;
+        } else {
+            let writer = session
+                .encounter_writer()
+                .ok_or("No live encounter buffer")?;
+            let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
+            self.shared.query_context.register_batch(batch).await?;
+        }
+
+        self.shared
+            .query_context
+            .query()
+            .await
+            .query()
+            .hp_over_time(bucket_ms, target_name.as_deref(), time_range.as_ref())
             .await
     }
 
@@ -1075,6 +1210,42 @@ impl ServiceHandle {
             .await
     }
 
+    /// Query rotation analysis for a player in an encounter.
+    pub async fn query_rotation(
+        &self,
+        encounter_idx: Option<u32>,
+        source_name: String,
+        anchor_ability_id: i64,
+        time_range: Option<TimeRange>,
+    ) -> Result<baras_core::query::RotationAnalysis, String> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref().ok_or("No active session")?;
+        let session = session.read().await;
+
+        if let Some(idx) = encounter_idx {
+            let dir = session.encounters_dir().ok_or("No encounters directory")?;
+            let path = dir.join(baras_core::storage::encounter_filename(idx));
+            if !path.exists() {
+                return Err(format!("Encounter file not found: {:?}", path));
+            }
+            self.shared.query_context.register_parquet(&path).await?;
+        } else {
+            let writer = session
+                .encounter_writer()
+                .ok_or("No live encounter buffer")?;
+            let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
+            self.shared.query_context.register_batch(batch).await?;
+        }
+
+        self.shared
+            .query_context
+            .query()
+            .await
+            .query()
+            .query_rotation(&source_name, anchor_ability_id, time_range.as_ref())
+            .await
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Overlay Status Flags (for skipping work in effects loop)
     // ─────────────────────────────────────────────────────────────────────────
@@ -1125,5 +1296,79 @@ impl ServiceHandle {
     /// Called when visibility, move mode, or rearrange mode changes
     pub fn emit_overlay_status_changed(&self) {
         let _ = self.app_handle.emit("overlay-status-changed", ());
+    }
+
+    /// Get current notes data from loaded boss definitions
+    /// Returns the first boss with notes, or None if no notes are available
+    pub async fn get_current_notes(&self) -> Option<baras_overlay::NotesData> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref()?;
+        let session = session.read().await;
+        let cache = session.session_cache.as_ref()?;
+        
+        // Get boss definitions from cache via public accessor
+        let definitions = cache.boss_definitions();
+        
+        // Find first boss with notes
+        for boss in definitions.iter() {
+            if let Some(notes) = &boss.notes {
+                if !notes.is_empty() {
+                    return Some(baras_overlay::NotesData {
+                        text: notes.clone(),
+                        boss_name: boss.name.clone(),
+                    });
+                }
+            }
+        }
+        
+        None
+    }
+
+    /// Get list of bosses with notes status for the current area
+    pub async fn get_area_bosses_for_notes(&self) -> Result<Vec<crate::commands::BossNotesInfo>, String> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref().ok_or("No active session")?;
+        let session = session.read().await;
+        let cache = session.session_cache.as_ref().ok_or("No session cache")?;
+        
+        let definitions = cache.boss_definitions();
+        
+        let bosses: Vec<crate::commands::BossNotesInfo> = definitions
+            .iter()
+            .map(|boss| crate::commands::BossNotesInfo {
+                id: boss.id.clone(),
+                name: boss.name.clone(),
+                has_notes: boss.notes.as_ref().is_some_and(|n| !n.is_empty()),
+            })
+            .collect();
+        
+        Ok(bosses)
+    }
+
+    /// Send notes for a specific boss to the overlay
+    pub async fn select_boss_notes(&self, boss_id: &str) -> Result<(), String> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref().ok_or("No active session")?;
+        let session = session.read().await;
+        let cache = session.session_cache.as_ref().ok_or("No session cache")?;
+        
+        let definitions = cache.boss_definitions();
+        
+        // Find the boss by ID
+        let boss = definitions
+            .iter()
+            .find(|b| b.id == boss_id)
+            .ok_or_else(|| format!("Boss '{}' not found", boss_id))?;
+        
+        // Send notes to overlay (even if empty, to allow clearing)
+        let notes_data = baras_overlay::NotesData {
+            text: boss.notes.clone().unwrap_or_default(),
+            boss_name: boss.name.clone(),
+        };
+        
+        // Send via the overlay channel
+        let _ = self.cmd_tx.send(super::ServiceCommand::SendNotesToOverlay(notes_data)).await;
+        
+        Ok(())
     }
 }

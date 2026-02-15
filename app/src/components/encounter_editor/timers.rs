@@ -286,6 +286,12 @@ fn TimerEditForm(
     let mut confirm_delete = use_signal(|| false);
     let mut just_saved = use_signal(|| false);
 
+    // Load available sound files once
+    let mut sound_files = use_signal(Vec::<String>::new);
+    use_future(move || async move {
+        sound_files.set(api::list_sound_files().await);
+    });
+
     // Reset just_saved when user makes new changes after saving
     let timer_original_for_effect = timer_original.clone();
     use_effect(move || {
@@ -801,11 +807,12 @@ fn TimerEditForm(
                                     draft.set(d);
                                 },
                                 option { value: "", "(none)" }
-                                option { value: "Alarm.mp3", "Alarm.mp3" }
-                                option { value: "Alert.mp3", "Alert.mp3" }
-                                // Show custom path if set and not a bundled sound
+                                for name in sound_files().iter() {
+                                    option { key: "{name}", value: "{name}", "{name}" }
+                                }
+                                // Show custom path if set and not in the bundled list
                                 if let Some(ref path) = draft().audio.file {
-                                    if !path.is_empty() && path != "Alarm.mp3" && path != "Alert.mp3" {
+                                    if !path.is_empty() && !sound_files().contains(path) {
                                         option { value: "{path}", selected: true, "{path} (custom)" }
                                     }
                                 }
@@ -953,6 +960,7 @@ pub fn PhaseSelector(
     on_change: EventHandler<Vec<String>>,
 ) -> Element {
     let mut dropdown_open = use_signal(|| false);
+    let mut dropdown_pos = use_signal(|| (0.0f64, 0.0f64));
 
     // Display text
     let display = if selected.is_empty() {
@@ -966,21 +974,31 @@ pub fn PhaseSelector(
     rsx! {
         div {
             class: "phase-selector",
-            style: "position: relative;",
             // Dropdown trigger
             button {
                 class: "select",
                 style: "width: 160px; text-align: left;",
-                onclick: move |_| dropdown_open.set(!dropdown_open()),
+                onclick: move |e| {
+                    if !dropdown_open() {
+                        // Use element_coordinates to find offset within button,
+                        // then subtract from client_coordinates to get button origin
+                        let click = e.client_coordinates();
+                        let offset = e.element_coordinates();
+                        let btn_left = click.x - offset.x;
+                        let btn_bottom = click.y - offset.y + 30.0;
+                        dropdown_pos.set((btn_left, btn_bottom));
+                    }
+                    dropdown_open.set(!dropdown_open());
+                },
                 "{display}"
                 span { class: "ml-auto", "▾" }
             }
 
-            // Dropdown menu
+            // Dropdown menu (fixed position to escape overflow clipping)
             if dropdown_open() {
                 div {
                     class: "phase-dropdown",
-                    style: "position: absolute; top: 100%; left: 0; z-index: 1000; background: #1e1e2e; border: 1px solid var(--border-medium); border-radius: var(--radius-sm); padding: var(--space-xs); min-width: 160px; max-height: 200px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.5);",
+                    style: "position: fixed; left: {dropdown_pos().0}px; top: {dropdown_pos().1}px; z-index: 10000; background: #1e1e2e; border: 1px solid var(--border-medium); border-radius: var(--radius-sm); padding: var(--space-xs); min-width: 160px; max-height: 200px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.5);",
 
                     if available.is_empty() {
                         span { class: "text-muted text-sm", "No phases defined" }

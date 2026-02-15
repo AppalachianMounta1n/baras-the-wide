@@ -836,15 +836,13 @@ button:active {
 .overlay-controls {
   margin: 0;
   width: 100%;
-  max-width: 70%;
-  align-self: center;
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: var(--gradient-panel);
   border-radius: var(--radius-xl);
-  padding: 1vh 1.5vw;
+  padding: 1em;
   border: 1px solid var(--border-accent);
 }
 
@@ -881,7 +879,7 @@ button:active {
   flex-shrink: 0;
 }
 
-/* Overlay toggle buttons grid */
+/* Overlay toggle buttons grid (legacy) */
 .overlay-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -889,6 +887,46 @@ button:active {
   margin: 0.2vh 0 0.3vh 0;
   width: 100%;
   flex-shrink: 0;
+}
+
+/* Overlay categories - horizontal column layout */
+.overlay-categories {
+  display: flex;
+  flex-direction: row;
+  gap: 1.5em;
+  padding: 1em;
+  background: linear-gradient(
+    180deg,
+    rgba(30, 60, 100, 0.25) 0%,
+    rgba(20, 45, 80, 0.2) 100%
+  );
+  border-radius: var(--radius-md);
+  border: 1px solid var(--blue-alpha-15);
+  margin-bottom: 1em;
+}
+
+.overlay-category {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.overlay-category .category-title {
+  font-size: 0.85em;
+  color: var(--swtor-blue);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  margin: 0 0 0.5em 0;
+  padding-bottom: 0.4em;
+  border-bottom: 1px solid var(--blue-alpha-20);
+}
+
+.overlay-category .category-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
 }
 
 .overlay-toggles {
@@ -1155,6 +1193,44 @@ button:active {
   text-decoration: underline;
 }
 
+/* Boss notes selector */
+.session-notes-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.5em 0;
+  margin-top: 0.5em;
+  border-top: 1px solid var(--border-dim);
+}
+
+.session-notes-selector .label {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.notes-boss-select {
+  flex: 1;
+  padding: 0.3em 0.5em;
+  font-size: 0.85em;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  color: var(--text-primary);
+  cursor: pointer;
+  max-width: 200px;
+}
+
+.notes-boss-select:hover {
+  border-color: var(--swtor-blue);
+}
+
+.notes-boss-select:focus {
+  outline: none;
+  border-color: var(--swtor-blue);
+  box-shadow: 0 0 0 2px rgba(79, 192, 255, 0.2);
+}
+
 .session-empty .settings-link:hover {
   color: var(--swtor-light-blue);
 }
@@ -1222,6 +1298,12 @@ button:active {
 .btn-session-upload:disabled {
   opacity: 0.7;
   cursor: wait;
+}
+
+.session-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 1.5em;
 }
 
 .session-upload-group {
@@ -2211,7 +2293,7 @@ details[open] .collapsible-summary::before {
   border-bottom: 1px solid var(--blue-alpha-15);
 }
 
-/* Customize button - distinct blue styling */
+/* Customize button - prominent gold styling */
 .btn-customize {
   display: flex;
   align-items: center;
@@ -2219,31 +2301,34 @@ details[open] .collapsible-summary::before {
   padding: 0.6em 1.2em;
   background: linear-gradient(
     180deg,
-    var(--blue-alpha-20) 0%,
-    rgba(45, 90, 140, 0.15) 100%
+    rgba(180, 140, 50, 0.25) 0%,
+    rgba(140, 100, 30, 0.15) 100%
   );
-  border: 1px solid var(--swtor-blue);
+  border: 1px solid #d4a849;
   border-radius: var(--radius-lg);
-  color: var(--swtor-blue);
+  color: #f0c860;
   font-size: 0.9em;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  box-shadow: 0 0 10px rgba(212, 168, 73, 0.3);
 }
 
 .btn-customize:hover {
   background: linear-gradient(
     180deg,
-    var(--border-accent-strong) 0%,
-    rgba(55, 100, 155, 0.2) 100%
+    rgba(200, 160, 60, 0.35) 0%,
+    rgba(160, 120, 40, 0.25) 100%
   );
-  box-shadow: 0 0 15px var(--blue-alpha-25);
+  box-shadow: 0 0 20px rgba(212, 168, 73, 0.5);
+  color: #ffe080;
 }
 
 .btn-customize i {
   font-size: 0.95em;
+  color: #d4a849;
 }
 
 .profile-selector {
@@ -2536,6 +2621,11 @@ details[open] .collapsible-summary::before {
   font-variant-numeric: tabular-nums;
 }
 
+.file-item .file-day {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
 .file-item .file-meta {
   display: flex;
   align-items: center;
@@ -2643,6 +2733,110 @@ details[open] .collapsible-summary::before {
 .file-item .upload-link:hover {
   color: #aac8fa;
   text-decoration: underline;
+}
+
+/* File Areas (Operations visited) */
+.file-areas {
+  margin-top: 0.4em;
+  font-size: 0.85em;
+}
+
+.file-areas summary {
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3em;
+  user-select: none;
+  list-style: none; /* Hide default disclosure triangle */
+}
+
+.file-areas summary::-webkit-details-marker {
+  display: none; /* Hide triangle in webkit browsers */
+}
+
+.file-areas[open] summary {
+  display: none; /* Hide summary when expanded, show full list instead */
+}
+
+.file-areas .area-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3em;
+}
+
+.file-areas .area-tag {
+  display: inline-block;
+  background: var(--blue-alpha-15);
+  color: var(--text-secondary);
+  padding: 0.15em 0.5em;
+  border-radius: var(--radius-sm);
+  font-size: 0.9em;
+  border: 1px solid var(--blue-alpha-20);
+}
+
+.file-areas .area-tag:hover {
+  background: var(--blue-alpha-20);
+  color: var(--text-primary);
+}
+
+/* Difficulty-specific colors */
+.file-areas .area-tag.diff-nim {
+  background: rgba(220, 60, 60, 0.2);
+  border-color: rgba(220, 60, 60, 0.4);
+  color: #f08080;
+}
+
+.file-areas .area-tag.diff-nim:hover {
+  background: rgba(220, 60, 60, 0.3);
+  color: #ffa0a0;
+}
+
+.file-areas .area-tag.diff-hm {
+  background: rgba(220, 160, 40, 0.2);
+  border-color: rgba(220, 160, 40, 0.4);
+  color: #e8c060;
+}
+
+.file-areas .area-tag.diff-hm:hover {
+  background: rgba(220, 160, 40, 0.3);
+  color: #f0d080;
+}
+
+.file-areas .area-tag.diff-sm {
+  background: rgba(60, 180, 120, 0.2);
+  border-color: rgba(60, 180, 120, 0.4);
+  color: #70d8a0;
+}
+
+.file-areas .area-tag.diff-sm:hover {
+  background: rgba(60, 180, 120, 0.3);
+  color: #90e8b8;
+}
+
+.file-areas .area-tag.diff-fp {
+  background: rgba(80, 140, 220, 0.2);
+  border-color: rgba(80, 140, 220, 0.4);
+  color: #80b8f0;
+}
+
+.file-areas .area-tag.diff-fp:hover {
+  background: rgba(80, 140, 220, 0.3);
+  color: #a0d0ff;
+}
+
+.file-areas .area-more {
+  background: var(--blue-alpha-10);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.file-areas .area-more:hover {
+  background: var(--blue-alpha-20);
+  color: var(--text-secondary);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -2856,6 +3050,7 @@ details[open] .collapsible-summary::before {
 .history-table-container {
   max-height: 200px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .history-table {
@@ -2896,7 +3091,7 @@ details[open] .collapsible-summary::before {
 }
 
 .col-name {
-  width: 65%;
+  width: 62%;
   overflow: hidden;
 }
 
@@ -2905,7 +3100,7 @@ details[open] .collapsible-summary::before {
 }
 
 .col-duration {
-  width: 20%;
+  width: 15%;
 }
 
 .col-result {
@@ -2914,7 +3109,7 @@ details[open] .collapsible-summary::before {
 }
 
 .col-upload {
-  width: 50px;
+  width: 11%;
   text-align: center;
 }
 
@@ -3055,9 +3250,42 @@ details[open] .collapsible-summary::before {
 
 .detail-item.npc-list {
   color: #aa8866;
-  flex: 1 1 auto;
+  flex: 1 1 100%;
   white-space: normal;
   min-width: 0;
+}
+
+.btn-view-explorer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.4em 0.8em;
+  background: linear-gradient(
+    180deg,
+    rgba(60, 130, 180, 0.25) 0%,
+    rgba(40, 100, 150, 0.15) 100%
+  );
+  border: 1px solid var(--swtor-blue-dim);
+  border-radius: var(--radius-md);
+  color: var(--swtor-blue);
+  font-size: 0.85em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-view-explorer:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(70, 150, 200, 0.35) 0%,
+    rgba(50, 120, 170, 0.25) 100%
+  );
+  box-shadow: 0 0 12px rgba(74, 158, 255, 0.3);
+  color: var(--swtor-blue-bright);
+}
+
+.btn-view-explorer i {
+  font-size: 0.9em;
 }
 
 .metrics-table {
@@ -3259,6 +3487,17 @@ details[open] .collapsible-summary::before {
   text-align: center;
 }
 
+.metrics-table .totals-row {
+  font-weight: 600;
+}
+.metrics-table .totals-row td {
+  box-shadow: inset 0 2px 0 var(--border-color);
+}
+.metrics-table .totals-label {
+  text-align: left;
+  color: var(--text-secondary);
+}
+
 .no-metrics {
   text-align: center;
   color: var(--text-disabled);
@@ -3296,6 +3535,123 @@ details[open] .collapsible-summary::before {
 
 .sortable-header:hover .sort-icon {
   opacity: 0.7;
+}
+
+/* Challenge results in encounter detail */
+.challenge-results {
+  margin-top: 0.75em;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 0.75em;
+}
+
+.challenge-results-header {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-bottom: 0.5em;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.challenge-results-header i {
+  color: #c8a84e;
+}
+
+.challenge-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+}
+
+.challenge-card {
+  flex: 1 1 280px;
+  max-width: 400px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-md);
+  padding: 0.5em 0.75em;
+}
+
+.challenge-card-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75em;
+  margin-bottom: 0.4em;
+  font-size: 0.85em;
+}
+
+.challenge-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.challenge-total {
+  color: #7eb8da;
+  font-weight: 500;
+}
+
+.challenge-duration {
+  margin-left: auto;
+  font-size: 0.9em;
+}
+
+.challenge-players {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.challenge-player-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.15em 0.4em;
+  font-size: 0.8em;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.challenge-bar-fill {
+  position: absolute;
+  inset: 0;
+  background: rgba(74, 144, 217, 0.15);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.challenge-player-name {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.challenge-player-ps {
+  position: relative;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 4.5em;
+  text-align: right;
+}
+
+.challenge-player-value {
+  position: relative;
+  color: #7eb8da;
+  font-variant-numeric: tabular-nums;
+  min-width: 4.5em;
+  text-align: right;
+}
+
+.challenge-player-pct {
+  position: relative;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 3.5em;
+  text-align: right;
 }
 
 /* Phase header rows (area/phase dividers - collapsible) */
@@ -4718,16 +5074,17 @@ details[open] .collapsible-summary::before {
 
 .player-stats-bar {
   display: flex;
-  gap: 1.5em;
-  padding: 0.5em 0;
-  margin-bottom: 0.5em;
-  border-bottom: 1px solid var(--border-subtle);
+  align-items: center;
+  gap: 1em;
+  padding: 0.4em 0.8em;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md);
 }
 
 .player-stats-bar .stat-input {
   display: flex;
   align-items: center;
-  gap: 0.5em;
+  gap: 0.4em;
 }
 
 .player-stats-bar label {
@@ -4736,13 +5093,23 @@ details[open] .collapsible-summary::before {
 }
 
 .player-stats-bar input {
-  width: 60px;
+  width: 50px;
   padding: 0.3em 0.5em;
   background: rgba(50, 50, 55, 0.8);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
+  font-size: 0.85em;
+}
+
+.player-stats-bar .stats-help-icon {
+  color: var(--text-muted);
+  cursor: help;
   font-size: 0.9em;
+}
+
+.player-stats-bar .stats-help-icon:hover {
+  color: var(--swtor-blue);
 }
 
 .effect-search-bar {
@@ -4897,6 +5264,15 @@ details[open] .collapsible-summary::before {
   padding: 0.15em 0.4em;
   border-radius: 3px;
   color: var(--success);
+  font-size: 0.75em;
+  font-weight: 500;
+}
+
+.effect-modified-badge {
+  background: var(--color-warning-bg);
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  color: var(--color-warning);
   font-size: 0.75em;
   font-weight: 500;
 }
@@ -6278,18 +6654,21 @@ details[open] .collapsible-summary::before {
   font-size: 0.9em;
 }
 
-.ability-table .ability-row.indented .ability-name-cell::before {
+.ability-table .ability-row.indented .ability-name-inner::before {
   content: "";
-  display: inline-block;
+  display: block;
+  flex-shrink: 0;
   width: 6px;
   height: 6px;
   background: var(--text-disabled);
   border-radius: 50%;
-  margin-right: 0.5em;
-  vertical-align: middle;
 }
 
 .ability-table .ability-name-cell {
+  font-weight: 400;
+}
+
+.ability-table .ability-name-cell .ability-name-inner {
   display: flex;
   align-items: center;
   gap: 0.5em;
@@ -6310,6 +6689,69 @@ details[open] .collapsible-summary::before {
 
 .ability-table tbody tr:last-child td {
   border-bottom: none;
+}
+
+/* Tab-colored value columns (Total, Rate) */
+.ability-table.damage-tab .col-val {
+  color: hsl(0, 60%, 72%);
+}
+.ability-table.damage-tab .group-stat.col-val {
+  color: hsl(0, 55%, 68%);
+}
+.ability-table.healing-tab .col-val {
+  color: hsl(120, 45%, 65%);
+}
+.ability-table.healing-tab .group-stat.col-val {
+  color: hsl(120, 40%, 58%);
+}
+
+/* Percentage columns - dimmed */
+.ability-table .col-pct {
+  color: var(--text-muted);
+}
+
+/* Average columns group - left border separator */
+.ability-table .col-avg-first {
+  border-left: 1px solid var(--border-subtle);
+}
+
+/* Shield columns - blue on healing tabs */
+.ability-table.healing-tab .col-shield {
+  color: hsl(210, 60%, 68%);
+}
+.ability-table.healing-tab .group-stat.col-shield {
+  color: hsl(210, 55%, 62%);
+}
+
+/* Orange averages only on damage tabs */
+.ability-table.damage-tab .col-avg {
+  color: hsl(30, 70%, 65%);
+}
+.ability-table.damage-tab .group-stat.col-avg {
+  color: hsl(30, 60%, 60%);
+}
+
+/* Bar column next to Total */
+.ability-table th.col-bar,
+.ability-table td.col-bar {
+  padding-left: 0;
+  padding-right: 0.5em;
+  width: 80px;
+}
+
+.inline-bar {
+  display: block;
+  height: 10px;
+  border-radius: 3px;
+  background: hsla(210, 60%, 55%, 0.35);
+}
+
+.ability-table.damage-tab .inline-bar {
+  background: hsla(0, 55%, 60%, 0.4);
+}
+
+.ability-table.healing-tab .inline-bar {
+  background: hsla(120, 45%, 55%, 0.4);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -6377,6 +6819,16 @@ details[open] .collapsible-summary::before {
   flex: 1;
   font-size: 14px;
   line-height: 1.4;
+}
+
+.toast-link {
+  display: block;
+  color: #5dade2;
+  text-decoration: underline;
+  word-break: break-all;
+}
+.toast-link:hover {
+  color: #85c1e9;
 }
 
 .toast-close {
@@ -6668,4 +7120,41 @@ details[open] .collapsible-summary::before {
 .parsely-upload-modal .modal-footer .btn-primary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Notes Tab (Encounter Editor)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.notes-tab {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: var(--spacing-md);
+}
+
+.notes-textarea {
+  flex: 1;
+  min-height: 400px;
+  width: 100%;
+  padding: var(--spacing-md);
+  font-family: var(--font-mono);
+  font-size: var(--font-sm);
+  line-height: 1.6;
+  background: var(--surface-darker);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  resize: vertical;
+}
+
+.notes-textarea:focus {
+  outline: none;
+  border-color: var(--swtor-blue);
+  box-shadow: 0 0 0 2px var(--blue-alpha-20);
+}
+
+.notes-textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 0.6;
 }

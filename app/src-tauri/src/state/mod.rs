@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64};
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 
-use baras_core::context::{AppConfig, DirectoryIndex, ParsingSession};
+use baras_core::context::{AppConfig, DirectoryIndex, LogAreaCache, ParsingSession};
 use baras_core::query::QueryContext;
 
 /// State shared between the combat service and Tauri commands.
@@ -67,10 +67,14 @@ pub struct SharedState {
 
     /// Shared query context for DataFusion queries (reuses SessionContext)
     pub query_context: QueryContext,
+
+    /// Cache of area indexes for log files (persisted to disk)
+    pub area_cache: RwLock<LogAreaCache>,
 }
 
 impl SharedState {
     pub fn new(config: AppConfig, directory_index: DirectoryIndex) -> Self {
+        let raid_slots = config.overlay_settings.raid_overlay.total_slots();
         Self {
             config: RwLock::new(config),
             directory_index: RwLock::new(directory_index),
@@ -78,7 +82,7 @@ impl SharedState {
             in_combat: AtomicBool::new(false),
             watching: AtomicBool::new(false),
             is_live_tailing: AtomicBool::new(true), // Start in live tailing mode
-            raid_registry: Mutex::new(RaidSlotRegistry::new(8)), // Default 8 slots (2x4 grid)
+            raid_registry: Mutex::new(RaidSlotRegistry::new(raid_slots)),
             current_area_id: AtomicI64::new(0),
             // Overlay status flags - updated by OverlayManager
             raid_overlay_active: AtomicBool::new(false),
@@ -94,6 +98,8 @@ impl SharedState {
             overlays_visible_before_conversation: AtomicBool::new(false),
             // Shared query context for DataFusion (reuses SessionContext across queries)
             query_context: QueryContext::new(),
+            // Area cache - loaded from disk later in service startup
+            area_cache: RwLock::new(LogAreaCache::new()),
         }
     }
 

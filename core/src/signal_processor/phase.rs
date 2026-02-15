@@ -460,10 +460,20 @@ pub fn check_ability_trigger(trigger: &Trigger, event: &CombatEvent) -> bool {
     }
 
     // Check EffectRemoved triggers
+    // This matches either:
+    // 1. The effect being removed (event.effect.effect_id) - e.g., a buff expiring
+    // 2. The ability doing the removing (event.action.action_id) - e.g., Dying Light removing Surging Flame
     if event.effect.type_id == effect_type_id::REMOVEEFFECT {
         let effect_id = event.effect.effect_id as u64;
         let effect_name = crate::context::resolve(event.effect.effect_name);
+        // First try matching the effect being removed
         if trigger.matches_effect_removed(effect_id, Some(effect_name)) {
+            return true;
+        }
+        // Also try matching the ability doing the removing (e.g., Dying Light)
+        let action_id = event.action.action_id as u64;
+        let action_name = crate::context::resolve(event.action.name);
+        if trigger.matches_effect_removed(action_id, Some(action_name)) {
             return true;
         }
     }

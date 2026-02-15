@@ -63,13 +63,14 @@ use baras_core::context::{
 };
 use baras_overlay::{
     AlertsOverlay, BossHealthOverlay, ChallengeOverlay, CooldownConfig, CooldownOverlay,
-    DotTrackerConfig, DotTrackerOverlay, EffectsABConfig, EffectsABOverlay, MetricOverlay, Overlay,
-    OverlayConfig, PersonalOverlay, RaidGridLayout, RaidOverlay, RaidOverlayConfig,
-    RaidRegistryAction, TimerOverlay,
+    DotTrackerConfig, DotTrackerOverlay, EffectsABConfig, EffectsABOverlay, MetricOverlay,
+    NotesConfig, NotesOverlay, Overlay, OverlayConfig, PersonalOverlay, RaidGridLayout,
+    RaidOverlay, RaidOverlayConfig, RaidRegistryAction, TimerOverlay,
 };
 use baras_types::{
     CooldownTrackerConfig, DotTrackerConfig as TypesDotTrackerConfig,
     EffectsAConfig as TypesEffectsAConfig, EffectsBConfig as TypesEffectsBConfig,
+    NotesOverlayConfig as TypesNotesOverlayConfig,
 };
 
 use super::state::{OverlayCommand, OverlayHandle, PositionEvent};
@@ -926,6 +927,45 @@ pub fn create_dot_tracker_overlay(
     let factory = move || {
         DotTrackerOverlay::new(config, overlay_config, background_alpha)
             .map_err(|e| format!("Failed to create DOT tracker overlay: {}", e))
+    };
+
+    let (tx, handle) = spawn_overlay_with_factory(factory, kind, None)?;
+
+    Ok(OverlayHandle {
+        tx,
+        handle,
+        kind,
+        registry_action_rx: None,
+    })
+}
+
+/// Create and spawn the notes overlay
+pub fn create_notes_overlay(
+    position: OverlayPositionConfig,
+    notes_config: TypesNotesOverlayConfig,
+    background_alpha: u8,
+) -> Result<OverlayHandle, String> {
+    let config = OverlayConfig {
+        x: position.x,
+        y: position.y,
+        width: position.width,
+        height: position.height,
+        namespace: "baras-notes".to_string(),
+        click_through: true,
+        target_monitor_id: position.monitor_id.clone(),
+    };
+
+    let kind = OverlayType::Notes;
+
+    // Convert types config to overlay config
+    let overlay_config = NotesConfig {
+        font_size: notes_config.font_size,
+        font_color: notes_config.font_color,
+    };
+
+    let factory = move || {
+        NotesOverlay::new(config, overlay_config, background_alpha)
+            .map_err(|e| format!("Failed to create notes overlay: {}", e))
     };
 
     let (tx, handle) = spawn_overlay_with_factory(factory, kind, None)?;

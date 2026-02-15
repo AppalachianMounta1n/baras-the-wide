@@ -9,7 +9,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::api::{
-    self, AbilityBreakdown, EncounterTimeline, EntityBreakdown,
+    self, AbilityBreakdown, DamageTakenSummary, EncounterTimeline, EntityBreakdown,
     PlayerDeath, RaidOverviewRow, TimeRange,
 };
 use crate::components::ability_icon::AbilityIcon;
@@ -18,6 +18,7 @@ use crate::components::class_icons::{get_class_icon, get_role_icon};
 use crate::components::combat_log::CombatLog;
 use crate::components::history_panel::EncounterSummary;
 use crate::components::phase_timeline::PhaseTimelineFilter;
+use crate::components::rotation_view::RotationView;
 use crate::components::{ToastSeverity, use_toast};
 use crate::types::{BreakdownMode, CombatLogSessionState, DataTab, SortColumn, SortDirection, UiSessionState, ViewMode};
 use crate::utils::js_set;
@@ -328,8 +329,8 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
     let mut encounters = use_signal(Vec::<EncounterSummary>::new);
     
     // Extract persisted state fields into local signals for easier access
-    // Always start with live encounter (None) instead of persisting selection
-    let mut selected_encounter = use_signal(|| None::<u32>);
+    // Initialize from parent state to support navigation from other components (e.g., HistoryPanel)
+    let mut selected_encounter = use_signal(|| props.state.read().data_explorer.selected_encounter);
     let mut view_mode = use_signal(|| props.state.read().data_explorer.view_mode);
     let mut selected_source = use_signal(|| props.state.read().data_explorer.selected_source.clone());
     let mut breakdown_mode = use_signal(|| props.state.read().data_explorer.breakdown_mode);
@@ -390,6 +391,12 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
         }
     });
     
+    // NOTE: selected_encounter is initialized from parent state on mount (line 332).
+    // This handles navigation from HistoryPanel "View in Explorer" button.
+    // We do NOT have a continuous parent→local sync effect here because it creates
+    // a bidirectional sync loop with the local→parent sync above, causing
+    // encounter clicks in the sidebar to be ignored/sticky.
+    
     // Sync show_ids from parent state when it changes (e.g., config loaded at startup)
     use_effect(move || {
         let parent_show_ids = props.state.read().combat_log.show_ids;
@@ -397,6 +404,17 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
             combat_log_state.write().show_ids = parent_show_ids;
         }
     });
+
+    // Local player name (fetched once on mount for auto-selection)
+    let local_player_name = use_signal(|| None::<String>);
+    {
+        let mut local_player_name = local_player_name;
+        use_future(move || async move {
+            if let Some(info) = api::get_session_info().await {
+                let _ = local_player_name.try_write().map(|mut w| *w = info.player_name);
+            }
+        });
+    }
 
     // Query result state (not persisted)
     let mut abilities = use_signal(Vec::<AbilityBreakdown>::new);
@@ -774,13 +792,17 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
         let tr = time_range();
         let tl_state = timeline_state();
 
-        // Extract tab if in detailed mode, otherwise exit
-        let Some(tab) = mode.tab() else {
-            // Clear detailed data when not in detailed mode
-            let _ = entities.try_write().map(|mut w| *w = Vec::new());
-            let _ = abilities.try_write().map(|mut w| *w = Vec::new());
-            let _ = selected_source.try_write().map(|mut w| *w = None);
-            return;
+        // Extract tab if in detailed mode, or use Damage tab for Rotation mode
+        let tab = match mode {
+            ViewMode::Detailed(tab) => tab,
+            ViewMode::Rotation => DataTab::Damage,
+            _ => {
+                // Clear detailed data when not in detailed/rotation mode
+                let _ = entities.try_write().map(|mut w| *w = Vec::new());
+                let _ = abilities.try_write().map(|mut w| *w = Vec::new());
+                let _ = selected_source.try_write().map(|mut w| *w = None);
+                return;
+            }
         };
 
         // Only load when timeline is loaded and we have an encounter
@@ -800,24 +822,47 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
             };
 
             // Load entity breakdown - single attempt
-            // None typically means no data available (no encounters dir, etc.) - show empty state
-            let entity_data = match api::query_entity_breakdown(tab, idx, tr_opt.as_ref()).await {
-                Some(data) => data,
-                None => {
-                    // No data available - just mark as loaded with empty data
-                    let _ = content_state
-                        .try_write()
-                        .map(|mut w| *w = LoadState::Loaded);
-                    return;
+            // For Rotation mode, merge Damage + Healing entities so healers with 0 dmg appear
+            let entity_data = if matches!(mode, ViewMode::Rotation) {
+                let dmg = api::query_entity_breakdown(DataTab::Damage, idx, tr_opt.as_ref()).await.unwrap_or_default();
+                let heal = api::query_entity_breakdown(DataTab::Healing, idx, tr_opt.as_ref()).await.unwrap_or_default();
+                let mut merged: HashMap<String, EntityBreakdown> = HashMap::new();
+                for e in dmg.into_iter().chain(heal) {
+                    merged.entry(e.source_name.clone())
+                        .and_modify(|existing| {
+                            existing.total_value += e.total_value;
+                            existing.abilities_used = existing.abilities_used.max(e.abilities_used);
+                        })
+                        .or_insert(e);
+                }
+                let mut result: Vec<_> = merged.into_values().collect();
+                result.sort_by(|a, b| b.total_value.partial_cmp(&a.total_value).unwrap_or(std::cmp::Ordering::Equal));
+                result
+            } else {
+                match api::query_entity_breakdown(tab, idx, tr_opt.as_ref()).await {
+                    Some(data) => data,
+                    None => {
+                        // No data available - just mark as loaded with empty data
+                        let _ = content_state
+                            .try_write()
+                            .map(|mut w| *w = LoadState::Loaded);
+                        return;
+                    }
                 }
             };
 
-            // Auto-select first player if none selected
+            // Auto-select local player if none selected, fall back to first player
             let auto_selected = if selected_source.read().is_none() {
-                entity_data
-                    .iter()
-                    .find(|e| e.entity_type == "Player" || e.entity_type == "Companion")
-                    .map(|e| e.source_name.clone())
+                let local_name = local_player_name.read();
+                let players = entity_data.iter().filter(|e| e.entity_type == "Player" || e.entity_type == "Companion");
+                // Prefer the local player if present
+                if let Some(name) = local_name.as_deref() {
+                    players.clone().find(|e| e.source_name == name)
+                        .or_else(|| players.clone().next())
+                        .map(|e| e.source_name.clone())
+                } else {
+                    players.clone().next().map(|e| e.source_name.clone())
+                }
             } else {
                 selected_source.read().clone()
             };
@@ -876,8 +921,12 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
 
         spawn(async move {
             // Apply entity filter only when no specific source is selected
-            let entity_filter: Option<&[&str]> = if src.is_none() && players_only {
-                Some(&["Player", "Companion"])
+            let entity_filter: Option<&[&str]> = if src.is_none() {
+                if players_only {
+                    Some(&["Player", "Companion"])
+                } else {
+                    Some(&["Npc"])
+                }
             } else {
                 None
             };
@@ -903,17 +952,36 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
         });
     });
 
+    // DamageTaken summary (fetched when DamageTaken tab + source selected)
+    let mut dt_summary: Signal<Option<DamageTakenSummary>> = use_signal(|| None);
+    use_effect(move || {
+        let view = *view_mode.read();
+        let idx = *selected_encounter.read();
+        let src = selected_source.read().clone();
+        let tr = time_range();
+        let tl_state = timeline_state();
+
+        // Only fetch for DamageTaken tab with a selected source
+        if !matches!(view, ViewMode::Detailed(DataTab::DamageTaken)) || src.is_none() || idx.is_none() || !matches!(tl_state, LoadState::Loaded) {
+            dt_summary.set(None);
+            return;
+        }
+
+        let entity_name = src.unwrap();
+        spawn(async move {
+            let tr_opt = if tr.start == 0.0 && tr.end == 0.0 { None } else { Some(tr) };
+            // Don't filter source entity types — the target_name filter already scopes the query
+            let result = api::query_damage_taken_summary(idx, &entity_name, tr_opt.as_ref(), None).await;
+            let _ = dt_summary.try_write().map(|mut w| *w = result);
+        });
+    });
+
     // Filter by source when selected
     let mut on_source_click = move |name: String| {
         let idx = *selected_encounter.read();
         let mode = *view_mode.read();
         let current = selected_source.read().clone();
         let tr = time_range();
-
-        // Get tab from view_mode
-        let Some(tab) = mode.tab() else {
-            return;
-        };
 
         // Toggle selection
         let new_source = if current.as_ref() == Some(&name) {
@@ -924,6 +992,11 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
 
         selected_source.set(new_source.clone());
 
+        // In Rotation mode, just set the source - the RotationView handles its own queries
+        let Some(tab) = mode.tab() else {
+            return;
+        };
+
         // Use time_range if not default
         let tr_opt = if tr.start == 0.0 && tr.end == 0.0 {
             None
@@ -933,12 +1006,15 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
 
         spawn(async move {
             // Apply entity filter only when no specific source is selected
-            let entity_filter: Option<&[&str]> =
-                if new_source.is_none() && *show_players_only.read() {
+            let entity_filter: Option<&[&str]> = if new_source.is_none() {
+                if *show_players_only.read() {
                     Some(&["Player", "Companion"])
                 } else {
-                    None
-                };
+                    Some(&["Npc"])
+                }
+            } else {
+                None
+            };
             let breakdown = *breakdown_mode.read();
             let duration = timeline.read().as_ref().map(|t| t.duration_secs);
             if let Some(data) = api::query_breakdown(
@@ -1004,10 +1080,17 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
     // Memoized entity list for detailed view - filtered by player/all toggle
     let entity_list = use_memo(move || {
         let players_only = *show_players_only.read();
+        let is_rotation = matches!(*view_mode.read(), ViewMode::Rotation);
         entities
             .read()
             .iter()
-            .filter(|e| !players_only || e.entity_type == "Player" || e.entity_type == "Companion")
+            .filter(|e| {
+                if is_rotation || players_only {
+                    e.entity_type == "Player" || e.entity_type == "Companion"
+                } else {
+                    e.entity_type == "Npc"
+                }
+            })
             .cloned()
             .collect::<Vec<_>>()
     });
@@ -1036,6 +1119,15 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
         hits: i64,
         avg: f64,
         crit_pct: f64,
+        miss_count: i64,
+        activation_count: i64,
+        crit_total: f64,
+        effective_total: f64,
+        shield_total: f64,
+        shield_rate: f64,
+        // DamageTaken-specific
+        shield_count: i64,
+        absorbed_total: f64,
     }
 
     // Memoized grouped abilities - groups by target when breakdown mode is enabled
@@ -1071,6 +1163,50 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                         .crit_rate
                         .partial_cmp(&b.crit_rate)
                         .unwrap_or(std::cmp::Ordering::Equal),
+                    SortColumn::MissPct => {
+                        let a_total = a.hit_count + a.miss_count;
+                        let b_total = b.hit_count + b.miss_count;
+                        let a_pct = if a_total > 0 { a.miss_count as f64 / a_total as f64 } else { 0.0 };
+                        let b_pct = if b_total > 0 { b.miss_count as f64 / b_total as f64 } else { 0.0 };
+                        a_pct.partial_cmp(&b_pct).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                    SortColumn::AvgHit => a
+                        .avg_hit
+                        .partial_cmp(&b.avg_hit)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                    SortColumn::AvgCrit => {
+                        let a_avg = if a.crit_count > 0 { a.crit_total / a.crit_count as f64 } else { 0.0 };
+                        let b_avg = if b.crit_count > 0 { b.crit_total / b.crit_count as f64 } else { 0.0 };
+                        a_avg.partial_cmp(&b_avg).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                    SortColumn::Activations => a.activation_count.cmp(&b.activation_count),
+                    SortColumn::Effective => a
+                        .effective_total
+                        .partial_cmp(&b.effective_total)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                    SortColumn::EffectivePct => {
+                        let a_pct = if a.total_value > 0.0 { a.effective_total / a.total_value } else { 0.0 };
+                        let b_pct = if b.total_value > 0.0 { b.effective_total / b.total_value } else { 0.0 };
+                        a_pct.partial_cmp(&b_pct).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                    SortColumn::ShieldTotal => {
+                        let a_val = if a.is_shield { a.total_value } else { 0.0 };
+                        let b_val = if b.is_shield { b.total_value } else { 0.0 };
+                        a_val.partial_cmp(&b_val).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                    SortColumn::Sps => {
+                        let a_val = if a.is_shield { a.dps } else { 0.0 };
+                        let b_val = if b.is_shield { b.dps } else { 0.0 };
+                        a_val.partial_cmp(&b_val).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                    SortColumn::AttackType => a.attack_type.cmp(&b.attack_type),
+                    SortColumn::DamageType => a.damage_type.cmp(&b.damage_type),
+                    SortColumn::ShldPct => {
+                        let a_pct = if a.hit_count + a.shield_count > 0 { a.shield_count as f64 / (a.hit_count + a.shield_count) as f64 } else { 0.0 };
+                        let b_pct = if b.hit_count + b.shield_count > 0 { b.shield_count as f64 / (b.hit_count + b.shield_count) as f64 } else { 0.0 };
+                        a_pct.partial_cmp(&b_pct).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                    SortColumn::Absorbed => a.absorbed_total.partial_cmp(&b.absorbed_total).unwrap_or(std::cmp::Ordering::Equal),
                 };
                 match dir {
                     SortDirection::Asc => cmp,
@@ -1119,6 +1255,15 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                 } else {
                     0.0
                 };
+                let miss_count: i64 = abilities.iter().map(|a| a.miss_count).sum();
+                // Activations are per-ability (not per-target), so sum unique abilities' counts
+                let activation_count: i64 = abilities.iter().map(|a| a.activation_count).sum();
+                let crit_total: f64 = abilities.iter().map(|a| a.crit_total).sum();
+                let effective_total: f64 = abilities.iter().map(|a| a.effective_total).sum();
+                let shield_total: f64 = abilities.iter().filter(|a| a.is_shield).map(|a| a.total_value).sum();
+                let shield_rate: f64 = abilities.iter().filter(|a| a.is_shield).map(|a| a.dps).sum();
+                let shield_count: i64 = abilities.iter().map(|a| a.shield_count).sum();
+                let absorbed_total: f64 = abilities.iter().map(|a| a.absorbed_total).sum();
 
                 let stats = GroupStats {
                     target: Some(target),
@@ -1129,6 +1274,14 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                     hits,
                     avg,
                     crit_pct,
+                    miss_count,
+                    activation_count,
+                    crit_total,
+                    effective_total,
+                    shield_total,
+                    shield_rate,
+                    shield_count,
+                    absorbed_total,
                 };
                 (stats, sort_abilities(abilities))
             })
@@ -1334,6 +1487,11 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                             onclick: move |_| { death_search_text.set(None); view_mode.set(ViewMode::CombatLog); },
                             "Combat Log"
                         }
+                        button {
+                            class: if matches!(view_mode(), ViewMode::Rotation) { "data-tab active" } else { "data-tab" },
+                            onclick: move |_| view_mode.set(ViewMode::Rotation),
+                            "Rotation"
+                        }
                     }
 
                     // Loading/Error state display
@@ -1359,20 +1517,35 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                         // Combat Log Panel
                         if let Some(enc_idx) = *selected_encounter.read() {
                             CombatLog {
+                                key: "{enc_idx}",
                                 encounter_idx: enc_idx,
                                 time_range: time_range(),
                                 initial_search: death_search_text(),
                                 state: combat_log_state,
+                                on_range_change: move |new_range: TimeRange| {
+                                    time_range.set(new_range);
+                                },
                             }
                         }
                     } else if matches!(view_mode(), ViewMode::Charts) {
                         // Charts Panel
                         if let Some(tl) = timeline.read().as_ref() {
-                            ChartsPanel {
-                                key: "{selected_encounter():?}",
-                                encounter_idx: *selected_encounter.read(),
-                                duration_secs: tl.duration_secs,
-                                time_range: time_range(),
+                            {
+                                let tr = time_range();
+                                let duration = if tr.start != 0.0 || tr.end != 0.0 {
+                                    tr.end - tr.start
+                                } else {
+                                    tl.duration_secs
+                                };
+                                rsx! {
+                                    ChartsPanel {
+                                        key: "{selected_encounter():?}",
+                                        encounter_idx: *selected_encounter.read(),
+                                        duration_secs: duration,
+                                        time_range: tr,
+                                        local_player: local_player_name.read().clone(),
+                                    }
+                                }
                             }
                         }
                     } else if matches!(view_mode(), ViewMode::Overview) {
@@ -1532,36 +1705,51 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                 }
                             }
                         }
-                    } else if let ViewMode::Detailed(current_tab) = view_mode() {
-                        // Two-column layout (Detailed breakdown)
+                    } else if matches!(view_mode(), ViewMode::Detailed(_) | ViewMode::Rotation) {
+                        // Two-column layout (Detailed breakdown or Rotation)
+                        {
+                        let current_tab = if let ViewMode::Detailed(tab) = view_mode() { Some(tab) } else { None };
+                        rsx! {
                         div { class: "explorer-content",
-                            // Entity breakdown (source filter for outgoing, target filter for incoming)
+                            // Entity breakdown sidebar
                             div { class: "entity-section",
                                 div { class: "entity-header",
                                     h4 {
-                                        if current_tab.is_outgoing() { "Sources" } else { "Targets" }
+                                        if current_tab.is_some_and(|t| !t.is_outgoing()) { "Targets" } else { "Sources" }
                                     }
-                                    div { class: "entity-filter-tabs",
-                                        button {
-                                            class: if *show_players_only.read() { "filter-tab active" } else { "filter-tab" },
-                                            onclick: move |_| show_players_only.set(true),
-                                            "Players"
-                                        }
-                                        button {
-                                            class: if !*show_players_only.read() { "filter-tab active" } else { "filter-tab" },
-                                            onclick: move |_| show_players_only.set(false),
-                                            "All"
+                                    if !matches!(view_mode(), ViewMode::Rotation) {
+                                        div { class: "entity-filter-tabs",
+                                            button {
+                                                class: if *show_players_only.read() { "filter-tab active" } else { "filter-tab" },
+                                                onclick: move |_| show_players_only.set(true),
+                                                "Player"
+                                            }
+                                            button {
+                                                class: if !*show_players_only.read() { "filter-tab active" } else { "filter-tab" },
+                                                onclick: move |_| show_players_only.set(false),
+                                                "NPC"
+                                            }
                                         }
                                     }
                                 }
                                 div { class: "entity-list",
                                     // Uses memoized entity_list
+                                    {
+                                    let tr = *time_range.read();
+                                    let duration = if tr.start != 0.0 || tr.end != 0.0 {
+                                        tr.end - tr.start
+                                    } else {
+                                        timeline.read().as_ref().map(|t| t.duration_secs).unwrap_or(1.0)
+                                    } as f64;
+                                    let duration = if duration > 0.0 { duration } else { 1.0 };
+                                    rsx! {
                                     for entity in entity_list().iter() {
                                         {
                                             let name = entity.source_name.clone();
                                             let is_selected = selected_source.read().as_ref() == Some(&name);
                                             let is_npc = entity.entity_type == "Npc";
                                             let class_icon = class_icon_lookup().get(&name).cloned();
+                                            let per_sec = entity.total_value / duration;
                                             rsx! {
                                                 div {
                                                     class: if is_selected { "entity-row selected" } else if is_npc { "entity-row npc" } else { "entity-row" },
@@ -1581,17 +1769,91 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                                         }
                                                         "{entity.source_name}"
                                                     }
-                                                    span { class: "entity-value", "{format_number(entity.total_value)}" }
+                                                    span { class: "entity-value", "{format_number(per_sec)}/s" }
                                                     span { class: "entity-abilities", "{entity.abilities_used} abilities" }
                                                 }
                                             }
                                         }
                                     }
+                                    }
+                                    }
                                 }
                             }
 
+                            if matches!(view_mode(), ViewMode::Rotation) {
+                                // Rotation view in right column
+                                div { class: "ability-section",
+                                    RotationView {
+                                        encounter_idx: *selected_encounter.read(),
+                                        time_range: time_range(),
+                                        selected_source: selected_source.read().clone(),
+                                        on_range_change: move |new_range: TimeRange| {
+                                            time_range.set(new_range);
+                                        },
+                                    }
+                                }
+                            } else if let Some(current_tab) = current_tab {
                             // Ability breakdown table
                             div { class: "ability-section",
+                                // DamageTaken summary panel
+                                if current_tab == DataTab::DamageTaken {
+                                    if let Some(ref summary) = *dt_summary.read() {
+                                        div { class: "damage-taken-summary",
+                                            div { class: "dt-summary-col",
+                                                div { class: "dt-summary-row",
+                                                    span { class: "dt-summary-label", "Internal/Elemental" }
+                                                    span { class: "dt-summary-pct", "{format_pct(summary.internal_elemental_pct)}" }
+                                                    span { class: "dt-summary-val", "{format_number(summary.internal_elemental_total)}" }
+                                                }
+                                                div { class: "dt-summary-row",
+                                                    span { class: "dt-summary-label", "Kinetic/Energy" }
+                                                    span { class: "dt-summary-pct", "{format_pct(summary.kinetic_energy_pct)}" }
+                                                    span { class: "dt-summary-val", "{format_number(summary.kinetic_energy_total)}" }
+                                                }
+                                                div { class: "dt-summary-row",
+                                                    span { class: "dt-summary-label", "Force/Tech" }
+                                                    span { class: "dt-summary-pct", "{format_pct(summary.force_tech_pct)}" }
+                                                    span { class: "dt-summary-val", "{format_number(summary.force_tech_total)}" }
+                                                }
+                                                div { class: "dt-summary-row",
+                                                    span { class: "dt-summary-label", "Melee/Ranged" }
+                                                    span { class: "dt-summary-pct", "{format_pct(summary.melee_ranged_pct)}" }
+                                                    span { class: "dt-summary-val", "{format_number(summary.melee_ranged_total)}" }
+                                                }
+                                            }
+                                            div { class: "dt-summary-col",
+                                                div { class: "dt-summary-row",
+                                                    span { class: "dt-summary-label", "Avoided" }
+                                                    span { class: "dt-summary-pct", "{format_pct(summary.avoided_pct)}" }
+                                                    span { class: "dt-summary-val" }
+                                                }
+                                                div { class: "dt-summary-row",
+                                                    span { class: "dt-summary-label", "Shielded" }
+                                                    span { class: "dt-summary-pct", "{format_pct(summary.shielded_pct)}" }
+                                                    span { class: "dt-summary-val" }
+                                                }
+                                                div { class: "dt-summary-row",
+                                                    span { class: "dt-summary-label", "Absorbed (self)" }
+                                                    span { class: "dt-summary-pct", "{format_pct(summary.absorbed_self_pct)}" }
+                                                    span { class: "dt-summary-val",
+                                                        if summary.absorbed_self_total > 0.0 {
+                                                            "{format_number(summary.absorbed_self_total)}"
+                                                        }
+                                                    }
+                                                }
+                                                div { class: "dt-summary-row",
+                                                    span { class: "dt-summary-label", "Absorbed (given)" }
+                                                    span { class: "dt-summary-pct", "{format_pct(summary.absorbed_given_pct)}" }
+                                                    span { class: "dt-summary-val",
+                                                        if summary.absorbed_given_total > 0.0 {
+                                                            "{format_number(summary.absorbed_given_total)}"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                                 // Header with breakdown controls only
                                 div { class: "ability-header",
                                     // Breakdown mode toggles (nested hierarchy)
@@ -1670,6 +1932,9 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                 let show_ability_col = mode.by_ability;
                                 let breakdown_col_label = if tab.is_outgoing() { "Target" } else { "Source" };
                                 let rate_label = tab.rate_label();
+                                let is_damage_tab = tab == DataTab::Damage || tab == DataTab::DamageTaken;
+                                let is_damage_taken = tab == DataTab::DamageTaken;
+                                let is_healing_tab = tab.is_healing();
                                 let current_sort = *sort_column.read();
                                 let current_dir = *sort_direction.read();
 
@@ -1701,11 +1966,40 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                     }
                                 };
 
+                                // Compute split averages for group stats
+                                let group_miss_pct = |s: &GroupStats| -> f64 {
+                                    let total = s.hits + s.miss_count;
+                                    if total > 0 { s.miss_count as f64 / total as f64 * 100.0 } else { 0.0 }
+                                };
+                                let group_avg_hit = |s: &GroupStats| -> f64 {
+                                    if s.hits > 0 { s.total / s.hits as f64 } else { 0.0 }
+                                };
+                                let group_avg_crit = |s: &GroupStats| -> f64 {
+                                    let crits = (s.crit_pct / 100.0 * s.hits as f64) as i64;
+                                    if crits > 0 { s.crit_total / crits as f64 } else { 0.0 }
+                                };
+                                let group_eff_pct = |s: &GroupStats| -> f64 {
+                                    if s.total > 0.0 { s.effective_total / s.total * 100.0 } else { 0.0 }
+                                };
+
+                                // Compute split averages for ability rows
+                                let ability_avg_crit = |a: &AbilityBreakdown| -> f64 {
+                                    if a.crit_count > 0 { a.crit_total / a.crit_count as f64 } else { 0.0 }
+                                };
+                                let ability_miss_pct = |a: &AbilityBreakdown| -> f64 {
+                                    let total = a.hit_count + a.miss_count;
+                                    if total > 0 { a.miss_count as f64 / total as f64 * 100.0 } else { 0.0 }
+                                };
+                                let ability_eff_pct = |a: &AbilityBreakdown| -> f64 {
+                                    if a.total_value > 0.0 { a.effective_total / a.total_value * 100.0 } else { 0.0 }
+                                };
+
+                                let table_class = if is_damage_tab { "ability-table damage-tab" } else if is_healing_tab { "ability-table healing-tab" } else { "ability-table" };
+
                                 rsx! {
-                                    table { class: "ability-table",
+                                    table { class: table_class,
                                         thead {
                                             tr {
-                                                // First column: Target/Ability (hierarchical) or just Ability
                                                 th {
                                                     class: if show_breakdown_col { sort_class(SortColumn::Target) } else { sort_class(SortColumn::Ability) },
                                                     onclick: if show_breakdown_col { sort_click(SortColumn::Target, true) } else { sort_click(SortColumn::Ability, true) },
@@ -1715,20 +2009,13 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                                         "Ability"
                                                     }
                                                 }
-                                                th {
-                                                    class: "num {sort_class(SortColumn::Total)}",
-                                                    onclick: sort_click(SortColumn::Total, false),
-                                                    "Total"
-                                                }
-                                                th {
-                                                    class: "num {sort_class(SortColumn::Percent)}",
-                                                    onclick: sort_click(SortColumn::Percent, false),
-                                                    "%"
-                                                }
-                                                th {
-                                                    class: "num {sort_class(SortColumn::Rate)}",
-                                                    onclick: sort_click(SortColumn::Rate, false),
-                                                    "{rate_label}"
+                                                // Activations and Hits as columns #2 and #3
+                                                if show_ability_col {
+                                                    th {
+                                                        class: "num {sort_class(SortColumn::Activations)}",
+                                                        onclick: sort_click(SortColumn::Activations, false),
+                                                        "Activations"
+                                                    }
                                                 }
                                                 th {
                                                     class: "num {sort_class(SortColumn::Hits)}",
@@ -1736,20 +2023,107 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                                     "Hits"
                                                 }
                                                 th {
-                                                    class: "num {sort_class(SortColumn::Avg)}",
+                                                    class: "num col-val {sort_class(SortColumn::Total)}",
+                                                    onclick: sort_click(SortColumn::Total, false),
+                                                    "Total"
+                                                }
+                                                th { class: "col-bar" }
+                                                if is_healing_tab {
+                                                    th {
+                                                        class: "num col-val {sort_class(SortColumn::Effective)}",
+                                                        onclick: sort_click(SortColumn::Effective, false),
+                                                        "Effective"
+                                                    }
+                                                    th {
+                                                        class: "num col-pct {sort_class(SortColumn::EffectivePct)}",
+                                                        onclick: sort_click(SortColumn::EffectivePct, false),
+                                                        "Eff%"
+                                                    }
+                                                }
+                                                th {
+                                                    class: "num col-pct {sort_class(SortColumn::Percent)}",
+                                                    onclick: sort_click(SortColumn::Percent, false),
+                                                    "%"
+                                                }
+                                                th {
+                                                    class: "num col-val {sort_class(SortColumn::Rate)}",
+                                                    onclick: sort_click(SortColumn::Rate, false),
+                                                    "{rate_label}"
+                                                }
+                                                if is_healing_tab {
+                                                    th {
+                                                        class: "num col-val {sort_class(SortColumn::Effective)}",
+                                                        onclick: sort_click(SortColumn::Effective, false),
+                                                        "EHPS"
+                                                    }
+                                                    th {
+                                                        class: "num col-shield {sort_class(SortColumn::ShieldTotal)}",
+                                                        onclick: sort_click(SortColumn::ShieldTotal, false),
+                                                        "Shielded"
+                                                    }
+                                                    th {
+                                                        class: "num col-shield {sort_class(SortColumn::Sps)}",
+                                                        onclick: sort_click(SortColumn::Sps, false),
+                                                        "SPS"
+                                                    }
+                                                }
+                                                if is_damage_tab {
+                                                    th {
+                                                        class: "num col-pct {sort_class(SortColumn::MissPct)}",
+                                                        onclick: sort_click(SortColumn::MissPct, false),
+                                                        if is_damage_taken { "Def%" } else { "Miss%" }
+                                                    }
+                                                }
+                                                if is_damage_taken {
+                                                    th {
+                                                        class: "num col-pct {sort_class(SortColumn::ShldPct)}",
+                                                        onclick: sort_click(SortColumn::ShldPct, false),
+                                                        "Shld%"
+                                                    }
+                                                    th {
+                                                        class: "num col-val {sort_class(SortColumn::Absorbed)}",
+                                                        onclick: sort_click(SortColumn::Absorbed, false),
+                                                        "Abs"
+                                                    }
+                                                    th {
+                                                        class: "num col-dmg-type {sort_class(SortColumn::AttackType)}",
+                                                        onclick: sort_click(SortColumn::AttackType, true),
+                                                        "AT"
+                                                    }
+                                                    th {
+                                                        class: "num col-dmg-type {sort_class(SortColumn::DamageType)}",
+                                                        onclick: sort_click(SortColumn::DamageType, true),
+                                                        "DT"
+                                                    }
+                                                }
+                                                if !is_damage_taken {
+                                                    th {
+                                                        class: "num col-pct {sort_class(SortColumn::CritPct)}",
+                                                        onclick: sort_click(SortColumn::CritPct, false),
+                                                        "Crit%"
+                                                    }
+                                                }
+                                                th {
+                                                    class: "num col-avg col-avg-first {sort_class(SortColumn::Avg)}",
                                                     onclick: sort_click(SortColumn::Avg, false),
                                                     "Avg"
                                                 }
+                                                if is_damage_tab {
+                                                    th {
+                                                        class: "num col-avg {sort_class(SortColumn::AvgHit)}",
+                                                        onclick: sort_click(SortColumn::AvgHit, false),
+                                                        "Hit"
+                                                    }
+                                                }
                                                 th {
-                                                    class: "num {sort_class(SortColumn::CritPct)}",
-                                                    onclick: sort_click(SortColumn::CritPct, false),
-                                                    "Crit%"
+                                                    class: "num col-avg {sort_class(SortColumn::AvgCrit)}",
+                                                    onclick: sort_click(SortColumn::AvgCrit, false),
+                                                    "Crit"
                                                 }
                                             }
                                         }
                                         tbody {
                                             for (stats, abilities) in grouped_abilities().iter() {
-                                                // Group header row (when grouping by target)
                                                 if let Some(target) = &stats.target {
                                                     tr { class: "group-header",
                                                         td { class: "group-target",
@@ -1761,36 +2135,265 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                                                 }
                                                             }
                                                         }
-                                                        td { class: "num group-stat", "{format_number(stats.total)}" }
-                                                        td { class: "num group-stat", "{format_pct(stats.percent)}" }
-                                                        td { class: "num group-stat", "{format_number(stats.rate)}" }
+                                                        if show_ability_col {
+                                                            td { class: "num group-stat", "{stats.activation_count}" }
+                                                        }
                                                         td { class: "num group-stat", "{stats.hits}" }
-                                                        td { class: "num group-stat", "{format_number(stats.avg)}" }
-                                                        td { class: "num group-stat", "{format_pct(stats.crit_pct)}" }
-                                                    }
-                                                }
-                                                // Ability rows (only shown when Ability breakdown is enabled)
-                                                if show_ability_col {
-                                                    for (idx, ability) in abilities.iter().enumerate() {
-                                                        tr { key: "{stats.target.as_deref().unwrap_or(\"\")}-{idx}-{ability.ability_id}", class: if stats.target.is_some() { "ability-row indented" } else { "ability-row" },
-                                                            td { class: "ability-name-cell",
-                                                                AbilityIcon { ability_id: ability.ability_id }
-                                                                if !ability.ability_name.is_empty() {
-                                                                    "{ability.ability_name}"
-                                                                } else {
-                                                                    "Ability #{ability.ability_id}"
+                                                        td { class: "num group-stat col-val", "{format_number(stats.total)}" }
+                                                        td { class: "col-bar" }
+                                                        if is_healing_tab {
+                                                            td { class: "num group-stat col-val", "{format_number(stats.effective_total)}" }
+                                                            td { class: "num group-stat col-pct", "{format_pct(group_eff_pct(stats))}" }
+                                                        }
+                                                        td { class: "num group-stat col-pct", "{format_pct(stats.percent)}" }
+                                                        td { class: "num group-stat col-val", "{format_number(stats.rate)}" }
+                                                        if is_healing_tab {
+                                                            td { class: "num group-stat col-val",
+                                                                {
+                                                                    let ehps = if stats.total > 0.0 { stats.rate * stats.effective_total / stats.total } else { 0.0 };
+                                                                    format_number(ehps)
                                                                 }
                                                             }
-                                                            td { class: "num", "{format_number(ability.total_value)}" }
-                                                            td { class: "num pct-cell",
-                                                                span { class: "pct-bar", style: "width: {ability.percent_of_total.min(100.0)}%;" }
-                                                                span { class: "pct-text", "{format_pct(ability.percent_of_total)}" }
+                                                            td { class: "num group-stat col-shield",
+                                                                if stats.shield_total > 0.0 { "{format_number(stats.shield_total)}" } else { "-" }
                                                             }
-                                                            td { class: "num", "{format_number(ability.dps)}" }
-                                                            td { class: "num", "{ability.hit_count}" }
-                                                            td { class: "num", "{format_number(ability.avg_hit)}" }
-                                                            td { class: "num", "{format_pct(ability.crit_rate)}" }
+                                                            td { class: "num group-stat col-shield",
+                                                                if stats.shield_rate > 0.0 { "{format_number(stats.shield_rate)}" } else { "-" }
+                                                            }
                                                         }
+                                                        if is_damage_tab {
+                                                            td { class: "num group-stat col-pct", "{format_pct(group_miss_pct(stats))}" }
+                                                        }
+                                                        if is_damage_taken {
+                                                            td { class: "num group-stat col-pct",
+                                                                {
+                                                                    let total = stats.hits + stats.shield_count;
+                                                                    if total > 0 {
+                                                                        format_pct(stats.shield_count as f64 / total as f64 * 100.0)
+                                                                    } else {
+                                                                        "-".to_string()
+                                                                    }
+                                                                }
+                                                            }
+                                                            td { class: "num group-stat col-val",
+                                                                if stats.absorbed_total > 0.0 { "{format_number(stats.absorbed_total)}" } else { "-" }
+                                                            }
+                                                            td { class: "num group-stat col-dmg-type", "-" }
+                                                            td { class: "num group-stat col-dmg-type", "-" }
+                                                        }
+                                                        if !is_damage_taken {
+                                                            td { class: "num group-stat col-pct", "{format_pct(stats.crit_pct)}" }
+                                                        }
+                                                        td { class: "num group-stat col-avg col-avg-first",
+                                                            {
+                                                                let overall = if is_damage_tab {
+                                                                    let total_attempts = stats.hits + stats.miss_count;
+                                                                    if total_attempts > 0 { format_number(stats.total / total_attempts as f64) } else { format_number(0.0) }
+                                                                } else {
+                                                                    format_number(stats.avg)
+                                                                };
+                                                                overall
+                                                            }
+                                                        }
+                                                        if is_damage_tab {
+                                                            td { class: "num group-stat col-avg", "{format_number(group_avg_hit(stats))}" }
+                                                        }
+                                                        td { class: "num group-stat col-avg", "{format_number(group_avg_crit(stats))}" }
+                                                    }
+                                                }
+                                                if show_ability_col {
+                                                    for (idx, ability) in abilities.iter().enumerate() {
+                                                        tr { key: "{stats.target.as_deref().unwrap_or(\"\")}-{idx}-{ability.ability_id}", class: if ability.is_shield { "ability-row shield-row" } else if stats.target.is_some() { "ability-row indented" } else { "ability-row" },
+                                                            td { class: "ability-name-cell",
+                                                                span { class: "ability-name-inner",
+                                                                    AbilityIcon { ability_id: ability.ability_id }
+                                                                    if !ability.ability_name.is_empty() {
+                                                                        "{ability.ability_name}"
+                                                                    } else {
+                                                                        "Ability #{ability.ability_id}"
+                                                                    }
+                                                                    if ability.is_shield {
+                                                                        span { class: "shield-badge", " (shield)" }
+                                                                    }
+                                                                }
+                                                            }
+                                                            // Activations and Hits as columns #2 and #3
+                                                            td { class: "num",
+                                                                if ability.activation_count > 0 {
+                                                                    "{ability.activation_count}"
+                                                                } else {
+                                                                    "-"
+                                                                }
+                                                            }
+                                                            td { class: "num", "{ability.hit_count}" }
+                                                            // Total with inline bar
+                                                            td { class: "num col-val", "{format_number(ability.total_value)}" }
+                                                            td { class: "col-bar",
+                                                                span { class: "inline-bar", style: "width: {(ability.percent_of_total * 0.8).min(80.0)}px;" }
+                                                            }
+                                                            if is_healing_tab {
+                                                                td { class: "num col-val", "{format_number(ability.effective_total)}" }
+                                                                td { class: "num col-pct", "{format_pct(ability_eff_pct(ability))}" }
+                                                            }
+                                                            // %
+                                                            td { class: "num col-pct", "{format_pct(ability.percent_of_total)}" }
+                                                            td { class: "num col-val", "{format_number(ability.dps)}" }
+                                                            if is_healing_tab {
+                                                                td { class: "num col-val",
+                                                                    {
+                                                                        let ehps = if ability.total_value > 0.0 { ability.dps * ability.effective_total / ability.total_value } else { 0.0 };
+                                                                        format_number(ehps)
+                                                                    }
+                                                                }
+                                                                td { class: "num col-shield",
+                                                                    if ability.is_shield { "{format_number(ability.total_value)}" } else { "-" }
+                                                                }
+                                                                td { class: "num col-shield",
+                                                                    if ability.is_shield { "{format_number(ability.dps)}" } else { "-" }
+                                                                }
+                                                            }
+                                                            if is_damage_tab {
+                                                                td { class: "num col-pct",
+                                                                    if ability.is_shield { "-" } else { "{format_pct(ability_miss_pct(ability))}" }
+                                                                }
+                                                            }
+                                                            if is_damage_taken {
+                                                                td { class: "num col-pct",
+                                                                    {
+                                                                        let total = ability.hit_count + ability.shield_count;
+                                                                        if total > 0 {
+                                                                            format_pct(ability.shield_count as f64 / total as f64 * 100.0)
+                                                                        } else {
+                                                                            "-".to_string()
+                                                                        }
+                                                                    }
+                                                                }
+                                                                td { class: "num col-val",
+                                                                    if ability.absorbed_total > 0.0 { "{format_number(ability.absorbed_total)}" } else { "-" }
+                                                                }
+                                                                td { class: "num col-dmg-type",
+                                                                    {
+                                                                        match ability.attack_type.as_str() {
+                                                                            "" => "-",
+                                                                            other => other,
+                                                                        }
+                                                                    }
+                                                                }
+                                                                td { class: "num col-dmg-type",
+                                                                    {
+                                                                        match ability.damage_type.as_str() {
+                                                                            "" => "-",
+                                                                            other => other,
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                            if !is_damage_taken {
+                                                                td { class: "num col-pct",
+                                                                    if ability.is_shield { "-" } else { "{format_pct(ability.crit_rate)}" }
+                                                                }
+                                                            }
+                                                            td { class: "num col-avg col-avg-first",
+                                                                {
+                                                                    let overall = if is_damage_tab {
+                                                                        let total_attempts = ability.hit_count + ability.miss_count;
+                                                                        if total_attempts > 0 { ability.total_value / total_attempts as f64 } else { 0.0 }
+                                                                    } else {
+                                                                        ability.avg_hit
+                                                                    };
+                                                                    format_number(overall)
+                                                                }
+                                                            }
+                                                            if is_damage_tab {
+                                                                td { class: "num col-avg",
+                                                                    if ability.is_shield { "-" } else { "{format_number(ability.avg_hit)}" }
+                                                                }
+                                                            }
+                                                            td { class: "num col-avg",
+                                                                if ability.is_shield || ability.crit_count == 0 { "-" } else { "{format_number(ability_avg_crit(ability))}" }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        tfoot {
+                                            {
+                                                let groups = grouped_abilities();
+                                                let total_hits: i64 = groups.iter().flat_map(|(_, abilities)| abilities.iter().map(|a| a.hit_count)).sum();
+                                                let total_activations: i64 = groups.iter().flat_map(|(_, abilities)| abilities.iter().map(|a| a.activation_count)).sum();
+                                                let total_val: f64 = groups.iter().flat_map(|(_, abilities)| abilities.iter().map(|a| a.total_value)).sum();
+                                                let total_rate: f64 = groups.iter().flat_map(|(_, abilities)| abilities.iter().map(|a| a.dps)).sum();
+                                                let total_eff: f64 = groups.iter().flat_map(|(_, abilities)| abilities.iter().map(|a| a.effective_total)).sum();
+                                                let total_miss: i64 = groups.iter().flat_map(|(_, abilities)| abilities.iter().map(|a| a.miss_count)).sum();
+                                                let total_crits: i64 = groups.iter().flat_map(|(_, abilities)| abilities.iter().map(|a| a.crit_count)).sum();
+                                                let total_shield_val: f64 = groups.iter().flat_map(|(_, abilities)| abilities.iter().filter(|a| a.is_shield).map(|a| a.total_value)).sum();
+                                                let total_shield_rate: f64 = groups.iter().flat_map(|(_, abilities)| abilities.iter().filter(|a| a.is_shield).map(|a| a.dps)).sum();
+                                                let total_shield_count: i64 = groups.iter().flat_map(|(_, abilities)| abilities.iter().map(|a| a.shield_count)).sum();
+                                                let total_absorbed: f64 = groups.iter().flat_map(|(_, abilities)| abilities.iter().map(|a| a.absorbed_total)).sum();
+                                                let crit_pct = if total_hits > 0 { total_crits as f64 / total_hits as f64 * 100.0 } else { 0.0 };
+                                                let avg = if is_damage_tab {
+                                                    let attempts = total_hits + total_miss;
+                                                    if attempts > 0 { total_val / attempts as f64 } else { 0.0 }
+                                                } else if total_hits > 0 {
+                                                    total_val / total_hits as f64
+                                                } else {
+                                                    0.0
+                                                };
+                                                let miss_pct = {
+                                                    let attempts = total_hits + total_miss;
+                                                    if attempts > 0 { total_miss as f64 / attempts as f64 * 100.0 } else { 0.0 }
+                                                };
+                                                let eff_pct = if total_val > 0.0 { total_eff / total_val * 100.0 } else { 0.0 };
+                                                let ehps = if total_val > 0.0 { total_rate * total_eff / total_val } else { 0.0 };
+                                                let shld_pct = {
+                                                    let total = total_hits + total_shield_count;
+                                                    if total > 0 { total_shield_count as f64 / total as f64 * 100.0 } else { 0.0 }
+                                                };
+
+                                                rsx! {
+                                                    tr { class: "totals-row",
+                                                        td { "Total" }
+                                                        if show_ability_col {
+                                                            td { class: "num", "{total_activations}" }
+                                                        }
+                                                        td { class: "num", "{total_hits}" }
+                                                        td { class: "num col-val", "{format_number(total_val)}" }
+                                                        td { class: "col-bar" }
+                                                        if is_healing_tab {
+                                                            td { class: "num col-val", "{format_number(total_eff)}" }
+                                                            td { class: "num col-pct", "{format_pct(eff_pct)}" }
+                                                        }
+                                                        td { class: "num col-pct" }
+                                                        td { class: "num col-val", "{format_number(total_rate)}" }
+                                                        if is_healing_tab {
+                                                            td { class: "num col-val", "{format_number(ehps)}" }
+                                                            td { class: "num col-shield",
+                                                                if total_shield_val > 0.0 { "{format_number(total_shield_val)}" } else { "-" }
+                                                            }
+                                                            td { class: "num col-shield",
+                                                                if total_shield_rate > 0.0 { "{format_number(total_shield_rate)}" } else { "-" }
+                                                            }
+                                                        }
+                                                        if is_damage_tab {
+                                                            td { class: "num col-pct", "{format_pct(miss_pct)}" }
+                                                        }
+                                                        if is_damage_taken {
+                                                            td { class: "num col-pct", "{format_pct(shld_pct)}" }
+                                                            td { class: "num col-val",
+                                                                if total_absorbed > 0.0 { "{format_number(total_absorbed)}" } else { "-" }
+                                                            }
+                                                            td { class: "num col-dmg-type" }
+                                                            td { class: "num col-dmg-type" }
+                                                        }
+                                                        if !is_damage_taken {
+                                                            td { class: "num col-pct", "{format_pct(crit_pct)}" }
+                                                        }
+                                                        td { class: "num col-avg col-avg-first", "{format_number(avg)}" }
+                                                        if is_damage_tab {
+                                                            td { class: "num col-avg" }
+                                                        }
+                                                        td { class: "num col-avg" }
                                                     }
                                                 }
                                             }
@@ -1799,6 +2402,9 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                 }
                                 }
                             }
+                            }
+                        }
+                        }
                         }
                     }
                 }

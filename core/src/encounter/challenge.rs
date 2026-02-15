@@ -219,6 +219,45 @@ impl ChallengeTracker {
         self.active
     }
 
+    /// Calculate the effective duration for a challenge value.
+    /// Phase-scoped challenges use cumulative phase time (e.g. burn1 20s + burn2 20s = 40s).
+    /// Non-phase challenges use elapsed time from activation.
+    fn calculate_duration(&self, val: &ChallengeValue, current_time: chrono::NaiveDateTime) -> f32 {
+        // Find the definition to check for phase conditions
+        let phase_ids = self
+            .definitions
+            .iter()
+            .find(|d| d.id == val.id)
+            .and_then(|d| d.phase_ids());
+
+        if let Some(phase_ids) = phase_ids {
+            // Sum accumulated durations for all matching phases
+            let mut total: f32 = phase_ids
+                .iter()
+                .filter_map(|pid| self.phase_durations.get(pid))
+                .sum();
+
+            // Add elapsed time if a matching phase is currently running
+            if let Some((ref current_id, start_time)) = self.current_phase_start
+                && phase_ids.iter().any(|pid| pid == current_id)
+            {
+                let elapsed = current_time.signed_duration_since(start_time);
+                total += (elapsed.num_milliseconds() as f32 / 1000.0).max(0.0);
+            }
+
+            total
+        } else {
+            // Non-phase challenge: elapsed time from activation
+            val.activated_time
+                .or(val.first_event_time)
+                .map(|start| {
+                    let elapsed = current_time.signed_duration_since(start);
+                    (elapsed.num_milliseconds() as f32 / 1000.0).max(0.0)
+                })
+                .unwrap_or(0.0)
+        }
+    }
+
     /// Get current values snapshot with calculated durations
     /// Pass current timestamp for live duration calculation
     /// Only returns challenges that have received at least one matching event
@@ -227,16 +266,7 @@ impl ChallengeTracker {
             .values()
             .filter(|val| val.first_event_time.is_some()) // Only show challenges with data
             .map(|val| {
-                // Calculate duration from activated_time (when challenge context became active)
-                // Falls back to first_event_time if activated_time not set
-                let duration_secs = val
-                    .activated_time
-                    .or(val.first_event_time)
-                    .map(|start| {
-                        let elapsed = current_time.signed_duration_since(start);
-                        (elapsed.num_milliseconds() as f32 / 1000.0).max(0.0)
-                    })
-                    .unwrap_or(0.0);
+                let duration_secs = self.calculate_duration(val, current_time);
 
                 ChallengeValue {
                     id: val.id.clone(),
@@ -256,25 +286,50 @@ impl ChallengeTracker {
             .collect()
     }
 
-    /// Get current values snapshot (uses stored duration - for historical data)
+    /// Get current values snapshot (uses finalized durations - for historical data)
     pub fn snapshot(&self) -> Vec<ChallengeValue> {
         self.values
             .values()
-            .map(|val| ChallengeValue {
-                id: val.id.clone(),
-                name: val.name.clone(),
-                value: val.value,
-                event_count: val.event_count,
-                by_player: val.by_player.clone(),
-                duration_secs: val.duration_secs.max(self.total_duration_secs).max(1.0),
-                first_event_time: val.first_event_time,
-                activated_time: val.activated_time,
-                // Display settings
-                enabled: val.enabled,
-                color: val.color,
-                columns: val.columns,
+            .map(|val| {
+                // Use phase-aware duration for finalized encounters
+                let duration_secs = self.finalized_duration(val);
+
+                ChallengeValue {
+                    id: val.id.clone(),
+                    name: val.name.clone(),
+                    value: val.value,
+                    event_count: val.event_count,
+                    by_player: val.by_player.clone(),
+                    duration_secs,
+                    first_event_time: val.first_event_time,
+                    activated_time: val.activated_time,
+                    // Display settings
+                    enabled: val.enabled,
+                    color: val.color,
+                    columns: val.columns,
+                }
             })
             .collect()
+    }
+
+    /// Calculate duration for a finalized (ended) encounter.
+    /// Phase-scoped challenges use cumulative phase time, others use total encounter time.
+    fn finalized_duration(&self, val: &ChallengeValue) -> f32 {
+        let phase_ids = self
+            .definitions
+            .iter()
+            .find(|d| d.id == val.id)
+            .and_then(|d| d.phase_ids());
+
+        if let Some(phase_ids) = phase_ids {
+            let total: f32 = phase_ids
+                .iter()
+                .filter_map(|pid| self.phase_durations.get(pid))
+                .sum();
+            total.max(1.0)
+        } else {
+            self.total_duration_secs.max(1.0)
+        }
     }
 
     /// Get a specific challenge value

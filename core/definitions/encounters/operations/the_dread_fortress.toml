@@ -669,6 +669,11 @@ name = "Reach of Brontes"
 ids = [3298281480257536]
 is_boss = false
 
+[[boss.entities]]
+name = "Droids"
+ids = [3300910000242688]
+is_boss = false
+is_kill_target = false
 # ─── Phases ─────────────────────────────────────────────────────────────────────
 
 [[boss.phases]]
@@ -691,12 +696,19 @@ start_trigger = { type = "boss_hp_below", hp_percent = 99.9, selector = [
 [[boss.phases]]
 id = "clock"
 name = "Clock"
-start_trigger = { type = "ability_cast", abilities = [3300802626060288] }
+
+[boss.phases.start_trigger]
+type = "npc_appears"
+selector = ["Droids"]
 
 [[boss.phases]]
 id = "fingers"
 name = "Fingers"
-start_trigger = { type = "effect_removed", effects = [3300802626060575] }
+
+[boss.phases.start_trigger]
+type = "counter_reaches"
+counter_id = "brontes_droid_deaths"
+value = 6
 
 [[boss.phases]]
 id = "burn"
@@ -707,6 +719,16 @@ start_trigger = { type = "ability_cast", abilities = [3311840692011008] }
 id = "finger_deaths"
 name = "Finger Deaths"
 increment_on = { type = "entity_death", selector = ["Fingers-2"] }
+
+[[boss.counter]]
+id = "brontes_droid_deaths"
+name = "Droid deaths"
+initial_value = 0
+decrement = false
+
+[boss.counter.increment_on]
+type = "entity_death"
+selector = ["Droids"]
 
 [[boss.challenges]]
 id = "brontes_burn"
