@@ -149,6 +149,13 @@ impl EncounterQuery<'_> {
                 FROM events
                 WHERE threat != 0 {time_filter}
                 GROUP BY source_name
+            ),
+            actions AS (
+                SELECT source_name as name,
+                       COUNT(*) as action_count
+                FROM events
+                WHERE effect_id = {ability_activate} {time_filter}
+                GROUP BY source_name
             )
             SELECT
                 p.name,
@@ -158,14 +165,17 @@ impl EncounterQuery<'_> {
                 COALESCE(t.damage_taken_total, 0) as damage_taken_total,
                 COALESCE(t.absorbed_total, 0) as absorbed_total,
                 COALESCE(h.healing_total, 0) as healing_total,
-                COALESCE(h.healing_effective, 0) as healing_effective
+                COALESCE(h.healing_effective, 0) as healing_effective,
+                COALESCE(a.action_count, 0) as action_count
             FROM participants p
             LEFT JOIN damage_dealt d ON p.name = d.name
             LEFT JOIN damage_taken t ON p.name = t.name
             LEFT JOIN healing_done h ON p.name = h.name
             LEFT JOIN threat as th ON p.name = th.name
+            LEFT JOIN actions a ON p.name = a.name
             ORDER BY damage_total DESC
-        "#
+        "#,
+                ability_activate = effect_id::ABILITYACTIVATE,
             ))
             .await?;
 
@@ -179,6 +189,7 @@ impl EncounterQuery<'_> {
             let absorbed_totals = col_f64(batch, 5)?;
             let healing_totals = col_f64(batch, 6)?;
             let healing_effectives = col_f64(batch, 7)?;
+            let action_counts = col_f64(batch, 8)?;
 
             for i in 0..batch.num_rows() {
                 let name = names[i].clone();
@@ -212,6 +223,7 @@ impl EncounterQuery<'_> {
                     healing_effective,
                     ehps: healing_effective * 1000.0 / duration_ms as f64,
                     healing_pct,
+                    apm: action_counts[i] * 60000.0 / duration_ms as f64,
                 });
             }
         }

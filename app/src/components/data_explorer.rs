@@ -1606,6 +1606,7 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                                 th { class: "section-header", colspan: "3", "Damage Taken" }
                                                 th { class: "section-header", colspan: "4", "Healing" }
                                                 th { class: "section-header", colspan: "2", "Shielding" }
+                                                th { class: "section-header", colspan: "1", "Activity" }
                                             }
                                             tr { class: "sub-header",
                                                 th {}
@@ -1622,6 +1623,7 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                                 th { class: "num", "EHPS" }
                                                 th { class: "num", "Total" }
                                                 th { class: "num", "SPS" }
+                                                th { class: "num", "APM" }
                                             }
                                         }
                                         tbody {
@@ -1669,6 +1671,7 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                                     td { class: "num heal", "{format_number(row.ehps)}" }
                                                     td { class: "num shield", "{format_number(row.shielding_given_total)}" }
                                                     td { class: "num shield", "{format_number(row.sps)}" }
+                                                    td { class: "num apm", "{row.apm:.1}" }
                                                 }
                                             }
                                         }
@@ -1688,6 +1691,7 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                                 td { class: "num heal", "{format_number(table_data.total_ehps)}" }
                                                 td { class: "num shield", "{format_number(table_data.total_shielding)}" }
                                                 td { class: "num shield", "{format_number(table_data.total_sps)}" }
+                                                td { class: "num apm" }
                                             }
                                         }
                                     }

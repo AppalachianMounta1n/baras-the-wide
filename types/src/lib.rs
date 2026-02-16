@@ -204,6 +204,10 @@ pub struct RaidOverviewRow {
     pub ehps: f64,
     /// Percentage of total raid effective healing
     pub healing_pct: f64,
+
+    // Activity
+    /// Actions per minute
+    pub apm: f64,
 }
 
 /// Query result for time-series data (DPS/HPS over time).
