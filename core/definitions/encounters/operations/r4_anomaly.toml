@@ -83,78 +83,78 @@ source = "any"
 target = "any"
 
 
-[[boss.timer]]
-id = "ip_cpt_back_wall_not_safe"
-name = "Back wall not safe"
-duration_secs = 8.5
-color = [255, 128, 0, 255]
-difficulties = ["veteran"]
-enabled = true
-display_target = "timers_a"
-
-[boss.timer.trigger]
-type = "any_of"
-
-[[boss.timer.trigger.conditions]]
-type = "counter_reaches"
-counter_id = "ip_cpt_big_bombs"
-value = 6
-
-[[boss.timer.trigger.conditions]]
-type = "counter_reaches"
-counter_id = "ip_cpt_big_bombs"
-value = 18
-
-[[boss.timer]]
-id = "ip_cpt_side_wall_not_safe"
-name = "Side wall not safe"
-duration_secs = 8.5
-color = [255, 128, 0, 255]
-difficulties = ["veteran"]
-enabled = true
-display_target = "timers_a"
-
-[boss.timer.trigger]
-type = "any_of"
-
-[[boss.timer.trigger.conditions]]
-type = "counter_reaches"
-counter_id = "ip_cpt_big_bombs"
-value = 8
-
-[[boss.timer.trigger.conditions]]
-type = "counter_reaches"
-counter_id = "ip_cpt_big_bombs"
-value = 16
-
-[[boss.timer]]
-id = "ip_cpt_exit_not_safe"
-name = "Exit not safe"
-duration_secs = 8.5
-color = [255, 128, 0, 255]
-difficulties = ["veteran"]
-enabled = true
-display_target = "timers_a"
-
-[boss.timer.trigger]
-type = "counter_reaches"
-counter_id = "ip_cpt_big_bombs"
-value = 10
-
-[[boss.timer]]
-id = "ip_cpt_entrance_not_safe"
-name = "Entrance not safe"
-duration_secs = 8.5
-color = [255, 128, 0, 255]
-difficulties = ["veteran"]
-enabled = true
-display_target = "timers_a"
-
-[boss.timer.trigger]
-type = "counter_reaches"
-counter_id = "ip_cpt_big_bombs"
-value = 20
-
+# [[boss.timer]]
+# id = "ip_cpt_back_wall_not_safe"
+# name = "Back wall not safe"
+# duration_secs = 8.5
+# color = [255, 128, 0, 255]
+# difficulties = ["veteran"]
+# enabled = true
+# display_target = "timers_a"
+#
+# [boss.timer.trigger]
+# type = "any_of"
+#
+# [[boss.timer.trigger.conditions]]
+# type = "counter_reaches"
+# counter_id = "ip_cpt_big_bombs"
+# value = 6
+#
+# [[boss.timer.trigger.conditions]]
+# type = "counter_reaches"
+# counter_id = "ip_cpt_big_bombs"
+# value = 18
+#
+# [[boss.timer]]
+# id = "ip_cpt_side_wall_not_safe"
+# name = "Side wall not safe"
+# duration_secs = 8.5
+# color = [255, 128, 0, 255]
+# difficulties = ["veteran"]
+# enabled = true
+# display_target = "timers_a"
+#
+# [boss.timer.trigger]
+# type = "any_of"
+#
+# [[boss.timer.trigger.conditions]]
+# type = "counter_reaches"
+# counter_id = "ip_cpt_big_bombs"
+# value = 8
+#
+# [[boss.timer.trigger.conditions]]
+# type = "counter_reaches"
+# counter_id = "ip_cpt_big_bombs"
+# value = 16
+#
+# [[boss.timer]]
+# id = "ip_cpt_exit_not_safe"
+# name = "Exit not safe"
+# duration_secs = 8.5
+# color = [255, 128, 0, 255]
+# difficulties = ["veteran"]
+# enabled = true
+# display_target = "timers_a"
+#
+# [boss.timer.trigger]
+# type = "counter_reaches"
+# counter_id = "ip_cpt_big_bombs"
+# value = 10
+#
+# [[boss.timer]]
+# id = "ip_cpt_entrance_not_safe"
+# name = "Entrance not safe"
+# duration_secs = 8.5
+# color = [255, 128, 0, 255]
+# difficulties = ["veteran"]
+# enabled = true
+# display_target = "timers_a"
+#
+# [boss.timer.trigger]
+# type = "counter_reaches"
+# counter_id = "ip_cpt_big_bombs"
+# value = 20
+#
 
 [[boss.timer]]
 id = "ip_cpt_big_grenade"
