@@ -58,6 +58,10 @@ pub struct ParsingSession {
     definition_loader: Option<Arc<DefinitionLoader>>,
     /// Last loaded area ID (to avoid reloading on duplicate events)
     loaded_area_id: i64,
+    /// Timestamp of the last event processed during tailing.
+    /// Updated on every `process_event()` call so stale detection
+    /// can use the live value instead of the static directory-index snapshot.
+    pub last_event_time: Option<NaiveDateTime>,
 }
 
 impl Default for ParsingSession {
@@ -85,6 +89,7 @@ impl ParsingSession {
             encounter_writer: None,
             definition_loader: None,
             loaded_area_id: 0,
+            last_event_time: None,
         }
     }
 
@@ -106,6 +111,7 @@ impl ParsingSession {
             encounter_writer: None,
             definition_loader: None,
             loaded_area_id: 0,
+            last_event_time: None,
         }
     }
 
@@ -134,6 +140,7 @@ impl ParsingSession {
             encounter_writer: None,
             definition_loader: None,
             loaded_area_id: 0,
+            last_event_time: None,
         }
     }
 
@@ -150,6 +157,11 @@ impl ParsingSession {
 
     /// Process a single event through the processor and dispatch signals
     pub fn process_event(&mut self, event: CombatEvent) {
+        // Track the latest event timestamp for stale session detection.
+        // This is read by is_session_stale() to know when the last real
+        // log activity occurred, avoiding false stale flags during live play.
+        self.last_event_time = Some(event.timestamp);
+
         // Sync load definitions on AreaEntered BEFORE processing
         // This ensures boss definitions are available when combat events arrive
         if event.effect.type_id == effect_type_id::AREAENTERED {

@@ -1,3 +1,9 @@
+# v2026.2.1501
+
+## Hotfix
+
+- Fixed stale session detection incorrectly flagging active live sessions as stale after 15 minutes of play
+
 # v2026.2.15
 
 Significant quality of life improvements and updates to overlay rendering
