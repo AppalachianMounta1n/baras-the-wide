@@ -333,7 +333,7 @@ impl ServiceHandle {
     /// Check if a session is stale (no log activity in the last 30 minutes).
     /// Uses the last event timestamp parsed from the log file's final line,
     /// falling back to the session start time from the filename.
-    const STALE_SESSION_MINUTES: i64 = 30;
+    const STALE_SESSION_MINUTES: i64 = 15;
 
     async fn is_session_stale(
         &self,
@@ -1345,10 +1345,10 @@ impl ServiceHandle {
         let session = session_guard.as_ref()?;
         let session = session.read().await;
         let cache = session.session_cache.as_ref()?;
-        
+
         // Get boss definitions from cache via public accessor
         let definitions = cache.boss_definitions();
-        
+
         // Find first boss with notes
         for boss in definitions.iter() {
             if let Some(notes) = &boss.notes {
@@ -1360,7 +1360,7 @@ impl ServiceHandle {
                 }
             }
         }
-        
+
         None
     }
 
@@ -1370,9 +1370,9 @@ impl ServiceHandle {
         let session = session_guard.as_ref().ok_or("No active session")?;
         let session = session.read().await;
         let cache = session.session_cache.as_ref().ok_or("No session cache")?;
-        
+
         let definitions = cache.boss_definitions();
-        
+
         let bosses: Vec<crate::commands::BossNotesInfo> = definitions
             .iter()
             .map(|boss| crate::commands::BossNotesInfo {
@@ -1381,7 +1381,7 @@ impl ServiceHandle {
                 has_notes: boss.notes.as_ref().is_some_and(|n| !n.is_empty()),
             })
             .collect();
-        
+
         Ok(bosses)
     }
 
@@ -1391,24 +1391,24 @@ impl ServiceHandle {
         let session = session_guard.as_ref().ok_or("No active session")?;
         let session = session.read().await;
         let cache = session.session_cache.as_ref().ok_or("No session cache")?;
-        
+
         let definitions = cache.boss_definitions();
-        
+
         // Find the boss by ID
         let boss = definitions
             .iter()
             .find(|b| b.id == boss_id)
             .ok_or_else(|| format!("Boss '{}' not found", boss_id))?;
-        
+
         // Send notes to overlay (even if empty, to allow clearing)
         let notes_data = baras_overlay::NotesData {
             text: boss.notes.clone().unwrap_or_default(),
             boss_name: boss.name.clone(),
         };
-        
+
         // Send via the overlay channel
         let _ = self.cmd_tx.send(super::ServiceCommand::SendNotesToOverlay(notes_data)).await;
-        
+
         Ok(())
     }
 }
