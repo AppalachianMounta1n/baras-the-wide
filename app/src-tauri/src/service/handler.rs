@@ -286,11 +286,13 @@ impl ServiceHandle {
             (None, None)
         };
 
-        // Check if this is a stale session (last event >30 min ago).
+        // Check if this is a stale session (last event >15 min ago).
         // Only relevant for live-tailing mode — historical sessions are inherently "not live".
-        let active_file_path = session.active_file.clone();
         let stale_session = if is_live {
-            self.is_session_stale(active_file_path.as_ref(), start_datetime).await
+            // Use the live session's last_event_time (updated on every process_event call)
+            // rather than the static directory-index snapshot which becomes stale during tailing.
+            let live_last_event = session.last_event_time;
+            Self::is_session_stale(live_last_event, start_datetime)
         } else {
             false
         };
@@ -330,25 +332,16 @@ impl ServiceHandle {
         })
     }
 
-    /// Check if a session is stale (no log activity in the last 30 minutes).
-    /// Uses the last event timestamp parsed from the log file's final line,
+    /// Check if a session is stale (no log activity in the last 15 minutes).
+    /// Uses the live session's last event timestamp (updated on every processed event),
     /// falling back to the session start time from the filename.
     const STALE_SESSION_MINUTES: i64 = 15;
 
-    async fn is_session_stale(
-        &self,
-        active_file: Option<&std::path::PathBuf>,
+    fn is_session_stale(
+        last_event_time: Option<chrono::NaiveDateTime>,
         session_start: Option<chrono::NaiveDateTime>,
     ) -> bool {
-        let Some(path) = active_file else {
-            return false;
-        };
-
-        let index = self.shared.directory_index.read().await;
-        let last_activity = index
-            .file_metadata(path)
-            .and_then(|meta| meta.last_event_time.or(Some(meta.created_at)))
-            .or(session_start);
+        let last_activity = last_event_time.or(session_start);
 
         match last_activity {
             Some(last) => {
