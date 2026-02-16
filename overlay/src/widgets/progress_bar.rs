@@ -46,6 +46,8 @@ pub struct ProgressBar {
     pub label_offset: f32,
     /// Whether to render text in bold (default: false)
     pub bold_text: bool,
+    /// Whether to render text with full surrounding glow instead of drop shadow (default: false)
+    pub text_glow: bool,
 }
 
 impl ProgressBar {
@@ -62,6 +64,7 @@ impl ProgressBar {
             split_color: None,
             label_offset: 0.0,
             bold_text: false,
+            text_glow: false,
         }
     }
 
@@ -74,6 +77,12 @@ impl ProgressBar {
     /// Enable bold text rendering
     pub fn with_bold_text(mut self) -> Self {
         self.bold_text = true;
+        self
+    }
+
+    /// Enable full surrounding text glow instead of simple drop shadow
+    pub fn with_text_glow(mut self) -> Self {
+        self.text_glow = true;
         self
     }
 
@@ -237,54 +246,47 @@ impl ProgressBar {
 
         let bold = self.bold_text;
 
+        // Helper: draw text with either full glow or simple drop shadow
+        let use_glow = self.text_glow;
+        let text_color = self.text_color;
+        let draw_bar_text = |frame: &mut OverlayFrame, text: &str, tx: f32, ty: f32| {
+            if use_glow {
+                frame.draw_text_with_glow(
+                    text,
+                    tx,
+                    ty,
+                    effective_font_size,
+                    text_color,
+                    bold,
+                    false,
+                );
+            } else {
+                // Simple 1px drop shadow
+                frame.draw_text_styled(
+                    text,
+                    tx + 1.0,
+                    ty + 1.0,
+                    effective_font_size,
+                    colors::text_shadow(),
+                    bold,
+                    false,
+                );
+                frame.draw_text_styled(text, tx, ty, effective_font_size, text_color, bold, false);
+            }
+        };
+
         // Draw label on the left (truncated to fit, with optional offset for icon)
         let label_start = x + text_padding + self.label_offset;
         let available_for_label = name_width - text_padding * 2.0 - self.label_offset;
         let display_label =
             self.truncate_label_to_width(frame, available_for_label.max(0.0), effective_font_size);
-        // Shadow for readability on any bar color
-        frame.draw_text_styled(
-            &display_label,
-            label_start + 1.0,
-            text_y + 1.0,
-            effective_font_size,
-            colors::text_shadow(),
-            bold,
-            false,
-        );
-        frame.draw_text_styled(
-            &display_label,
-            label_start,
-            text_y,
-            effective_font_size,
-            self.text_color,
-            bold,
-            false,
-        );
+        draw_bar_text(frame, &display_label, label_start, text_y);
 
         // Draw right text (rightmost position)
         if let Some(ref right) = self.right_text {
             let (text_width, _) = frame.measure_text(right, effective_font_size);
             let right_x = x + width - text_width - text_padding;
-            // Shadow for readability on any bar color
-            frame.draw_text_styled(
-                right,
-                right_x + 1.0,
-                text_y + 1.0,
-                effective_font_size,
-                colors::text_shadow(),
-                bold,
-                false,
-            );
-            frame.draw_text_styled(
-                right,
-                right_x,
-                text_y,
-                effective_font_size,
-                self.text_color,
-                bold,
-                false,
-            );
+            draw_bar_text(frame, right, right_x, text_y);
         }
 
         // Draw center text
@@ -293,48 +295,12 @@ impl ProgressBar {
                 // In 3-column mode, position center text right-aligned within its column
                 let (center_width, _) = frame.measure_text(center, effective_font_size);
                 let center_x = right_start - center_width - text_padding;
-                // Shadow for readability on any bar color
-                frame.draw_text_styled(
-                    center,
-                    center_x + 1.0,
-                    text_y + 1.0,
-                    effective_font_size,
-                    colors::text_shadow(),
-                    bold,
-                    false,
-                );
-                frame.draw_text_styled(
-                    center,
-                    center_x,
-                    text_y,
-                    effective_font_size,
-                    self.text_color,
-                    bold,
-                    false,
-                );
+                draw_bar_text(frame, center, center_x, text_y);
             } else {
                 // In 2-column mode (center only), right-align it
                 let (center_width, _) = frame.measure_text(center, effective_font_size);
                 let center_pos = x + width - center_width - text_padding;
-                // Shadow for readability on any bar color
-                frame.draw_text_styled(
-                    center,
-                    center_pos + 1.0,
-                    text_y + 1.0,
-                    effective_font_size,
-                    colors::text_shadow(),
-                    bold,
-                    false,
-                );
-                frame.draw_text_styled(
-                    center,
-                    center_pos,
-                    text_y,
-                    effective_font_size,
-                    self.text_color,
-                    bold,
-                    false,
-                );
+                draw_bar_text(frame, center, center_pos, text_y);
             }
         }
     }

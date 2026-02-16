@@ -153,6 +153,7 @@ impl TimerOverlay {
                 .with_text_color(font_color)
                 .with_right_text(time_text)
                 .with_bold_text()
+                .with_text_glow()
                 .render(
                     &mut self.frame,
                     padding,

@@ -205,6 +205,35 @@ impl OverlayFrame {
             .draw_text_styled(text, x, y, font_size, color, bold, italic);
     }
 
+    /// Draw styled text with a full surrounding dark glow for readability.
+    /// Renders text at all 8 cardinal/diagonal offsets in shadow color, then the real text on top.
+    pub fn draw_text_with_glow(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        font_size: f32,
+        color: Color,
+        bold: bool,
+        italic: bool,
+    ) {
+        let shadow_color = crate::widgets::colors::text_shadow();
+        let d = 1.0_f32;
+        for &(dx, dy) in &[
+            (-d, -d),
+            (0.0, -d),
+            (d, -d),
+            (-d, 0.0),
+            (d, 0.0),
+            (-d, d),
+            (0.0, d),
+            (d, d),
+        ] {
+            self.draw_text_styled(text, x + dx, y + dy, font_size, shadow_color, bold, italic);
+        }
+        self.draw_text_styled(text, x, y, font_size, color, bold, italic);
+    }
+
     /// Draw text with color from RGBA array
     pub fn draw_text_rgba(&mut self, text: &str, x: f32, y: f32, font_size: f32, rgba: [u8; 4]) {
         self.window
