@@ -1941,7 +1941,7 @@ pub fn SettingsPanel(
 
                             div { class: "stat-order-list",
                                 for (idx, stat) in visible_stats.into_iter().enumerate() {
-                                    div { class: "stat-order-item", key: "{stat:?}",
+                                    div { class: "stat-order-item", key: "{idx}",
                                         span { class: "stat-name", "{stat.label()}" }
                                         div { class: "stat-controls",
                                             button {
@@ -1970,7 +1970,8 @@ pub fn SettingsPanel(
                                                 class: "btn-remove",
                                                 onclick: move |_| {
                                                     let mut new_settings = draft_settings();
-                                                    new_settings.personal_overlay.visible_stats.retain(|s| *s != stat);
+                                                    let stats = &mut new_settings.personal_overlay.visible_stats;
+                                                    if idx < stats.len() { stats.remove(idx); }
                                                     update_draft(new_settings);
                                                 },
                                                 "✕"
@@ -1986,15 +1987,20 @@ pub fn SettingsPanel(
                                 div { class: "stat-add-grid",
                                     for stat in PersonalStat::all() {
                                         {
-                                            let is_visible = current_settings.personal_overlay.visible_stats.contains(stat);
+                                            let stat = *stat;
+                                            // Separator can always be added (multiple times)
+                                            // Other stats can only be added once
+                                            let is_visible = stat != PersonalStat::Separator
+                                                && current_settings.personal_overlay.visible_stats.contains(&stat);
                                             if !is_visible {
-                                                let stat = *stat;
                                                 rsx! {
                                                     button {
                                                         class: "btn-add-stat",
                                                         onclick: move |_| {
                                                             let mut new_settings = draft_settings();
-                                                            if !new_settings.personal_overlay.visible_stats.contains(&stat) {
+                                                            if stat == PersonalStat::Separator
+                                                                || !new_settings.personal_overlay.visible_stats.contains(&stat)
+                                                            {
                                                                 new_settings.personal_overlay.visible_stats.push(stat);
                                                             }
                                                             update_draft(new_settings);
@@ -2083,6 +2089,51 @@ pub fn SettingsPanel(
                                 update_draft(new_settings);
                             }
                         }
+                    }
+
+                    div { class: "setting-row",
+                        label { "Auto-color Values" }
+                        input {
+                            r#type: "checkbox",
+                            checked: current_settings.personal_overlay.auto_color_values,
+                            onchange: move |e: Event<FormData>| {
+                                let mut new_settings = draft_settings();
+                                new_settings.personal_overlay.auto_color_values = e.checked();
+                                update_draft(new_settings);
+                            }
+                        }
+                    }
+
+                    div { class: "setting-row",
+                        label { "Hide Empty Values" }
+                        input {
+                            r#type: "checkbox",
+                            checked: current_settings.personal_overlay.hide_empty_values,
+                            onchange: move |e: Event<FormData>| {
+                                let mut new_settings = draft_settings();
+                                new_settings.personal_overlay.hide_empty_values = e.checked();
+                                update_draft(new_settings);
+                            }
+                        }
+                    }
+
+                    div { class: "setting-row",
+                        label { "Line Spacing" }
+                        input {
+                            r#type: "range",
+                            min: "70",
+                            max: "150",
+                            step: "10",
+                            value: "{(current_settings.personal_overlay.line_spacing * 100.0) as i32}",
+                            oninput: move |e| {
+                                if let Ok(val) = e.value().parse::<i32>() {
+                                    let mut new_settings = draft_settings();
+                                    new_settings.personal_overlay.line_spacing = (val as f32 / 100.0).clamp(0.7, 1.5);
+                                    update_draft(new_settings);
+                                }
+                            }
+                        }
+                        span { class: "value", "{(current_settings.personal_overlay.line_spacing * 100.0) as i32}%" }
                     }
 
                             div { class: "setting-row reset-row",

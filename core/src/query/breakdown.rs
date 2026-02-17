@@ -761,7 +761,7 @@ impl EncounterQuery<'_> {
             ))
             .await?;
 
-        let (total_damage, ie_total, ke_total, total_attempts, avoided_count, shielded_count) =
+        let (total_damage, ie_total, ke_total, total_attempts, avoided_count, shielded_count, hit_count) =
             if let Some(batch) = batches.first()
                 && batch.num_rows() > 0
             {
@@ -772,6 +772,7 @@ impl EncounterQuery<'_> {
                     col_i64(batch, 3)?[0] as f64,
                     col_i64(batch, 4)?[0] as f64,
                     col_i64(batch, 5)?[0] as f64,
+                    col_i64(batch, 6)?[0] as f64,
                 )
             } else {
                 return Ok(DamageTakenSummary::default());
@@ -861,7 +862,7 @@ impl EncounterQuery<'_> {
             melee_ranged_total: mr_total,
             melee_ranged_pct: if total_damage > 0.0 { mr_total / total_damage * 100.0 } else { 0.0 },
             avoided_pct: if total_attempts > 0.0 { avoided_count / total_attempts * 100.0 } else { 0.0 },
-            shielded_pct: if total_attempts > 0.0 { shielded_count / total_attempts * 100.0 } else { 0.0 },
+            shielded_pct: if hit_count > 0.0 { shielded_count / hit_count * 100.0 } else { 0.0 },
             absorbed_self_total: absorbed_self,
             absorbed_self_pct: if total_damage + total_absorbed > 0.0 { absorbed_self / (total_damage + total_absorbed) * 100.0 } else { 0.0 },
             absorbed_given_total: absorbed_given,

@@ -1202,8 +1202,8 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                     SortColumn::AttackType => a.attack_type.cmp(&b.attack_type),
                     SortColumn::DamageType => a.damage_type.cmp(&b.damage_type),
                     SortColumn::ShldPct => {
-                        let a_pct = if a.hit_count + a.shield_count > 0 { a.shield_count as f64 / (a.hit_count + a.shield_count) as f64 } else { 0.0 };
-                        let b_pct = if b.hit_count + b.shield_count > 0 { b.shield_count as f64 / (b.hit_count + b.shield_count) as f64 } else { 0.0 };
+                        let a_pct = if a.hit_count > 0 { a.shield_count as f64 / a.hit_count as f64 } else { 0.0 };
+                        let b_pct = if b.hit_count > 0 { b.shield_count as f64 / b.hit_count as f64 } else { 0.0 };
                         a_pct.partial_cmp(&b_pct).unwrap_or(std::cmp::Ordering::Equal)
                     }
                     SortColumn::Absorbed => a.absorbed_total.partial_cmp(&b.absorbed_total).unwrap_or(std::cmp::Ordering::Equal),
@@ -2269,9 +2269,8 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                                             if is_damage_taken {
                                                                 td { class: "num col-pct",
                                                                     {
-                                                                        let total = ability.hit_count + ability.shield_count;
-                                                                        if total > 0 {
-                                                                            format_pct(ability.shield_count as f64 / total as f64 * 100.0)
+                                                                        if ability.hit_count > 0 {
+                                                                            format_pct(ability.shield_count as f64 / ability.hit_count as f64 * 100.0)
                                                                         } else {
                                                                             "-".to_string()
                                                                         }
@@ -2355,10 +2354,9 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                                 };
                                                 let eff_pct = if total_val > 0.0 { total_eff / total_val * 100.0 } else { 0.0 };
                                                 let ehps = if total_val > 0.0 { total_rate * total_eff / total_val } else { 0.0 };
-                                                let shld_pct = {
-                                                    let total = total_hits + total_shield_count;
-                                                    if total > 0 { total_shield_count as f64 / total as f64 * 100.0 } else { 0.0 }
-                                                };
+                                                let shld_pct = if total_hits > 0 {
+                                                    total_shield_count as f64 / total_hits as f64 * 100.0
+                                                } else { 0.0 };
 
                                                 rsx! {
                                                     tr { class: "totals-row",

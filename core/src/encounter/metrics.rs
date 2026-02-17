@@ -1,6 +1,6 @@
 use crate::combat_log::EntityType;
-use crate::context::IStr;
 use crate::context::resolve;
+use crate::context::IStr;
 use crate::game_data::Discipline;
 use serde::{Deserialize, Serialize};
 
@@ -17,9 +17,12 @@ pub struct MetricAccumulator {
     pub damage_received: i64,
     pub damage_received_effective: i64,
     pub damage_absorbed: i64,
+    /// All incoming attacks (hits + avoidances) — denominator for defense %
     pub attacks_received: u32,
+    /// Attacks that landed damage (dmg_amount > 0) — denominator for shield %
+    pub hits_received: u32,
 
-    // Defense stats (dodge/parry/resist/deflect)
+    // Defense stats (dodge/parry/resist/deflect/miss)
     pub defense_count: u32,
     // Natural shield rolls (tank stat, not effect shields)
     pub shield_roll_count: u32,
@@ -139,6 +142,11 @@ impl EntityMetrics {
             abs: self.abs as i64,
             total_shielding: self.total_shielding,
 
+            // Tank stats
+            defense_pct: self.defense_pct,
+            shield_pct: self.shield_pct,
+            total_shield_absorbed: self.total_shield_absorbed,
+
             // Activity
             apm: self.apm,
         }
@@ -187,6 +195,11 @@ pub struct PlayerMetrics {
     // Shielding (absorbs)
     pub abs: i64,
     pub total_shielding: i64,
+
+    // Tank stats
+    pub defense_pct: f32,
+    pub shield_pct: f32,
+    pub total_shield_absorbed: i64,
 
     // Activity
     pub apm: f32,
