@@ -12,8 +12,8 @@ use super::{Overlay, OverlayConfigUpdate, OverlayData};
 use crate::frame::OverlayFrame;
 use crate::platform::{OverlayConfig, PlatformError};
 use crate::utils::color_from_rgba;
-use crate::widgets::Header;
 use crate::widgets::colors;
+use crate::widgets::Header;
 
 /// Cache for pre-scaled icons
 type ScaledIconCache = HashMap<(u64, u32), Vec<u8>>;
@@ -102,6 +102,10 @@ pub struct DotTrackerConfig {
     pub show_header: bool,
     /// Show countdown timers on icons
     pub show_countdown: bool,
+    /// Font scale multiplier (1.0 - 2.0, default 1.0)
+    pub font_scale: f32,
+    /// When true, background shrinks to fit content instead of filling the window
+    pub dynamic_background: bool,
 }
 
 impl Default for DotTrackerConfig {
@@ -114,6 +118,8 @@ impl Default for DotTrackerConfig {
             show_source_name: false,
             show_header: false,
             show_countdown: true,
+            font_scale: 1.0,
+            dynamic_background: true,
         }
     }
 }
@@ -229,7 +235,8 @@ impl DotTrackerOverlay {
         let padding = self.frame.scaled(BASE_PADDING);
         let row_spacing = self.frame.scaled(BASE_ROW_SPACING);
         let icon_spacing = self.frame.scaled(BASE_ICON_SPACING);
-        let font_size = self.frame.scaled(BASE_FONT_SIZE);
+        let font_scale = self.config.font_scale.clamp(1.0, 2.0);
+        let font_size = self.frame.scaled(BASE_FONT_SIZE * font_scale);
         let icon_size = self.frame.scaled(self.config.icon_size as f32);
         let name_width = self.frame.scaled(BASE_NAME_WIDTH);
         let row_height = icon_size + row_spacing;
@@ -243,7 +250,28 @@ impl DotTrackerOverlay {
             0.0
         };
 
-        self.frame.begin_frame();
+        // Compute content height for dynamic background
+        let num_visible = self
+            .data
+            .targets
+            .iter()
+            .take(max_targets)
+            .filter(|t| !t.dots.is_empty())
+            .count();
+        let content_height = if num_visible > 0 {
+            padding * 2.0 + header_space + num_visible as f32 * row_height
+        } else if self.config.show_header {
+            padding * 2.0 + header_space
+        } else {
+            0.0
+        };
+
+        // Begin frame (clear, background, border)
+        if self.config.dynamic_background {
+            self.frame.begin_frame_with_content_height(content_height);
+        } else {
+            self.frame.begin_frame();
+        }
 
         // Render header if enabled
         if self.config.show_header {

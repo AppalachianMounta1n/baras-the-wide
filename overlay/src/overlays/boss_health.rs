@@ -122,12 +122,43 @@ impl BossHealthOverlay {
         }
     }
 
+    /// Pre-compute the total content height for all visible entries.
+    /// This allows drawing the background only to the content area.
+    fn compute_content_height(&self, entries: &[OverlayHealthEntry], compression: f32) -> f32 {
+        let padding = self.frame.scaled(BASE_PADDING);
+        let bar_height = self.frame.scaled(BASE_BAR_HEIGHT) * compression;
+        let label_height = self.frame.scaled(BASE_LABEL_HEIGHT) * compression;
+        let entry_spacing = self.frame.scaled(BASE_ENTRY_SPACING) * compression;
+        let label_bar_gap = self.frame.scaled(BASE_LABEL_BAR_GAP) * compression;
+        let label_font_size =
+            self.frame.scaled(BASE_LABEL_FONT_SIZE) * compression * self.config.font_scale.clamp(1.0, 2.0);
+
+        let mut y = padding;
+
+        for entry in entries {
+            // Label + gap + bar
+            y += label_height + label_bar_gap + bar_height;
+
+            // Target line if shown
+            if self.config.show_target && entry.target_name.is_some() {
+                let target_font_size = label_font_size * 0.85;
+                y += target_font_size + 2.0;
+            }
+
+            y += entry_spacing;
+        }
+
+        // Replace the trailing entry_spacing with bottom padding
+        if !entries.is_empty() {
+            y = y - entry_spacing + padding;
+        }
+
+        y
+    }
+
     /// Render the overlay
     pub fn render(&mut self) {
         let width = self.frame.width() as f32;
-
-        // Begin frame (clear, background, border)
-        self.frame.begin_frame();
 
         // Filter out dead bosses (0% health) and collect living ones
         let entries: Vec<_> = self
@@ -141,6 +172,11 @@ impl BossHealthOverlay {
 
         // Nothing to render if no living bosses
         if entries.is_empty() {
+            if self.config.dynamic_background {
+                self.frame.begin_frame_with_content_height(0.0);
+            } else {
+                self.frame.begin_frame();
+            }
             self.frame.end_frame();
             return;
         }
@@ -152,14 +188,25 @@ impl BossHealthOverlay {
         // Calculate compression factor based on entry count
         let compression = self.compression_factor(entries.len(), has_targets);
 
+        // Pre-compute content height, then begin frame with content-aware background
+        let content_height = self.compute_content_height(&entries, compression);
+        if self.config.dynamic_background {
+            self.frame.begin_frame_with_content_height(content_height);
+        } else {
+            self.frame.begin_frame();
+        }
+
+        // Clamp font_scale to sensible range
+        let font_scale = self.config.font_scale.clamp(1.0, 2.0);
+
         // Apply compression to entry-specific dimensions
         let padding = self.frame.scaled(BASE_PADDING);
         let bar_height = self.frame.scaled(BASE_BAR_HEIGHT) * compression;
         let label_height = self.frame.scaled(BASE_LABEL_HEIGHT) * compression;
         let entry_spacing = self.frame.scaled(BASE_ENTRY_SPACING) * compression;
         let label_bar_gap = self.frame.scaled(BASE_LABEL_BAR_GAP) * compression;
-        let font_size = self.frame.scaled(BASE_FONT_SIZE) * compression;
-        let label_font_size = self.frame.scaled(BASE_LABEL_FONT_SIZE) * compression;
+        let font_size = self.frame.scaled(BASE_FONT_SIZE) * compression * font_scale;
+        let label_font_size = self.frame.scaled(BASE_LABEL_FONT_SIZE) * compression * font_scale;
 
         let bar_color = color_from_rgba(self.config.bar_color);
         let font_color = color_from_rgba(self.config.font_color);

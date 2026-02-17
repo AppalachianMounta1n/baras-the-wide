@@ -84,6 +84,8 @@ pub fn SettingsPanel(
                 config.overlay_settings.metric_stack_from_bottom =
                     new_settings.metric_stack_from_bottom;
                 config.overlay_settings.metric_scaling_factor = new_settings.metric_scaling_factor;
+                config.overlay_settings.metric_font_scale = new_settings.metric_font_scale;
+                config.overlay_settings.metric_dynamic_background = new_settings.metric_dynamic_background;
                 config.overlay_settings.class_icons_enabled = new_settings.class_icons_enabled;
                 config.overlay_settings.personal_opacity = new_settings.personal_opacity;
                 config.overlay_settings.raid_overlay = new_settings.raid_overlay.clone();
@@ -448,6 +450,38 @@ pub fn SettingsPanel(
                                     }
                                 }
                             }
+
+                            div { class: "setting-row",
+                                label { "Font Scale" }
+                                input {
+                                    r#type: "range",
+                                    min: "100",
+                                    max: "200",
+                                    step: "10",
+                                    value: "{(current_settings.metric_font_scale * 100.0) as i32}",
+                                    oninput: move |e| {
+                                        if let Ok(val) = e.value().parse::<i32>() {
+                                            let mut new_settings = draft_settings();
+                                            new_settings.metric_font_scale = (val as f32 / 100.0).clamp(1.0, 2.0);
+                                            update_draft(new_settings);
+                                        }
+                                    }
+                                }
+                                span { class: "value", "{(current_settings.metric_font_scale * 100.0) as i32}%" }
+                            }
+
+                            div { class: "setting-row",
+                                label { "Dynamic Background" }
+                                input {
+                                    r#type: "checkbox",
+                                    checked: current_settings.metric_dynamic_background,
+                                    onchange: move |e: Event<FormData>| {
+                                        let mut new_settings = draft_settings();
+                                        new_settings.metric_dynamic_background = e.checked();
+                                        update_draft(new_settings);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -500,6 +534,37 @@ pub fn SettingsPanel(
                                 }
                             }
 
+                    div { class: "setting-row",
+                        label { "Font Scale" }
+                        input {
+                            r#type: "range",
+                            min: "100",
+                            max: "200",
+                            step: "10",
+                            value: "{(current_settings.boss_health.font_scale * 100.0) as i32}",
+                            oninput: move |e| {
+                                if let Ok(val) = e.value().parse::<i32>() {
+                                    let mut new_settings = draft_settings();
+                                    new_settings.boss_health.font_scale = (val as f32 / 100.0).clamp(1.0, 2.0);
+                                    update_draft(new_settings);
+                                }
+                            }
+                        }
+                        span { class: "value", "{(current_settings.boss_health.font_scale * 100.0) as i32}%" }
+                    }
+                    div { class: "setting-row",
+                        label { "Dynamic Background" }
+                        input {
+                            r#type: "checkbox",
+                            checked: current_settings.boss_health.dynamic_background,
+                            onchange: move |e: Event<FormData>| {
+                                let mut new_settings = draft_settings();
+                                new_settings.boss_health.dynamic_background = e.checked();
+                                update_draft(new_settings);
+                            }
+                        }
+                    }
+
                     div { class: "setting-row reset-row",
                         button {
                             class: "btn btn-reset",
@@ -545,6 +610,37 @@ pub fn SettingsPanel(
                         }
                     }
 
+                    div { class: "setting-row",
+                        label { "Font Scale" }
+                        input {
+                            r#type: "range",
+                            min: "100",
+                            max: "200",
+                            step: "10",
+                            value: "{(current_settings.timers_a_overlay.font_scale * 100.0) as i32}",
+                            oninput: move |e| {
+                                if let Ok(val) = e.value().parse::<i32>() {
+                                    let mut new_settings = draft_settings();
+                                    new_settings.timers_a_overlay.font_scale = (val as f32 / 100.0).clamp(1.0, 2.0);
+                                    update_draft(new_settings);
+                                }
+                            }
+                        }
+                        span { class: "value", "{(current_settings.timers_a_overlay.font_scale * 100.0) as i32}%" }
+                    }
+                    div { class: "setting-row",
+                        label { "Dynamic Background" }
+                        input {
+                            r#type: "checkbox",
+                            checked: current_settings.timers_a_overlay.dynamic_background,
+                            onchange: move |e: Event<FormData>| {
+                                let mut new_settings = draft_settings();
+                                new_settings.timers_a_overlay.dynamic_background = e.checked();
+                                update_draft(new_settings);
+                            }
+                        }
+                    }
+
                     div { class: "setting-row reset-row",
                         button {
                             class: "btn btn-reset",
@@ -586,6 +682,37 @@ pub fn SettingsPanel(
                                     new_settings.timers_b_overlay.font_color = color;
                                     update_draft(new_settings);
                                 }
+                            }
+                        }
+                    }
+
+                    div { class: "setting-row",
+                        label { "Font Scale" }
+                        input {
+                            r#type: "range",
+                            min: "100",
+                            max: "200",
+                            step: "10",
+                            value: "{(current_settings.timers_b_overlay.font_scale * 100.0) as i32}",
+                            oninput: move |e| {
+                                if let Ok(val) = e.value().parse::<i32>() {
+                                    let mut new_settings = draft_settings();
+                                    new_settings.timers_b_overlay.font_scale = (val as f32 / 100.0).clamp(1.0, 2.0);
+                                    update_draft(new_settings);
+                                }
+                            }
+                        }
+                        span { class: "value", "{(current_settings.timers_b_overlay.font_scale * 100.0) as i32}%" }
+                    }
+                    div { class: "setting-row",
+                        label { "Dynamic Background" }
+                        input {
+                            r#type: "checkbox",
+                            checked: current_settings.timers_b_overlay.dynamic_background,
+                            onchange: move |e: Event<FormData>| {
+                                let mut new_settings = draft_settings();
+                                new_settings.timers_b_overlay.dynamic_background = e.checked();
+                                update_draft(new_settings);
                             }
                         }
                     }
@@ -719,6 +846,37 @@ pub fn SettingsPanel(
                             onchange: move |e: Event<FormData>| {
                                 let mut new_settings = draft_settings();
                                 new_settings.effects_a.stack_priority = e.checked();
+                                update_draft(new_settings);
+                            }
+                        }
+                    }
+
+                    div { class: "setting-row",
+                        label { "Font Scale" }
+                        input {
+                            r#type: "range",
+                            min: "100",
+                            max: "200",
+                            step: "10",
+                            value: "{(current_settings.effects_a.font_scale * 100.0) as i32}",
+                            oninput: move |e| {
+                                if let Ok(val) = e.value().parse::<i32>() {
+                                    let mut new_settings = draft_settings();
+                                    new_settings.effects_a.font_scale = (val as f32 / 100.0).clamp(1.0, 2.0);
+                                    update_draft(new_settings);
+                                }
+                            }
+                        }
+                        span { class: "value", "{(current_settings.effects_a.font_scale * 100.0) as i32}%" }
+                    }
+                    div { class: "setting-row",
+                        label { "Dynamic Background" }
+                        input {
+                            r#type: "checkbox",
+                            checked: current_settings.effects_a.dynamic_background,
+                            onchange: move |e: Event<FormData>| {
+                                let mut new_settings = draft_settings();
+                                new_settings.effects_a.dynamic_background = e.checked();
                                 update_draft(new_settings);
                             }
                         }
@@ -858,6 +1016,37 @@ pub fn SettingsPanel(
                         }
                     }
 
+                    div { class: "setting-row",
+                        label { "Font Scale" }
+                        input {
+                            r#type: "range",
+                            min: "100",
+                            max: "200",
+                            step: "10",
+                            value: "{(current_settings.effects_b.font_scale * 100.0) as i32}",
+                            oninput: move |e| {
+                                if let Ok(val) = e.value().parse::<i32>() {
+                                    let mut new_settings = draft_settings();
+                                    new_settings.effects_b.font_scale = (val as f32 / 100.0).clamp(1.0, 2.0);
+                                    update_draft(new_settings);
+                                }
+                            }
+                        }
+                        span { class: "value", "{(current_settings.effects_b.font_scale * 100.0) as i32}%" }
+                    }
+                    div { class: "setting-row",
+                        label { "Dynamic Background" }
+                        input {
+                            r#type: "checkbox",
+                            checked: current_settings.effects_b.dynamic_background,
+                            onchange: move |e: Event<FormData>| {
+                                let mut new_settings = draft_settings();
+                                new_settings.effects_b.dynamic_background = e.checked();
+                                update_draft(new_settings);
+                            }
+                        }
+                    }
+
                     div { class: "setting-row reset-row",
                         button {
                             class: "btn btn-reset",
@@ -959,6 +1148,37 @@ pub fn SettingsPanel(
                             onchange: move |e: Event<FormData>| {
                                 let mut new_settings = draft_settings();
                                 new_settings.cooldown_tracker.sort_by_remaining = e.checked();
+                                update_draft(new_settings);
+                            }
+                        }
+                    }
+
+                    div { class: "setting-row",
+                        label { "Font Scale" }
+                        input {
+                            r#type: "range",
+                            min: "100",
+                            max: "200",
+                            step: "10",
+                            value: "{(current_settings.cooldown_tracker.font_scale * 100.0) as i32}",
+                            oninput: move |e| {
+                                if let Ok(val) = e.value().parse::<i32>() {
+                                    let mut new_settings = draft_settings();
+                                    new_settings.cooldown_tracker.font_scale = (val as f32 / 100.0).clamp(1.0, 2.0);
+                                    update_draft(new_settings);
+                                }
+                            }
+                        }
+                        span { class: "value", "{(current_settings.cooldown_tracker.font_scale * 100.0) as i32}%" }
+                    }
+                    div { class: "setting-row",
+                        label { "Dynamic Background" }
+                        input {
+                            r#type: "checkbox",
+                            checked: current_settings.cooldown_tracker.dynamic_background,
+                            onchange: move |e: Event<FormData>| {
+                                let mut new_settings = draft_settings();
+                                new_settings.cooldown_tracker.dynamic_background = e.checked();
                                 update_draft(new_settings);
                             }
                         }
@@ -1101,6 +1321,37 @@ pub fn SettingsPanel(
                                     new_settings.dot_tracker.font_color = color;
                                     update_draft(new_settings);
                                 }
+                            }
+                        }
+                    }
+
+                    div { class: "setting-row",
+                        label { "Font Scale" }
+                        input {
+                            r#type: "range",
+                            min: "100",
+                            max: "200",
+                            step: "10",
+                            value: "{(current_settings.dot_tracker.font_scale * 100.0) as i32}",
+                            oninput: move |e| {
+                                if let Ok(val) = e.value().parse::<i32>() {
+                                    let mut new_settings = draft_settings();
+                                    new_settings.dot_tracker.font_scale = (val as f32 / 100.0).clamp(1.0, 2.0);
+                                    update_draft(new_settings);
+                                }
+                            }
+                        }
+                        span { class: "value", "{(current_settings.dot_tracker.font_scale * 100.0) as i32}%" }
+                    }
+                    div { class: "setting-row",
+                        label { "Dynamic Background" }
+                        input {
+                            r#type: "checkbox",
+                            checked: current_settings.dot_tracker.dynamic_background,
+                            onchange: move |e: Event<FormData>| {
+                                let mut new_settings = draft_settings();
+                                new_settings.dot_tracker.dynamic_background = e.checked();
+                                update_draft(new_settings);
                             }
                         }
                     }
@@ -1311,6 +1562,37 @@ pub fn SettingsPanel(
                                     }
                                 }
                             }
+
+                    div { class: "setting-row",
+                        label { "Font Scale" }
+                        input {
+                            r#type: "range",
+                            min: "100",
+                            max: "200",
+                            step: "10",
+                            value: "{(current_settings.challenge_overlay.font_scale * 100.0) as i32}",
+                            oninput: move |e| {
+                                if let Ok(val) = e.value().parse::<i32>() {
+                                    let mut new_settings = draft_settings();
+                                    new_settings.challenge_overlay.font_scale = (val as f32 / 100.0).clamp(1.0, 2.0);
+                                    update_draft(new_settings);
+                                }
+                            }
+                        }
+                        span { class: "value", "{(current_settings.challenge_overlay.font_scale * 100.0) as i32}%" }
+                    }
+                    div { class: "setting-row",
+                        label { "Dynamic Background" }
+                        input {
+                            r#type: "checkbox",
+                            checked: current_settings.challenge_overlay.dynamic_background,
+                            onchange: move |e: Event<FormData>| {
+                                let mut new_settings = draft_settings();
+                                new_settings.challenge_overlay.dynamic_background = e.checked();
+                                update_draft(new_settings);
+                            }
+                        }
+                    }
 
                             // Reset button
                             div { class: "setting-row reset-row",
@@ -1772,6 +2054,37 @@ pub fn SettingsPanel(
                                 }
                             }
 
+                    div { class: "setting-row",
+                        label { "Font Scale" }
+                        input {
+                            r#type: "range",
+                            min: "100",
+                            max: "200",
+                            step: "10",
+                            value: "{(current_settings.personal_overlay.font_scale * 100.0) as i32}",
+                            oninput: move |e| {
+                                if let Ok(val) = e.value().parse::<i32>() {
+                                    let mut new_settings = draft_settings();
+                                    new_settings.personal_overlay.font_scale = (val as f32 / 100.0).clamp(1.0, 2.0);
+                                    update_draft(new_settings);
+                                }
+                            }
+                        }
+                        span { class: "value", "{(current_settings.personal_overlay.font_scale * 100.0) as i32}%" }
+                    }
+                    div { class: "setting-row",
+                        label { "Dynamic Background" }
+                        input {
+                            r#type: "checkbox",
+                            checked: current_settings.personal_overlay.dynamic_background,
+                            onchange: move |e: Event<FormData>| {
+                                let mut new_settings = draft_settings();
+                                new_settings.personal_overlay.dynamic_background = e.checked();
+                                update_draft(new_settings);
+                            }
+                        }
+                    }
+
                             div { class: "setting-row reset-row",
                                 button {
                                     class: "btn btn-reset",
@@ -1929,6 +2242,8 @@ pub fn SettingsPanel(
                                     }
                                 }
                             }
+
+                            // Font Scale and Dynamic Background are in Global Metrics Settings
 
                             div { class: "setting-row reset-row",
                                 button {

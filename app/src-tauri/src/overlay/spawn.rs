@@ -460,6 +460,8 @@ pub fn create_metric_overlay(
     stack_from_bottom: bool,
     scaling_factor: f32,
     show_class_icons: bool,
+    font_scale: f32,
+    dynamic_background: bool,
 ) -> Result<OverlayHandle, String> {
     // Position is already relative to the monitor - pass directly
     // On Wayland: used as layer-shell margins
@@ -488,6 +490,8 @@ pub fn create_metric_overlay(
             stack_from_bottom,
             scaling_factor,
             show_class_icons,
+            font_scale,
+            dynamic_background,
         )
         .map_err(|e| format!("Failed to create {} overlay: {}", title, e))
     };
@@ -783,6 +787,8 @@ pub fn create_effects_a_overlay(
         stack_priority: effects_config.stack_priority,
         show_header: effects_config.show_header,
         header_title: "Effects A".to_string(),
+        font_scale: effects_config.font_scale,
+        dynamic_background: effects_config.dynamic_background,
     };
 
     let factory = move || {
@@ -834,6 +840,8 @@ pub fn create_effects_b_overlay(
         stack_priority: effects_config.stack_priority,
         show_header: effects_config.show_header,
         header_title: "Effects B".to_string(),
+        font_scale: effects_config.font_scale,
+        dynamic_background: effects_config.dynamic_background,
     };
 
     let factory = move || {
@@ -878,6 +886,8 @@ pub fn create_cooldowns_overlay(
         show_source_name: cooldowns_config.show_source_name,
         show_target_name: cooldowns_config.show_target_name,
         show_header: cooldowns_config.show_header,
+        font_scale: cooldowns_config.font_scale,
+        dynamic_background: cooldowns_config.dynamic_background,
     };
 
     let factory = move || {
@@ -922,6 +932,8 @@ pub fn create_dot_tracker_overlay(
         show_source_name: dot_config.show_source_name,
         show_header: dot_config.show_header,
         show_countdown: dot_config.show_countdown,
+        font_scale: dot_config.font_scale,
+        dynamic_background: dot_config.dynamic_background,
     };
 
     let factory = move || {

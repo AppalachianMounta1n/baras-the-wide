@@ -54,6 +54,8 @@ impl OverlayManager {
                     settings.metric_stack_from_bottom,
                     settings.metric_scaling_factor,
                     settings.class_icons_enabled,
+                    settings.metric_font_scale,
+                    settings.metric_dynamic_background,
                 )?
             }
             OverlayType::Personal => {
@@ -264,6 +266,8 @@ impl OverlayManager {
                     settings.metric_stack_from_bottom,
                     settings.metric_scaling_factor,
                     settings.class_icons_enabled,
+                    settings.metric_font_scale,
+                    settings.metric_dynamic_background,
                 )
             }
             OverlayType::Personal => {
@@ -310,6 +314,8 @@ impl OverlayManager {
                     stack_priority: cfg.stack_priority,
                     show_header: cfg.show_header,
                     header_title: "Effects A".to_string(),
+                    font_scale: cfg.font_scale,
+                    dynamic_background: cfg.dynamic_background,
                 };
                 OverlayConfigUpdate::EffectsA(buffs_config, settings.effects_a_opacity)
             }
@@ -329,6 +335,8 @@ impl OverlayManager {
                     stack_priority: cfg.stack_priority,
                     show_header: cfg.show_header,
                     header_title: "Effects B".to_string(),
+                    font_scale: cfg.font_scale,
+                    dynamic_background: cfg.dynamic_background,
                 };
                 OverlayConfigUpdate::EffectsB(debuffs_config, settings.effects_b_opacity)
             }
@@ -342,6 +350,8 @@ impl OverlayManager {
                     show_source_name: cfg.show_source_name,
                     show_target_name: cfg.show_target_name,
                     show_header: cfg.show_header,
+                    font_scale: cfg.font_scale,
+                    dynamic_background: cfg.dynamic_background,
                 };
                 OverlayConfigUpdate::Cooldowns(cooldowns_config, settings.cooldown_tracker_opacity)
             }
@@ -355,6 +365,8 @@ impl OverlayManager {
                     show_source_name: cfg.show_source_name,
                     show_header: cfg.show_header,
                     show_countdown: cfg.show_countdown,
+                    font_scale: cfg.font_scale,
+                    dynamic_background: cfg.dynamic_background,
                 };
                 OverlayConfigUpdate::DotTracker(dot_config, settings.dot_tracker_opacity)
             }

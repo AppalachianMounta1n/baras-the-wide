@@ -11,8 +11,8 @@ use super::{Overlay, OverlayConfigUpdate, OverlayData};
 use crate::frame::OverlayFrame;
 use crate::platform::{OverlayConfig, PlatformError};
 use crate::utils::color_from_rgba;
-use crate::widgets::Header;
 use crate::widgets::colors;
+use crate::widgets::Header;
 
 /// Cache for pre-scaled icons to avoid re-scaling every frame
 type ScaledIconCache = HashMap<(u64, u32), Vec<u8>>;
@@ -102,6 +102,10 @@ pub struct EffectsABConfig {
     pub show_header: bool,
     /// Title to display in header
     pub header_title: String,
+    /// Font scale multiplier (1.0 - 2.0, default 1.0)
+    pub font_scale: f32,
+    /// When true, background shrinks to fit content instead of filling the window
+    pub dynamic_background: bool,
 }
 
 impl Default for EffectsABConfig {
@@ -115,6 +119,8 @@ impl Default for EffectsABConfig {
             stack_priority: false,
             show_header: false,
             header_title: String::new(),
+            font_scale: 1.0,
+            dynamic_background: true,
         }
     }
 }
@@ -228,7 +234,8 @@ impl EffectsABOverlay {
 
         let padding = self.frame.scaled(BASE_PADDING);
         let spacing = self.frame.scaled(BASE_SPACING);
-        let font_size = self.frame.scaled(BASE_FONT_SIZE);
+        let font_scale = self.config.font_scale.clamp(1.0, 2.0);
+        let font_size = self.frame.scaled(BASE_FONT_SIZE * font_scale);
         let icon_size = self.frame.scaled(self.config.icon_size as f32);
         let scale = self.frame.scale_factor();
         let header_font_size = font_size * 1.4;
@@ -240,7 +247,30 @@ impl EffectsABOverlay {
             0.0
         };
 
-        self.frame.begin_frame();
+        // Count visible entries for dynamic background
+        let num_visible = self.data.effects.iter().take(max_display).count();
+
+        // Compute content height for dynamic background
+        let content_height = if num_visible == 0 {
+            if self.config.show_header {
+                padding * 2.0 + header_space
+            } else {
+                0.0
+            }
+        } else {
+            let mut h = padding * 2.0 + header_space + icon_size;
+            if self.config.show_effect_names {
+                let name_font_size = font_size * 0.85;
+                h += name_font_size + 2.0;
+            }
+            h
+        };
+
+        if self.config.dynamic_background {
+            self.frame.begin_frame_with_content_height(content_height);
+        } else {
+            self.frame.begin_frame();
+        }
 
         // Render header if enabled
         if self.config.show_header && !self.config.header_title.is_empty() {
@@ -375,7 +405,8 @@ impl EffectsABOverlay {
 
         let padding = self.frame.scaled(BASE_PADDING);
         let row_spacing = self.frame.scaled(BASE_SPACING);
-        let font_size = self.frame.scaled(BASE_FONT_SIZE);
+        let font_scale = self.config.font_scale.clamp(1.0, 2.0);
+        let font_size = self.frame.scaled(BASE_FONT_SIZE * font_scale);
         let icon_size = self.frame.scaled(self.config.icon_size as f32);
         let row_height = icon_size + row_spacing;
         let scale = self.frame.scale_factor();
@@ -388,7 +419,25 @@ impl EffectsABOverlay {
             0.0
         };
 
-        self.frame.begin_frame();
+        // Count visible entries for dynamic background
+        let num_visible = self.data.effects.iter().take(max_display).count();
+
+        // Compute content height for dynamic background
+        let content_height = if num_visible == 0 {
+            if self.config.show_header {
+                padding * 2.0 + header_space
+            } else {
+                0.0
+            }
+        } else {
+            padding * 2.0 + header_space + num_visible as f32 * row_height
+        };
+
+        if self.config.dynamic_background {
+            self.frame.begin_frame_with_content_height(content_height);
+        } else {
+            self.frame.begin_frame();
+        }
 
         // Render header if enabled
         if self.config.show_header && !self.config.header_title.is_empty() {

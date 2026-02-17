@@ -146,15 +146,17 @@ impl ChallengeOverlay {
     pub fn render_overlay(&mut self) {
         let width = self.frame.width() as f32;
         let height = self.frame.height() as f32;
+        let scale = self.frame.scale_factor();
 
         let padding = self.frame.scaled(BASE_PADDING);
         let card_spacing = self.frame.scaled(BASE_CARD_SPACING);
         let mut bar_height = self.frame.scaled(BASE_BAR_HEIGHT);
         let mut bar_spacing = self.frame.scaled(BASE_BAR_SPACING);
-        let mut font_size = self.frame.scaled(BASE_FONT_SIZE);
-        let mut header_font_size = self.frame.scaled(BASE_HEADER_FONT_SIZE);
-        let mut duration_font_size = self.frame.scaled(BASE_DURATION_FONT_SIZE);
-        let mut bar_radius = 3.0 * self.frame.scale_factor();
+        let font_scale = self.config.font_scale.clamp(1.0, 2.0);
+        let mut font_size = self.frame.scaled(BASE_FONT_SIZE * font_scale);
+        let mut header_font_size = self.frame.scaled(BASE_HEADER_FONT_SIZE * font_scale);
+        let mut duration_font_size = self.frame.scaled(BASE_DURATION_FONT_SIZE * font_scale);
+        let mut bar_radius = 3.0 * scale;
 
         let font_color = color_from_rgba(self.config.font_color);
         let default_bar_color = color_from_rgba(self.config.default_bar_color);
@@ -164,9 +166,8 @@ impl ChallengeOverlay {
         let max_display = self.config.max_display as usize;
         let layout = self.config.layout;
 
-        self.frame.begin_frame();
-
         // Filter to enabled challenges only - clone to avoid borrow issues
+        // (must happen before begin_frame so we can compute content height for dynamic background)
         let enabled_challenges: Vec<ChallengeEntry> = self
             .data
             .entries
@@ -180,7 +181,7 @@ impl ChallengeOverlay {
         if num_visible > 0 {
             // Scale content up to fill available space when fewer challenges are shown.
             // Estimate per-card height: header + separator + player bars + optional footer
-            let sep_overhead = bar_spacing * 2.0 + 4.0 * self.frame.scale_factor();
+            let sep_overhead = bar_spacing * 2.0 + 4.0 * scale;
             let card_height_est = header_font_size
                 + sep_overhead
                 + MAX_PLAYERS as f32 * (bar_height + bar_spacing)
@@ -206,6 +207,60 @@ impl ChallengeOverlay {
             header_font_size *= content_scale;
             duration_font_size *= content_scale;
             bar_radius *= content_scale;
+        }
+
+        // Compute actual content height from final (scaled) dimensions for dynamic background
+        let content_height = if num_visible == 0 {
+            0.0
+        } else {
+            match layout {
+                ChallengeLayout::Vertical => {
+                    let mut h = padding;
+                    for (idx, challenge) in enabled_challenges.iter().enumerate() {
+                        if idx > 0 {
+                            h += card_spacing;
+                        }
+                        // Card header: title + separator
+                        h += header_font_size + bar_spacing * 2.0 + 2.0 + 4.0 * scale;
+                        // Player bars
+                        let num_players = challenge.by_player.len().min(MAX_PLAYERS);
+                        h += num_players as f32 * (bar_height + bar_spacing);
+                        // Footer
+                        if show_footer {
+                            h += 2.0 + bar_spacing + font_size + 6.0 * scale;
+                        }
+                    }
+                    h + padding
+                }
+                ChallengeLayout::Horizontal => {
+                    // All cards are same height (tallest card), side by side
+                    let tallest_card = enabled_challenges
+                        .iter()
+                        .map(|c| {
+                            let num_players = c.by_player.len().min(MAX_PLAYERS);
+                            let card_h = header_font_size
+                                + bar_spacing * 2.0
+                                + 2.0
+                                + 4.0 * scale
+                                + num_players as f32 * (bar_height + bar_spacing)
+                                + if show_footer {
+                                    2.0 + bar_spacing + font_size + 6.0 * scale
+                                } else {
+                                    0.0
+                                };
+                            card_h
+                        })
+                        .max_by(|a, b| a.partial_cmp(b).unwrap())
+                        .unwrap_or(0.0);
+                    padding * 2.0 + tallest_card
+                }
+            }
+        };
+
+        if self.config.dynamic_background {
+            self.frame.begin_frame_with_content_height(content_height);
+        } else {
+            self.frame.begin_frame();
         }
 
         match layout {

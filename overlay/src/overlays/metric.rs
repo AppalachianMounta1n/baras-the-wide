@@ -114,6 +114,10 @@ pub struct MetricOverlay {
     stack_from_bottom: bool,
     scaling_factor: f32,
     show_class_icons: bool,
+    /// Global font scale for metric bar text (1.0 - 2.0)
+    font_scale: f32,
+    /// Global dynamic background setting for metrics
+    dynamic_background: bool,
 }
 
 impl MetricOverlay {
@@ -127,6 +131,8 @@ impl MetricOverlay {
         stack_from_bottom: bool,
         scaling_factor: f32,
         show_class_icons: bool,
+        font_scale: f32,
+        dynamic_background: bool,
     ) -> Result<Self, PlatformError> {
         let mut frame = OverlayFrame::new(config, BASE_WIDTH, BASE_HEIGHT)?;
         frame.set_background_alpha(background_alpha);
@@ -141,6 +147,8 @@ impl MetricOverlay {
             stack_from_bottom,
             scaling_factor: scaling_factor.clamp(1.0, 2.0),
             show_class_icons,
+            font_scale: font_scale.clamp(1.0, 2.0),
+            dynamic_background,
         })
     }
 
@@ -174,6 +182,16 @@ impl MetricOverlay {
         self.show_class_icons = show;
     }
 
+    /// Update font scale (clamped to 1.0-2.0)
+    pub fn set_font_scale(&mut self, scale: f32) {
+        self.font_scale = scale.clamp(1.0, 2.0);
+    }
+
+    /// Update dynamic background setting
+    pub fn set_dynamic_background(&mut self, dynamic: bool) {
+        self.dynamic_background = dynamic;
+    }
+
     /// Update the metric entries
     pub fn set_entries(&mut self, entries: Vec<MetricEntry>) {
         self.entries = entries;
@@ -196,9 +214,11 @@ impl MetricOverlay {
 
         // Get scaled layout values
         let padding = self.frame.scaled(BASE_PADDING);
-        // Scale font size partially with bar scaling (40% of the bar scale increase)
-        let font_scale = 1.0 + (self.scaling_factor - 1.0) * 0.4;
-        let font_size = self.frame.scaled(BASE_FONT_SIZE * font_scale);
+        // Base font size for header/footer (NOT affected by font_scale or scaling_factor)
+        let base_font_size = self.frame.scaled(BASE_FONT_SIZE);
+        // Font scale from global metric settings — only affects bar text, not header/footer
+        let font_scale = self.font_scale.clamp(1.0, 2.0);
+        let bar_font_size = self.frame.scaled(BASE_FONT_SIZE * font_scale);
         let scaled_bar_height = BASE_BAR_HEIGHT * self.scaling_factor;
         let ideal_bar_height = self.frame.scaled(scaled_bar_height);
         let bar_spacing = self.frame.scaled(BASE_BAR_SPACING);
@@ -224,17 +244,17 @@ impl MetricOverlay {
             .collect();
         let num_entries = visible_entries.len();
 
-        // Calculate space reserved for header and footer (must match actual widget heights)
+        // Calculate space reserved for header and footer (uses base_font_size, unaffected by font_scale)
         // Header with separator: font_size + spacing + 2.0 + spacing + 4.0 * scale
         // Footer: 2.0 (separator offset) + spacing + font_size + buffer
         let scale = self.frame.scale_factor();
         let header_space = if self.appearance.show_header {
-            font_size + bar_spacing + 2.0 + bar_spacing + 4.0 * scale
+            base_font_size + bar_spacing + 2.0 + bar_spacing + 4.0 * scale
         } else {
             0.0
         };
         let footer_space = if self.appearance.show_footer {
-            2.0 + bar_spacing + font_size + 6.0 * scale // separator + spacing + text + buffer
+            2.0 + bar_spacing + base_font_size + 6.0 * scale // separator + spacing + text + buffer
         } else {
             0.0
         };
@@ -261,18 +281,36 @@ impl MetricOverlay {
             (ideal_bar_height, bar_spacing)
         };
 
-        // Begin frame (clear, background, border)
-        self.frame.begin_frame();
-
-        let content_width = width - padding * 2.0;
-        let bar_radius = 4.0 * self.frame.scale_factor();
-
-        // Calculate total height of all bars
+        // Calculate total height of all bars (for content height and layout)
         let total_bars_height = if num_entries > 0 {
-            num_entries as f32 * bar_height + (num_entries - 1).max(0) as f32 * effective_spacing
+            num_entries as f32 * bar_height
+                + (num_entries.saturating_sub(1)) as f32 * effective_spacing
         } else {
             0.0
         };
+
+        // Compute content height for dynamic background
+        let content_height = if num_entries == 0
+            && !self.appearance.show_header
+            && !self.appearance.show_footer
+            && !self.show_empty_bars
+        {
+            0.0
+        } else if num_entries == 0 && !self.show_empty_bars {
+            padding * 2.0 + header_space + footer_space
+        } else {
+            padding * 2.0 + header_space + total_bars_height + footer_space
+        };
+
+        // Begin frame (clear, background, border)
+        if self.dynamic_background {
+            self.frame.begin_frame_with_content_height(content_height);
+        } else {
+            self.frame.begin_frame();
+        }
+
+        let content_width = width - padding * 2.0;
+        let bar_radius = 4.0 * self.frame.scale_factor();
 
         // Calculate bar start position based on stack direction
         let bars_start_y = if self.stack_from_bottom {
@@ -283,7 +321,7 @@ impl MetricOverlay {
             padding + header_space
         };
 
-        // Draw header just above the first bar
+        // Draw header just above the first bar (uses base_font_size, not bar_font_size)
         let mut y = if self.appearance.show_header {
             let header_y = bars_start_y - header_space;
             Header::new(&self.title).with_color(font_color).render(
@@ -291,7 +329,7 @@ impl MetricOverlay {
                 padding,
                 header_y,
                 content_width,
-                font_size,
+                base_font_size,
                 bar_spacing,
             );
             bars_start_y
@@ -307,7 +345,7 @@ impl MetricOverlay {
 
         // Draw entries using ProgressBar widget
         // Scale text font size proportionally if bars are compressed
-        let base_text_size = font_size - 2.0 * self.frame.scale_factor();
+        let base_text_size = bar_font_size - 2.0 * self.frame.scale_factor();
         let compression_ratio = bar_height / ideal_bar_height;
         let text_font_size = if compression_ratio < 1.0 {
             // When bars are compressed, scale text proportionally (keep minimum readable)
@@ -437,7 +475,13 @@ impl MetricOverlay {
                 Footer::new("").with_color(font_color)
             };
 
-            footer.render(&mut self.frame, padding, y, content_width, font_size - 2.0);
+            footer.render(
+                &mut self.frame,
+                padding,
+                y,
+                content_width,
+                base_font_size - 2.0,
+            );
         }
 
         // End frame (resize indicator, commit)
@@ -467,6 +511,8 @@ impl Overlay for MetricOverlay {
             stack_bottom,
             scale,
             show_icons,
+            font_scale,
+            dynamic_bg,
         ) = config
         {
             self.set_appearance(appearance);
@@ -475,6 +521,8 @@ impl Overlay for MetricOverlay {
             self.set_stack_from_bottom(stack_bottom);
             self.set_scaling_factor(scale);
             self.set_show_class_icons(show_icons);
+            self.set_font_scale(font_scale);
+            self.set_dynamic_background(dynamic_bg);
         }
     }
 

@@ -10,8 +10,8 @@ use super::{Overlay, OverlayConfigUpdate, OverlayData};
 use crate::frame::OverlayFrame;
 use crate::platform::{OverlayConfig, PlatformError};
 use crate::utils::color_from_rgba;
-use crate::widgets::Header;
 use crate::widgets::colors;
+use crate::widgets::Header;
 
 /// Cache for pre-scaled icons
 type ScaledIconCache = HashMap<(u64, u32), Vec<u8>>;
@@ -99,6 +99,10 @@ pub struct CooldownConfig {
     pub show_target_name: bool,
     /// Show header title above overlay
     pub show_header: bool,
+    /// Font scale multiplier (1.0 - 2.0, default 1.0)
+    pub font_scale: f32,
+    /// When true, background shrinks to fit content instead of filling the window
+    pub dynamic_background: bool,
 }
 
 impl Default for CooldownConfig {
@@ -111,6 +115,8 @@ impl Default for CooldownConfig {
             show_source_name: false,
             show_target_name: false,
             show_header: false,
+            font_scale: 1.0,
+            dynamic_background: true,
         }
     }
 }
@@ -219,7 +225,8 @@ impl CooldownOverlay {
 
         let padding = self.frame.scaled(BASE_PADDING);
         let row_spacing = self.frame.scaled(BASE_ROW_SPACING);
-        let font_size = self.frame.scaled(BASE_FONT_SIZE);
+        let font_scale = self.config.font_scale.clamp(1.0, 2.0);
+        let font_size = self.frame.scaled(BASE_FONT_SIZE * font_scale);
         let icon_size = self.frame.scaled(self.config.icon_size as f32);
         let row_height = icon_size + row_spacing;
         let scale = self.frame.scale_factor();
@@ -232,7 +239,24 @@ impl CooldownOverlay {
             0.0
         };
 
-        self.frame.begin_frame();
+        // Compute content height for dynamic background
+        let num_entries = self.data.entries.iter().take(max_display).count();
+        let content_height = if num_entries > 0 && self.config.show_header {
+            padding * 2.0 + header_space + num_entries as f32 * row_height
+        } else if num_entries > 0 {
+            padding * 2.0 + num_entries as f32 * row_height
+        } else if self.config.show_header {
+            padding * 2.0 + header_space
+        } else {
+            0.0
+        };
+
+        // Begin frame (clear, background, border)
+        if self.config.dynamic_background {
+            self.frame.begin_frame_with_content_height(content_height);
+        } else {
+            self.frame.begin_frame();
+        }
 
         // Render header if enabled
         if self.config.show_header {

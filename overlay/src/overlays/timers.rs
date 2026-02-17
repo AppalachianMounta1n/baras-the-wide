@@ -116,12 +116,10 @@ impl TimerOverlay {
         let padding = self.frame.scaled(BASE_PADDING);
         let bar_height = self.frame.scaled(BASE_BAR_HEIGHT);
         let entry_spacing = self.frame.scaled(BASE_ENTRY_SPACING);
-        let font_size = self.frame.scaled(BASE_FONT_SIZE);
+        let font_scale = self.config.font_scale.clamp(1.0, 2.0);
+        let font_size = self.frame.scaled(BASE_FONT_SIZE * font_scale);
 
         let font_color = color_from_rgba(self.config.font_color);
-
-        // Begin frame (clear, background, border)
-        self.frame.begin_frame();
 
         // Sort entries in place if needed
         if self.config.sort_by_remaining {
@@ -130,8 +128,25 @@ impl TimerOverlay {
                 .sort_by(|a, b| a.remaining_secs.partial_cmp(&b.remaining_secs).unwrap());
         }
 
-        // Nothing to render if no timers
+        // Compute content height for dynamic background
         let max_display = self.config.max_display as usize;
+        let num_entries = self.data.entries.iter().take(max_display).count();
+        let content_height = if num_entries > 0 {
+            padding * 2.0
+                + num_entries as f32 * bar_height
+                + (num_entries - 1).max(0) as f32 * entry_spacing
+        } else {
+            0.0
+        };
+
+        // Begin frame (clear, background, border)
+        if self.config.dynamic_background {
+            self.frame.begin_frame_with_content_height(content_height);
+        } else {
+            self.frame.begin_frame();
+        }
+
+        // Nothing to render if no timers
         if self.data.entries.is_empty() {
             self.frame.end_frame();
             return;

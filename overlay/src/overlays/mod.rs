@@ -114,8 +114,8 @@ pub enum OverlayData {
 /// Configuration updates that can be sent to overlays
 #[derive(Debug, Clone)]
 pub enum OverlayConfigUpdate {
-    /// Appearance config for metric overlays (+ alpha, show_empty, stack_bottom, scale, show_class_icons)
-    Metric(OverlayAppearanceConfig, u8, bool, bool, f32, bool),
+    /// Appearance config for metric overlays (+ alpha, show_empty, stack_bottom, scale, show_class_icons, font_scale, dynamic_background)
+    Metric(OverlayAppearanceConfig, u8, bool, bool, f32, bool, f32, bool),
     /// Config for personal overlay (+ background alpha)
     Personal(PersonalOverlayConfig, u8),
     /// Config for raid overlay (+ background alpha)

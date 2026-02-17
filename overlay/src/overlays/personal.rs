@@ -151,14 +151,23 @@ impl PersonalOverlay {
         let width = self.frame.width() as f32;
 
         let padding = self.frame.scaled(BASE_PADDING);
-        let font_size = self.frame.scaled(BASE_FONT_SIZE);
+        let font_scale = self.config.font_scale.clamp(1.0, 2.0);
+        let font_size = self.frame.scaled(BASE_FONT_SIZE * font_scale);
         let line_height = self.frame.scaled(BASE_LINE_HEIGHT);
 
         let label_color = color_from_rgba(self.config.label_color);
         let font_color = color_from_rgba(self.config.font_color);
 
+        // Compute content height for dynamic background
+        let num_stats = self.config.visible_stats.len();
+        let content_height = padding + font_size + num_stats as f32 * line_height + padding;
+
         // Begin frame (clear, background, border)
-        self.frame.begin_frame();
+        if self.config.dynamic_background {
+            self.frame.begin_frame_with_content_height(content_height);
+        } else {
+            self.frame.begin_frame();
+        }
 
         // Draw stats using LabeledValue widgets
         let mut y = padding + font_size;
