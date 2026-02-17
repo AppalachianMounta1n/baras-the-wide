@@ -480,6 +480,45 @@ impl EffectTracker {
         })
     }
 
+    /// Check if any of the definition's refresh abilities were recently cast.
+    ///
+    /// For AoE abilities (in `AOE_REFRESH_ABILITY_IDS`), checks if the ability was cast
+    /// at ANY target recently (since we only track the primary target).
+    /// For single-target abilities, checks the specific target.
+    fn has_recent_refresh_cast(
+        &self,
+        def: &super::EffectDefinition,
+        target_id: i64,
+        timestamp: NaiveDateTime,
+    ) -> bool {
+        const RECENT_CAST_WINDOW_MS: i64 = 1500;
+
+        def.refresh_abilities.iter().any(|refresh| {
+            if let baras_types::AbilitySelector::Id(ability_id) = refresh.ability() {
+                let is_aoe = AOE_REFRESH_ABILITY_IDS.contains(ability_id);
+                if is_aoe {
+                    // AoE: check if ability was cast at ANY target recently
+                    self.recent_casts.iter().any(|(&(aid, _), &ts)| {
+                        aid == *ability_id && {
+                            let elapsed = (timestamp - ts).num_milliseconds();
+                            elapsed >= 0 && elapsed <= RECENT_CAST_WINDOW_MS
+                        }
+                    })
+                } else {
+                    // Single-target: check specific target
+                    self.recent_casts
+                        .get(&(*ability_id, target_id))
+                        .is_some_and(|&ts| {
+                            let elapsed = (timestamp - ts).num_milliseconds();
+                            elapsed >= 0 && elapsed <= RECENT_CAST_WINDOW_MS
+                        })
+                }
+            } else {
+                false
+            }
+        })
+    }
+
     /// Handle signals with explicit local player ID from session cache
     pub fn handle_signals_with_player(
         &mut self,
@@ -650,24 +689,39 @@ impl EffectTracker {
             return;
         };
 
-        let mut base_ended_def_ids: Vec<String> = Vec::new();
+        // Collect effects that just ended (duration expired or removed by signal).
+        // Include audio info so alerts fire reliably before GC.
+        let mut ended_effects: Vec<(String, Option<String>, bool)> = Vec::new();
 
         for effect in self.active_effects.values_mut() {
-            if !effect.on_end_alert_fired && effect.has_base_duration_ended() {
-                effect.on_end_alert_fired = true;
-                base_ended_def_ids.push(effect.definition_id.clone());
-            }
-
+            // Mark duration-expired effects as removed
             if effect.removed_at.is_none()
                 && effect.has_duration_expired(current_time)
                 && effect.mark_removed()
             {
                 self.ticking_count = self.ticking_count.saturating_sub(1);
             }
+
+            // Collect alert info for effects that just ended (any reason)
+            if !effect.on_end_alert_fired
+                && (effect.has_base_duration_ended() || effect.removed_at.is_some())
+            {
+                effect.on_end_alert_fired = true;
+                let should_play_audio =
+                    !effect.audio_played && effect.audio_offset == 0 && effect.audio_file.is_some();
+                if should_play_audio {
+                    effect.audio_played = true;
+                }
+                ended_effects.push((
+                    effect.definition_id.clone(),
+                    effect.audio_file.clone(),
+                    should_play_audio,
+                ));
+            }
         }
 
-        // Fire OnExpire alerts
-        for def_id in base_ended_def_ids {
+        // Fire OnExpire alerts (with audio for early removals)
+        for (def_id, audio_file, audio_enabled) in ended_effects {
             if let Some(def) = self.definitions.effects.get(&def_id)
                 && def.alert_on == AlertTrigger::OnExpire
                 && let Some(text) = &def.alert_text
@@ -679,15 +733,15 @@ impl EffectTracker {
                     color: def.color,
                     timestamp: current_time,
                     alert_text_enabled: true,
-                    audio_enabled: false,
-                    audio_file: None,
+                    audio_enabled,
+                    audio_file,
                 });
             }
         }
 
-        // Remove effects that have finished fading
+        // Remove effects that have been marked removed (immediate, no fade delay)
         self.active_effects
-            .retain(|_, effect| !effect.should_remove());
+            .retain(|_, effect| effect.removed_at.is_none());
 
         // Clean up old recent_casts entries (older than 5 seconds)
         self.recent_casts
@@ -756,6 +810,10 @@ impl EffectTracker {
 
             let duration = self.effective_duration(def);
 
+            // Pre-compute DotTracker validation before mutable borrow of active_effects
+            let dot_tracker_valid = def.display_target != DisplayTarget::DotTracker
+                || self.has_recent_refresh_cast(def, target_id, timestamp);
+
             if let Some(existing) = self.active_effects.get_mut(&key) {
                 // Skip duplicate log lines (same timestamp) to avoid corrupting timing
                 if existing.last_refreshed_at == timestamp {
@@ -765,42 +823,11 @@ impl EffectTracker {
                     continue;
                 }
 
-                // For DotTracker REFRESHES, validate that a refresh_ability was cast at this
-                // target within the recent window. This prevents lingering effects (which
-                // reapply with the same effect_id ~5 seconds after DOT expires) from
-                // incorrectly refreshing tracked DOTs. Initial applications are always valid.
-                //
-                // Skip this validation for effects refreshable by AoE abilities - those
-                // hit multiple targets and we only track the primary target's cast.
-                if def.display_target == DisplayTarget::DotTracker {
-                    // Check if any refresh_ability is an AoE ability (skip validation if so)
-                    let is_aoe_refreshable = def.refresh_abilities.iter().any(|refresh| {
-                        if let baras_types::AbilitySelector::Id(ability_id) = refresh.ability() {
-                            AOE_REFRESH_ABILITY_IDS.contains(ability_id)
-                        } else {
-                            false
-                        }
-                    });
-
-                    if !is_aoe_refreshable {
-                        const RECENT_CAST_WINDOW_MS: i64 = 1500;
-
-                        let has_recent_cast = def.refresh_abilities.iter().any(|refresh| {
-                            if let baras_types::AbilitySelector::Id(ability_id) = refresh.ability() {
-                                if let Some(&cast_time) =
-                                    self.recent_casts.get(&(*ability_id, target_id))
-                                {
-                                    let elapsed = (timestamp - cast_time).num_milliseconds();
-                                    return elapsed >= 0 && elapsed <= RECENT_CAST_WINDOW_MS;
-                                }
-                            }
-                            false
-                        });
-
-                        if !has_recent_cast {
-                            continue; // Skip refresh - likely lingering effect reapplication
-                        }
-                    }
+                // For DotTracker, validate that a refresh_ability was cast within the
+                // recent window. This prevents lingering effects (which reapply with the
+                // same effect_id ~5 seconds after DOT expires) from incorrectly refreshing.
+                if !dot_tracker_valid {
+                    continue;
                 }
 
                 existing.refresh(timestamp, duration);
@@ -1433,9 +1460,12 @@ impl EffectTracker {
             if let Some(effect) = self.active_effects.get_mut(&key) {
                 effect.set_stacks(charges);
 
-                // Refresh duration on ModifyCharges if is_refreshed_on_modify is set
+                // Refresh duration on ModifyCharges if is_refreshed_on_modify is set.
+                // Uses refresh_duration() (not refresh()) to avoid updating last_refreshed_at,
+                // which would cause the stale-removal window to swallow a legitimate
+                // RemoveEffect that follows shortly after a charge change.
                 if let Some(dur) = duration {
-                    effect.refresh(timestamp, Some(dur));
+                    effect.refresh_duration(timestamp, dur);
                 }
             }
         }
