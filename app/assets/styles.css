@@ -6651,7 +6651,6 @@ details[open] .collapsible-summary::before {
   font-size: 0.85em;
   background: rgba(0, 0, 0, 0.2);
   border-radius: var(--radius-sm);
-  overflow: hidden;
 }
 
 .ability-table th,
@@ -6662,12 +6661,13 @@ details[open] .collapsible-summary::before {
 }
 
 .ability-table th {
-  background: var(--blue-alpha-5);
+  background: var(--bg-mid);
   color: var(--swtor-blue-dim);
   font-weight: 500;
   font-size: 0.9em;
   position: sticky;
   top: 0;
+  z-index: 2;
 }
 
 /* Sortable column headers */
