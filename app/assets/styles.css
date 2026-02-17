@@ -6240,6 +6240,51 @@ details[open] .collapsible-summary::before {
   overflow: hidden;
 }
 
+.explorer-sidebar.collapsed {
+  width: auto;
+  min-width: auto;
+  max-width: none;
+}
+
+.explorer-sidebar.collapsed .sidebar-header {
+  border-bottom: none;
+  padding: 0.5em;
+}
+
+.sidebar-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5em;
+}
+
+/* Sidebar collapse toggle button */
+.sidebar-collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.sidebar-collapse-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--border-accent);
+}
+
+.sidebar-collapse-btn i {
+  font-size: 10px;
+}
+
 .sidebar-header {
   padding: 0.75em;
   border-bottom: 1px solid var(--border-accent);
@@ -6490,6 +6535,11 @@ details[open] .collapsible-summary::before {
   min-width: 180px;
   display: flex;
   flex-direction: column;
+}
+
+.entity-section.collapsed {
+  width: auto;
+  min-width: auto;
 }
 
 .entity-section h4 {

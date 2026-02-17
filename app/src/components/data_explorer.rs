@@ -10,7 +10,7 @@ use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::api::{
     self, AbilityBreakdown, DamageTakenSummary, EncounterTimeline, EntityBreakdown,
-    PlayerDeath, RaidOverviewRow, TimeRange,
+    NpcHealthRow, PlayerDeath, RaidOverviewRow, TimeRange,
 };
 use crate::components::ability_icon::AbilityIcon;
 use crate::components::charts_panel::ChartsPanel;
@@ -182,13 +182,20 @@ fn build_donut_option(title: &str, data: &[(String, f64)], color: &str) -> JsVal
     center_arr.push(&JsValue::from_str("55%"));
     js_set(&series, "center", &center_arr);
 
-    // Label formatting
+    // Label formatting - outside labels with overflow handling
     let label = js_sys::Object::new();
     js_set(&label, "show", &JsValue::TRUE);
     js_set(&label, "formatter", &JsValue::from_str("{b}"));
     js_set(&label, "color", &JsValue::from_str("#ccc"));
     js_set(&label, "fontSize", &JsValue::from_f64(10.0));
+    js_set(&label, "overflow", &JsValue::from_str("truncate"));
+    js_set(&label, "ellipsis", &JsValue::from_str(".."));
     js_set(&series, "label", &label);
+
+    // Label layout - keep labels within chart bounds
+    let label_layout = js_sys::Object::new();
+    js_set(&label_layout, "hideOverlap", &JsValue::TRUE);
+    js_set(&series, "labelLayout", &label_layout);
 
     // Emphasis
     let emphasis = js_sys::Object::new();
@@ -339,7 +346,11 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
     let mut sort_column = use_signal(|| props.state.read().data_explorer.sort_column);
     let mut sort_direction = use_signal(|| props.state.read().data_explorer.sort_direction);
     let mut collapsed_sections = use_signal(|| props.state.read().data_explorer.collapsed_sections.clone());
-    
+
+    // Sidebar collapse states (not persisted - always start expanded)
+    let mut sidebar_collapsed = use_signal(|| false);
+    let mut entity_collapsed = use_signal(|| false);
+
     // Combat log state is a separate signal that CombatLog component will modify
     let mut combat_log_state = use_signal(|| props.state.read().combat_log.clone());
     
@@ -432,6 +443,7 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
     // Overview data
     let mut overview_data = use_signal(Vec::<RaidOverviewRow>::new);
     let mut player_deaths = use_signal(Vec::<PlayerDeath>::new);
+    let mut npc_health = use_signal(Vec::<NpcHealthRow>::new);
     // Track last (encounter, time_range) we fetched overview data for (prevents re-fetch loops)
     let mut last_overview_fetch = use_signal(|| None::<(Option<u32>, TimeRange)>);
 
@@ -644,6 +656,7 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
         let _ = entities.try_write().map(|mut w| *w = Vec::new());
         let _ = overview_data.try_write().map(|mut w| *w = Vec::new());
         let _ = player_deaths.try_write().map(|mut w| *w = Vec::new());
+        let _ = npc_health.try_write().map(|mut w| *w = Vec::new());
         let _ = last_overview_fetch.try_write().map(|mut w| *w = None);
         let _ = timeline.try_write().map(|mut w| *w = None);
         // Only reset time_range and selected_source if encounter actually changed (not on initial mount restore)
@@ -773,10 +786,13 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                 return;
             }
 
-            // Load player deaths (only needed for Overview tab)
+            // Load player deaths + NPC health (only needed for Overview tab)
             if is_overview {
                 if let Some(deaths) = api::query_player_deaths(idx).await {
                     let _ = player_deaths.try_write().map(|mut w| *w = deaths);
+                }
+                if let Some(npcs) = api::query_npc_health(idx, tr_opt.as_ref()).await {
+                    let _ = npc_health.try_write().map(|mut w| *w = npcs);
                 }
                 let _ = content_state
                     .try_write()
@@ -1315,108 +1331,122 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
     rsx! {
         div { class: "data-explorer",
             // Sidebar with encounter list
-            aside { class: "explorer-sidebar",
+            aside { class: if *sidebar_collapsed.read() { "explorer-sidebar collapsed" } else { "explorer-sidebar" },
                 div { class: "sidebar-header",
-                    h3 {
-                        i { class: "fa-solid fa-list" }
-                        " Encounters"
-                    }
-                    div { class: "history-controls",
-                        label { class: "boss-filter-toggle",
-                            input {
-                                r#type: "checkbox",
-                                checked: *show_only_bosses.read(),
-                                onchange: move |e| {
-                                    let checked = e.checked();
-                                    show_only_bosses.set(checked);
-                                    // Update parent state immediately (avoids bidirectional sync loop)
-                                    if let Ok(mut state) = props.state.try_write() {
-                                        state.data_explorer.show_only_bosses = checked;
-                                    }
-                                    let mut toast = use_toast();
-                                    spawn(async move {
-                                        if let Some(mut cfg) = api::get_config().await {
-                                            cfg.show_only_bosses = checked;
-                                            if let Err(err) = api::update_config(&cfg).await {
-                                                toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
-                                            }
-                                        }
-                                    });
-                                }
+                    div { class: "sidebar-header-row",
+                        if !*sidebar_collapsed.read() {
+                            h3 {
+                                i { class: "fa-solid fa-list" }
+                                " Encounters"
                             }
-                            span { "Bosses Only" }
                         }
-                        span { class: "encounter-count",
-                            "{filtered_history().len()}"
-                            if *show_only_bosses.read() { " / {encounters().len()}" }
+                        button {
+                            class: "sidebar-collapse-btn",
+                            title: if *sidebar_collapsed.read() { "Expand encounters" } else { "Collapse encounters" },
+                            onclick: move |_| { let v = *sidebar_collapsed.read(); sidebar_collapsed.set(!v); },
+                            i { class: if *sidebar_collapsed.read() { "fa-solid fa-angles-right" } else { "fa-solid fa-angles-left" } }
+                        }
+                    }
+                    if !*sidebar_collapsed.read() {
+                        div { class: "history-controls",
+                            label { class: "boss-filter-toggle",
+                                input {
+                                    r#type: "checkbox",
+                                    checked: *show_only_bosses.read(),
+                                    onchange: move |e| {
+                                        let checked = e.checked();
+                                        show_only_bosses.set(checked);
+                                        // Update parent state immediately (avoids bidirectional sync loop)
+                                        if let Ok(mut state) = props.state.try_write() {
+                                            state.data_explorer.show_only_bosses = checked;
+                                        }
+                                        let mut toast = use_toast();
+                                        spawn(async move {
+                                            if let Some(mut cfg) = api::get_config().await {
+                                                cfg.show_only_bosses = checked;
+                                                if let Err(err) = api::update_config(&cfg).await {
+                                                    toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                                }
+                                            }
+                                        });
+                                    }
+                                }
+                                span { "Bosses Only" }
+                            }
+                            span { class: "encounter-count",
+                                "{filtered_history().len()}"
+                                if *show_only_bosses.read() { " / {encounters().len()}" }
+                            }
                         }
                     }
                 }
 
-                div { class: "sidebar-encounter-list",
-                    if encounters().is_empty() {
-                        div { class: "sidebar-empty",
-                            i { class: "fa-solid fa-inbox" }
-                            p { "No encounters" }
-                            p { class: "hint", "Load a log file to see encounters" }
-                        }
-                    } else {
-                        for (idx, (area_name, difficulty, area_encounters)) in sections().iter().enumerate() {
-                            {
-                                let section_key = format!("{}_{}", idx, area_name);
-                                let is_collapsed = collapsed_sections().contains(&section_key);
-                                let section_key_toggle = section_key.clone();
-                                let chevron_class = if is_collapsed { "fa-chevron-right" } else { "fa-chevron-down" };
+                if !*sidebar_collapsed.read() {
+                    div { class: "sidebar-encounter-list",
+                        if encounters().is_empty() {
+                            div { class: "sidebar-empty",
+                                i { class: "fa-solid fa-inbox" }
+                                p { "No encounters" }
+                                p { class: "hint", "Load a log file to see encounters" }
+                            }
+                        } else {
+                            for (idx, (area_name, difficulty, area_encounters)) in sections().iter().enumerate() {
+                                {
+                                    let section_key = format!("{}_{}", idx, area_name);
+                                    let is_collapsed = collapsed_sections().contains(&section_key);
+                                    let section_key_toggle = section_key.clone();
+                                    let chevron_class = if is_collapsed { "fa-chevron-right" } else { "fa-chevron-down" };
 
-                                rsx! {
-                                    // Area header (collapsible)
-                                    div {
-                                        class: "sidebar-section-header",
-                                        onclick: move |_| {
-                                            let mut set = collapsed_sections();
-                                            if set.contains(&section_key_toggle) {
-                                                set.remove(&section_key_toggle);
-                                            } else {
-                                                set.insert(section_key_toggle.clone());
+                                    rsx! {
+                                        // Area header (collapsible)
+                                        div {
+                                            class: "sidebar-section-header",
+                                            onclick: move |_| {
+                                                let mut set = collapsed_sections();
+                                                if set.contains(&section_key_toggle) {
+                                                    set.remove(&section_key_toggle);
+                                                } else {
+                                                    set.insert(section_key_toggle.clone());
+                                                }
+                                                collapsed_sections.set(set);
+                                            },
+                                            i { class: "fa-solid {chevron_class} collapse-icon" }
+                                            span { class: "section-area", "{area_name}" }
+                                            if let Some(diff) = difficulty {
+                                                span { class: "section-difficulty", " • {diff}" }
                                             }
-                                            collapsed_sections.set(set);
-                                        },
-                                        i { class: "fa-solid {chevron_class} collapse-icon" }
-                                        span { class: "section-area", "{area_name}" }
-                                        if let Some(diff) = difficulty {
-                                            span { class: "section-difficulty", " • {diff}" }
+                                            span { class: "section-count", " ({area_encounters.len()})" }
                                         }
-                                        span { class: "section-count", " ({area_encounters.len()})" }
-                                    }
 
-                                    // Encounter items (hidden if collapsed)
-                                    if !is_collapsed {
-                                        for enc in area_encounters.iter() {
-                                            {
-                                                // Use actual encounter_id for parquet file lookup
-                                                let enc_idx = enc.encounter_id as u32;
-                                                let is_selected = *selected_encounter.read() == Some(enc_idx);
-                                                let success_class = if enc.success { "success" } else { "wipe" };
+                                        // Encounter items (hidden if collapsed)
+                                        if !is_collapsed {
+                                            for enc in area_encounters.iter() {
+                                                {
+                                                    // Use actual encounter_id for parquet file lookup
+                                                    let enc_idx = enc.encounter_id as u32;
+                                                    let is_selected = *selected_encounter.read() == Some(enc_idx);
+                                                    let success_class = if enc.success { "success" } else { "wipe" };
 
-                                                rsx! {
-                                                    div {
-                                                        class: if is_selected { "sidebar-encounter-item selected" } else { "sidebar-encounter-item" },
-                                                        onclick: move |_| selected_encounter.set(Some(enc_idx)),
-                                                        div { class: "encounter-main",
-                                                            span { class: "encounter-name", "{enc.display_name}" }
-                                                            span { class: "result-indicator {success_class}",
-                                                                if enc.success {
-                                                                    i { class: "fa-solid fa-check" }
-                                                                } else {
-                                                                    i { class: "fa-solid fa-skull" }
+                                                    rsx! {
+                                                        div {
+                                                            class: if is_selected { "sidebar-encounter-item selected" } else { "sidebar-encounter-item" },
+                                                            onclick: move |_| selected_encounter.set(Some(enc_idx)),
+                                                            div { class: "encounter-main",
+                                                                span { class: "encounter-name", "{enc.display_name}" }
+                                                                span { class: "result-indicator {success_class}",
+                                                                    if enc.success {
+                                                                        i { class: "fa-solid fa-check" }
+                                                                    } else {
+                                                                        i { class: "fa-solid fa-skull" }
+                                                                    }
                                                                 }
                                                             }
-                                                        }
-                                                        div { class: "encounter-meta",
-                                                            if let Some(time) = &enc.start_time {
-                                                                span { class: "encounter-time", "{time}" }
+                                                            div { class: "encounter-meta",
+                                                                if let Some(time) = &enc.start_time {
+                                                                    span { class: "encounter-time", "{time}" }
+                                                                }
+                                                                span { class: "encounter-duration", "({format_duration(enc.duration_seconds)})" }
                                                             }
-                                                            span { class: "encounter-duration", "({format_duration(enc.duration_seconds)})" }
                                                         }
                                                     }
                                                 }
@@ -1446,6 +1476,19 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                             range: time_range(),
                             on_range_change: move |new_range: TimeRange| {
                                 time_range.set(new_range);
+                            }
+                        }
+                    }
+
+                    // Selected encounter indicator (shown when sidebar collapsed)
+                    if *sidebar_collapsed.read() {
+                        if let Some(enc_idx) = *selected_encounter.read() {
+                            if let Some(enc) = encounters().iter().find(|e| e.encounter_id as u32 == enc_idx) {
+                                div { class: "selected-entity-indicator",
+                                    i { class: "fa-solid fa-crosshairs" }
+                                    span { "{enc.display_name}" }
+                                    span { class: "indicator-meta", "({format_duration(enc.duration_seconds)})" }
+                                }
                             }
                         }
                     }
@@ -1544,6 +1587,8 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                         duration_secs: duration,
                                         time_range: tr,
                                         local_player: local_player_name.read().clone(),
+                                        entity_collapsed: *entity_collapsed.read(),
+                                        on_toggle_entity: move |_| { let v = *entity_collapsed.read(); entity_collapsed.set(!v); },
                                     }
                                 }
                             }
@@ -1706,6 +1751,62 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                             div { id: "donut-taken", class: "overview-donut-chart" }
                                         }
                                     }
+
+                                    // NPC Health Table - split into columns of 12
+                                    {
+                                        let npcs = npc_health.read();
+                                        let chunks: Vec<&[NpcHealthRow]> = npcs.chunks(15).collect();
+                                        rsx! {
+                                            if !npcs.is_empty() {
+                                                div { class: "npc-health-section",
+                                                    h4 { class: "npc-health-title",
+                                                        i { class: "fa-solid fa-heart-pulse" }
+                                                        " NPC Health ({npcs.len()})"
+                                                    }
+                                                    div { class: "npc-health-grid",
+                                                        for chunk in chunks.iter() {
+                                                            table { class: "npc-health-table",
+                                                                thead {
+                                                                    tr {
+                                                                        th { "Name" }
+                                                                        th { class: "num", "HP" }
+                                                                        th { class: "num", "Max" }
+                                                                        th { class: "num", "%" }
+                                                                    }
+                                                                }
+                                                                tbody {
+                                                                    for npc in chunk.iter() {
+                                                                        {
+                                                                            let hp_class = if npc.final_hp == 0 { "dead" } else { "alive" };
+                                                                            let seen_str = format_duration(npc.first_seen_secs as i64);
+                                                                            let death_str = npc.death_time_secs.map(|t| format_duration(t as i64));
+                                                                            rsx! {
+                                                                                tr { class: "npc-row {hp_class}",
+                                                                                    td {
+                                                                                        span { class: "npc-name", "{npc.name}" }
+                                                                                        span { class: "npc-seen-time", " @{seen_str}" }
+                                                                                        if let Some(ref dt) = death_str {
+                                                                                            span { class: "npc-death-time",
+                                                                                                i { class: "fa-solid fa-skull" }
+                                                                                                " {dt}"
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                    td { class: "num", "{format_number(npc.final_hp as f64)}" }
+                                                                                    td { class: "num", "{format_number(npc.max_hp as f64)}" }
+                                                                                    td { class: "num", "{npc.final_hp_pct:.1}%" }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1716,11 +1817,21 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                         rsx! {
                         div { class: "explorer-content",
                             // Entity breakdown sidebar
-                            div { class: "entity-section",
+                            div { class: if *entity_collapsed.read() { "entity-section collapsed" } else { "entity-section" },
                                 div { class: "entity-header",
-                                    h4 {
-                                        if current_tab.is_some_and(|t| !t.is_outgoing()) { "Targets" } else { "Sources" }
+                                    if !*entity_collapsed.read() {
+                                        h4 {
+                                            if current_tab.is_some_and(|t| !t.is_outgoing()) { "Targets" } else { "Sources" }
+                                        }
                                     }
+                                    button {
+                                        class: "sidebar-collapse-btn",
+                                        title: if *entity_collapsed.read() { "Expand entities" } else { "Collapse entities" },
+                                        onclick: move |_| { let v = *entity_collapsed.read(); entity_collapsed.set(!v); },
+                                        i { class: if *entity_collapsed.read() { "fa-solid fa-angles-right" } else { "fa-solid fa-angles-left" } }
+                                    }
+                                }
+                                if !*entity_collapsed.read() {
                                     if !matches!(view_mode(), ViewMode::Rotation) {
                                         div { class: "entity-filter-tabs",
                                             button {
@@ -1735,51 +1846,51 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                                             }
                                         }
                                     }
-                                }
-                                div { class: "entity-list",
-                                    // Uses memoized entity_list
-                                    {
-                                    let tr = *time_range.read();
-                                    let duration = if tr.start != 0.0 || tr.end != 0.0 {
-                                        tr.end - tr.start
-                                    } else {
-                                        timeline.read().as_ref().map(|t| t.duration_secs).unwrap_or(1.0)
-                                    } as f64;
-                                    let duration = if duration > 0.0 { duration } else { 1.0 };
-                                    rsx! {
-                                    for entity in entity_list().iter() {
+                                    div { class: "entity-list",
+                                        // Uses memoized entity_list
                                         {
-                                            let name = entity.source_name.clone();
-                                            let is_selected = selected_source.read().as_ref() == Some(&name);
-                                            let is_npc = entity.entity_type == "Npc";
-                                            let class_icon = class_icon_lookup().get(&name).cloned();
-                                            let per_sec = entity.total_value / duration;
-                                            rsx! {
-                                                div {
-                                                    class: if is_selected { "entity-row selected" } else if is_npc { "entity-row npc" } else { "entity-row" },
-                                                    onclick: {
-                                                        let name = name.clone();
-                                                        move |_| on_source_click(name.clone())
-                                                    },
-                                                    span { class: "entity-name",
-                                                        if let Some(icon_name) = &class_icon {
-                                                            if let Some(icon_asset) = get_class_icon(icon_name) {
-                                                                img {
-                                                                    class: "entity-class-icon",
-                                                                    src: *icon_asset,
-                                                                    alt: ""
+                                        let tr = *time_range.read();
+                                        let duration = if tr.start != 0.0 || tr.end != 0.0 {
+                                            tr.end - tr.start
+                                        } else {
+                                            timeline.read().as_ref().map(|t| t.duration_secs).unwrap_or(1.0)
+                                        } as f64;
+                                        let duration = if duration > 0.0 { duration } else { 1.0 };
+                                        rsx! {
+                                        for entity in entity_list().iter() {
+                                            {
+                                                let name = entity.source_name.clone();
+                                                let is_selected = selected_source.read().as_ref() == Some(&name);
+                                                let is_npc = entity.entity_type == "Npc";
+                                                let class_icon = class_icon_lookup().get(&name).cloned();
+                                                let per_sec = entity.total_value / duration;
+                                                rsx! {
+                                                    div {
+                                                        class: if is_selected { "entity-row selected" } else if is_npc { "entity-row npc" } else { "entity-row" },
+                                                        onclick: {
+                                                            let name = name.clone();
+                                                            move |_| on_source_click(name.clone())
+                                                        },
+                                                        span { class: "entity-name",
+                                                            if let Some(icon_name) = &class_icon {
+                                                                if let Some(icon_asset) = get_class_icon(icon_name) {
+                                                                    img {
+                                                                        class: "entity-class-icon",
+                                                                        src: *icon_asset,
+                                                                        alt: ""
+                                                                    }
                                                                 }
                                                             }
+                                                            "{entity.source_name}"
                                                         }
-                                                        "{entity.source_name}"
+                                                        span { class: "entity-value", "{format_number(per_sec)}/s" }
+                                                        span { class: "entity-abilities", "{entity.abilities_used} abilities" }
                                                     }
-                                                    span { class: "entity-value", "{format_number(per_sec)}/s" }
-                                                    span { class: "entity-abilities", "{entity.abilities_used} abilities" }
                                                 }
                                             }
                                         }
-                                    }
-                                    }
+                                        }
+                                        }
                                     }
                                 }
                             }
@@ -1787,6 +1898,14 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                             if matches!(view_mode(), ViewMode::Rotation) {
                                 // Rotation view in right column
                                 div { class: "ability-section",
+                                    if *entity_collapsed.read() {
+                                        if let Some(name) = selected_source.read().as_ref() {
+                                            div { class: "selected-entity-indicator",
+                                                i { class: "fa-solid fa-user" }
+                                                span { "{name}" }
+                                            }
+                                        }
+                                    }
                                     RotationView {
                                         encounter_idx: *selected_encounter.read(),
                                         time_range: time_range(),
@@ -1799,6 +1918,14 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                             } else if let Some(current_tab) = current_tab {
                             // Ability breakdown table
                             div { class: "ability-section",
+                                if *entity_collapsed.read() {
+                                    if let Some(name) = selected_source.read().as_ref() {
+                                        div { class: "selected-entity-indicator",
+                                            i { class: "fa-solid fa-user" }
+                                            span { "{name}" }
+                                        }
+                                    }
+                                }
                                 // DamageTaken summary panel
                                 if current_tab == DataTab::DamageTaken {
                                     if let Some(ref summary) = *dt_summary.read() {

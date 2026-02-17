@@ -14,7 +14,8 @@ use baras_core::game_data::Discipline;
 use baras_core::query::{
     AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow,
     DamageTakenSummary, DataTab, EffectChartData, EffectWindow, EncounterTimeline,
-    EntityBreakdown, HpPoint, PlayerDeath, RaidOverviewRow, TimeRange, TimeSeriesPoint,
+    EntityBreakdown, HpPoint, NpcHealthRow, PlayerDeath, RaidOverviewRow, TimeRange,
+    TimeSeriesPoint,
 };
 use tauri::{AppHandle, Emitter};
 
@@ -1240,6 +1241,40 @@ impl ServiceHandle {
             .await
             .query()
             .query_player_deaths()
+            .await
+    }
+
+    /// Query final health state of all NPCs in an encounter.
+    pub async fn query_npc_health(
+        &self,
+        encounter_idx: Option<u32>,
+        time_range: Option<TimeRange>,
+    ) -> Result<Vec<NpcHealthRow>, String> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref().ok_or("No active session")?;
+        let session = session.read().await;
+
+        if let Some(idx) = encounter_idx {
+            let dir = session.encounters_dir().ok_or("No encounters directory")?;
+            let path = dir.join(baras_core::storage::encounter_filename(idx));
+            if !path.exists() {
+                return Err(format!("Encounter file not found: {:?}", path));
+            }
+            self.shared.query_context.register_parquet(&path).await?;
+        } else {
+            let writer = session
+                .encounter_writer()
+                .ok_or("No live encounter buffer")?;
+            let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
+            self.shared.query_context.register_batch(batch).await?;
+        }
+
+        self.shared
+            .query_context
+            .query()
+            .await
+            .query()
+            .query_npc_health(time_range.as_ref())
             .await
     }
 

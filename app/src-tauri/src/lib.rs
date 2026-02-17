@@ -253,6 +253,7 @@ pub fn run() {
             commands::query_source_names,
             commands::query_target_names,
             commands::query_player_deaths,
+            commands::query_npc_health,
             commands::query_rotation,
             commands::query_damage_taken_summary,
             commands::query_encounter_timeline,

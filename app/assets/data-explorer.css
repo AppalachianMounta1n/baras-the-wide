@@ -255,6 +255,29 @@
   font-size: 0.9em;
 }
 
+/* Selected entity indicator (shown when entity sidebar collapsed) */
+.selected-entity-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--accent-gold);
+  background: rgba(255, 200, 50, 0.08);
+  border: 1px solid rgba(255, 200, 50, 0.2);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.selected-entity-indicator i {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.selected-entity-indicator .indicator-meta {
+  color: var(--text-muted);
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
    Entity Section (Sources filter)
    ───────────────────────────────────────────────────────────────────────────── */
@@ -495,27 +518,113 @@
 }
 
 .overview-charts-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  display: flex;
+  flex-wrap: nowrap;
   gap: var(--space-md);
+  min-width: max-content;
 }
 
 .overview-donut-chart {
   background: var(--bg-secondary);
   border-radius: var(--radius-sm);
-  height: 280px;
-  width: 100%;
+  height: 250px;
+  flex: 1 1 0;
+  min-width: 220px;
 }
 
-/* Responsive: stack on very small screens */
-@media (max-width: 800px) {
-  .overview-charts-grid {
-    grid-template-columns: 1fr;
-  }
-  .overview-donut-chart {
-    height: 250px;
-  }
+/* ─────────────────────────────────────────────────────────────────────────────
+   NPC Health Table
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.npc-health-section {
+  margin-top: var(--space-md);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-subtle);
 }
+
+.npc-health-title {
+  margin: 0 0 var(--space-xs) 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.npc-health-title i {
+  color: #e74c3c;
+  margin-right: 4px;
+}
+
+.npc-health-grid {
+  display: flex;
+  gap: var(--space-md);
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  align-items: start;
+}
+
+.npc-health-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  border: 1px solid var(--border-color, #3a3a4a);
+  flex-shrink: 0;
+}
+
+.npc-health-table thead th {
+  padding: 3px 10px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-color, #3a3a4a);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--bg-secondary);
+}
+
+.npc-health-table thead th.num {
+  text-align: right;
+}
+
+.npc-health-table .npc-row td {
+  padding: 2px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.npc-health-table .npc-row:last-child td {
+  border-bottom: none;
+}
+
+.npc-health-table .npc-row td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.npc-health-table .npc-row.dead td {
+  color: var(--text-tertiary);
+}
+
+.npc-health-table .npc-row.alive td.num {
+  color: #e67e22;
+}
+
+.npc-seen-time {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  margin-left: 2px;
+}
+
+.npc-death-time {
+  color: #e74c3c;
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+.npc-death-time i {
+  font-size: 8px;
+}
+
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Raid Overview Table
@@ -524,6 +633,7 @@
 .overview-section {
   padding: var(--space-sm);
   overflow-x: auto;
+  display: grid;
 }
 
 .overview-table {
@@ -712,6 +822,10 @@
   min-height: 400px;
 }
 
+.charts-panel.sidebar-collapsed {
+  grid-template-columns: auto 1fr;
+}
+
 /* Main content area - charts on top, effects below */
 .charts-main {
   display: flex;
@@ -726,6 +840,20 @@
   border-radius: var(--radius-sm);
   padding: var(--space-sm);
   overflow-y: auto;
+}
+
+.charts-sidebar.collapsed {
+  padding: var(--space-xs);
+}
+
+.charts-sidebar .entity-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--space-xs);
+}
+
+.charts-sidebar.collapsed .entity-header {
+  margin-bottom: 0;
 }
 
 .charts-sidebar .sidebar-section {

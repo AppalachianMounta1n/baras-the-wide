@@ -5,7 +5,8 @@
 use baras_core::query::{
     AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow,
     DamageTakenSummary, DataTab, EffectChartData, EffectWindow, EncounterTimeline,
-    EntityBreakdown, HpPoint, PlayerDeath, RaidOverviewRow, RotationAnalysis, TimeRange,
+    EntityBreakdown, HpPoint, NpcHealthRow, PlayerDeath, RaidOverviewRow, RotationAnalysis,
+    TimeRange,
     TimeSeriesPoint,
 };
 use tauri::State;
@@ -282,6 +283,16 @@ pub async fn query_player_deaths(
     encounter_idx: Option<u32>,
 ) -> Result<Vec<PlayerDeath>, String> {
     handle.query_player_deaths(encounter_idx).await
+}
+
+/// Query final health state of all NPCs in an encounter.
+#[tauri::command]
+pub async fn query_npc_health(
+    handle: State<'_, ServiceHandle>,
+    encounter_idx: Option<u32>,
+    time_range: Option<TimeRange>,
+) -> Result<Vec<NpcHealthRow>, String> {
+    handle.query_npc_health(encounter_idx, time_range).await
 }
 
 /// Query damage taken summary (damage type breakdown + mitigation stats).

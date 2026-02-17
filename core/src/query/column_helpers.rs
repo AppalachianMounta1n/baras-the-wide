@@ -77,6 +77,24 @@ pub fn col_f32(batch: &RecordBatch, idx: usize) -> Result<Vec<f32>, String> {
     ))
 }
 
+pub fn col_opt_f32(batch: &RecordBatch, idx: usize) -> Result<Vec<Option<f32>>, String> {
+    let col = batch.column(idx);
+    if let Some(a) = col.as_any().downcast_ref::<Float32Array>() {
+        return Ok((0..a.len())
+            .map(|i| if a.is_null(i) { None } else { Some(a.value(i)) })
+            .collect());
+    }
+    if let Some(a) = col.as_any().downcast_ref::<Float64Array>() {
+        return Ok((0..a.len())
+            .map(|i| if a.is_null(i) { None } else { Some(a.value(i) as f32) })
+            .collect());
+    }
+    Err(format!(
+        "col {idx}: expected float, got {:?}",
+        col.data_type()
+    ))
+}
+
 pub fn scalar_f32(batches: &[RecordBatch]) -> f32 {
     batches
         .first()

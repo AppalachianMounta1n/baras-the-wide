@@ -260,6 +260,19 @@ pub struct PlayerDeath {
     pub death_time_secs: f32,
 }
 
+/// Final health state of an NPC in an encounter.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NpcHealthRow {
+    pub name: String,
+    /// Combat time (seconds) when this NPC first appeared
+    pub first_seen_secs: f32,
+    /// Combat time (seconds) when this NPC died, if it died
+    pub death_time_secs: Option<f32>,
+    pub max_hp: i64,
+    pub final_hp: i64,
+    pub final_hp_pct: f32,
+}
+
 /// A single row in the combat log viewer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CombatLogRow {
