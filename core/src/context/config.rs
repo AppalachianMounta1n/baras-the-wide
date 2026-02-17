@@ -59,7 +59,26 @@ pub trait AppConfigExt {
 
 impl AppConfigExt for AppConfig {
     fn load() -> Self {
-        confy::load("baras", "config").unwrap_or_else(|_| Self::load_with_defaults())
+        match confy::load("baras", "config") {
+            Ok(config) => config,
+            Err(e) => {
+                tracing::warn!("Failed to load config: {e}");
+
+                // Back up the invalid config file so it isn't lost on next save
+                if let Ok(path) = confy::get_configuration_file_path("baras", "config") {
+                    if path.exists() {
+                        let backup = path.with_extension("toml.bak");
+                        if let Err(e) = std::fs::copy(&path, &backup) {
+                            tracing::error!("Failed to back up config to {}: {e}", backup.display());
+                        } else {
+                            tracing::info!("Backed up invalid config to {}", backup.display());
+                        }
+                    }
+                }
+
+                Self::load_with_defaults()
+            }
+        }
     }
 
     /// Load with platform-specific defaults (used when no config file exists)
