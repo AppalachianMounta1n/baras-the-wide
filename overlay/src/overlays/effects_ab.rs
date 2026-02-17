@@ -494,28 +494,11 @@ impl EffectsABOverlay {
             self.frame
                 .stroke_rounded_rect(x, y, icon_size, icon_size, 3.0, 1.0, colors::white());
 
-            // Stack count in corner
-            if effect.stacks >= 1 {
-                let stack_text = format!("{}", effect.stacks);
-                let stack_font_size = font_size * 0.9;
-                let stack_x =
-                    x + icon_size - self.frame.measure_text(&stack_text, stack_font_size).0 - 2.0;
-                let stack_y = y + stack_font_size + 2.0;
-
-                self.frame.draw_text(
-                    &stack_text,
-                    stack_x + 1.0,
-                    stack_y + 1.0,
-                    stack_font_size,
-                    colors::text_shadow(),
-                );
-                self.frame.draw_text(
-                    &stack_text,
-                    stack_x,
-                    stack_y,
-                    stack_font_size,
-                    colors::effect_buff(),
-                );
+            // Stack priority vs normal mode
+            if self.config.stack_priority && effect.stacks >= 1 {
+                self.draw_stack_priority(effect, x, y, icon_size, font_size);
+            } else {
+                self.draw_normal_mode(effect, x, y, icon_size, font_size);
             }
 
             // Text to the right of icon
