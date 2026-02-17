@@ -1,3 +1,36 @@
+# v2026.2.1700
+
+## Data Explorer
+
+- Added NPC health table
+- Added fullscreen toggle for data explorer tabs
+- Abilities and effects split into separate log view columns
+- Pinned headers for stat breakdown tabs
+
+## Effects Tracker
+
+- Effects now support `healingtaken` and `damagetaken` trigger types
+- Fixed effects not being pruned when charges expire
+- Added stack priority option for vertical effect layout
+- DoT tracker countdown text set to white for readability
+
+## Overlays
+
+- Dynamic backgrounds with font scaling support added to overlays
+- All overlay text now uses stylized rendering with shadow/glow
+- Raid notes overlay now supports dynamic backgrounds
+- Personal overlay now hides empty values by default
+- Fixed shield % calculations on personal overlay
+
+## Encounters
+
+- Added Traitor Among The Chiss flashpoint (without optional Temple Guardian Cat boss)
+- Counters can now increment on all trigger types
+
+## Misc
+
+- Config file is now backed up on save failure
+
 # v2026.2.1501
 
 ## Hotfix

@@ -1865,8 +1865,8 @@ impl CombatService {
                             }
                         }
 
-                        // Send text alerts to overlay (only those with alert_text_enabled)
-                        let text_alerts: Vec<_> = alerts.iter().filter(|a| a.alert_text_enabled).cloned().collect();
+                        // Send text alerts to overlay (only those with alert_text_enabled and not stale)
+                        let text_alerts: Vec<_> = alerts.iter().filter(|a| a.alert_text_enabled && a.timestamp >= tailing_started_at).cloned().collect();
                         if !text_alerts.is_empty() {
                             if overlay_tx.try_send(OverlayUpdate::AlertsFired(text_alerts)).is_err() {
                                 warn!("Overlay channel full, dropped timer alerts");

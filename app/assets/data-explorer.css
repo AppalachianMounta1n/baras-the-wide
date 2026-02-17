@@ -590,6 +590,7 @@
 .npc-health-table .npc-row td {
   padding: 2px 10px;
   border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
 }
 
 .npc-health-table .npc-row:last-child td {
