@@ -411,7 +411,7 @@ impl DotTrackerOverlay {
                     let time_color = if dot.remaining_secs <= 3.0 {
                         colors::effect_debuff()
                     } else {
-                        colors::icon_countdown()
+                        colors::white()
                     };
                     self.frame
                         .draw_text_glowed(&time_text, text_x, text_y, time_font_size, time_color);
@@ -548,7 +548,7 @@ impl DotTrackerOverlay {
                     text_x,
                     text_y,
                     time_font_size,
-                    colors::icon_countdown(),
+                    colors::white(),
                 );
 
                 // Stack count in bottom-right corner
