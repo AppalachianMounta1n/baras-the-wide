@@ -350,6 +350,7 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
     // Sidebar collapse states (not persisted - always start expanded)
     let mut sidebar_collapsed = use_signal(|| false);
     let mut entity_collapsed = use_signal(|| false);
+    let mut overview_fullscreen = use_signal(|| false);
 
     // Combat log state is a separate signal that CombatLog component will modify
     let mut combat_log_state = use_signal(|| props.state.read().combat_log.clone());
@@ -1461,7 +1462,7 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
             }
 
             // Data Panel (main content area)
-            div { class: "data-panel",
+            div { class: if *overview_fullscreen.read() { "data-panel fullscreen" } else { "data-panel" },
                 if selected_encounter.read().is_none() {
                     div { class: "panel-placeholder",
                         i { class: "fa-solid fa-chart-bar" }
@@ -1534,6 +1535,12 @@ pub fn DataExplorerPanel(mut props: DataExplorerProps) -> Element {
                             class: if matches!(view_mode(), ViewMode::Rotation) { "data-tab active" } else { "data-tab" },
                             onclick: move |_| view_mode.set(ViewMode::Rotation),
                             "Rotation"
+                        }
+                        button {
+                            class: "panel-fullscreen-btn",
+                            title: if *overview_fullscreen.read() { "Exit fullscreen" } else { "Expand to fullscreen" },
+                            onclick: move |_| { let v = *overview_fullscreen.read(); overview_fullscreen.set(!v); },
+                            i { class: if *overview_fullscreen.read() { "fa-solid fa-down-left-and-up-right-to-center" } else { "fa-solid fa-up-right-and-down-left-from-center" } }
                         }
                     }
 

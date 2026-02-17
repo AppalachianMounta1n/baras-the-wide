@@ -6449,6 +6449,29 @@ details[open] .collapsible-summary::before {
   flex-direction: column;
 }
 
+.data-explorer .data-panel.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  border-radius: 0;
+  border: none;
+}
+
+.panel-fullscreen-btn {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 6px 10px;
+  margin-left: auto;
+  transition: color 0.15s;
+}
+
+.panel-fullscreen-btn:hover {
+  color: var(--text-primary);
+}
+
 .panel-placeholder {
   flex: 1;
   display: flex;
