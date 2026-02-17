@@ -1220,7 +1220,7 @@ pub struct PersonalOverlayConfig {
     #[serde(default = "default_scaling_factor")]
     pub font_scale: f32,
     /// When true, background shrinks to fit content instead of filling the window
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub dynamic_background: bool,
     /// When true, value text is automatically colored by stat category
     /// (red for damage, green for healing, orange for mitigation, blue for threat)
@@ -1255,7 +1255,7 @@ impl Default for PersonalOverlayConfig {
             font_color: overlay_colors::WHITE,
             label_color: overlay_colors::WHITE,
             font_scale: 1.0,
-            dynamic_background: true,
+            dynamic_background: false,
             auto_color_values: true,
             line_spacing: 1.0,
             hide_empty_values: true,
@@ -1389,7 +1389,7 @@ pub struct BossHealthConfig {
     #[serde(default = "default_scaling_factor")]
     pub font_scale: f32,
     /// When true, background shrinks to fit content instead of filling the window
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub dynamic_background: bool,
 }
 
@@ -1405,7 +1405,7 @@ impl Default for BossHealthConfig {
             show_percent: true,
             show_target: true,
             font_scale: 1.0,
-            dynamic_background: true,
+            dynamic_background: false,
         }
     }
 }
@@ -1433,7 +1433,7 @@ pub struct TimerOverlayConfig {
     #[serde(default = "default_scaling_factor")]
     pub font_scale: f32,
     /// When true, background shrinks to fit content instead of filling the window
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub dynamic_background: bool,
 }
 
@@ -1452,7 +1452,7 @@ impl Default for TimerOverlayConfig {
             max_display: 10,
             sort_by_remaining: true,
             font_scale: 1.0,
-            dynamic_background: true,
+            dynamic_background: false,
         }
     }
 }
@@ -1561,7 +1561,7 @@ pub struct ChallengeOverlayConfig {
     #[serde(default = "default_scaling_factor")]
     pub font_scale: f32,
     /// When true, background shrinks to fit content instead of filling the window
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub dynamic_background: bool,
 }
 
@@ -1582,7 +1582,7 @@ impl Default for ChallengeOverlayConfig {
             max_display: 4,
             layout: ChallengeLayout::Vertical,
             font_scale: 1.0,
-            dynamic_background: true,
+            dynamic_background: false,
         }
     }
 }
@@ -1619,7 +1619,7 @@ pub struct EffectsAConfig {
     #[serde(default = "default_scaling_factor")]
     pub font_scale: f32,
     /// When true, background shrinks to fit content instead of filling the window
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub dynamic_background: bool,
 }
 
@@ -1641,7 +1641,7 @@ impl Default for EffectsAConfig {
             stack_priority: false,
             show_header: false,
             font_scale: 1.0,
-            dynamic_background: true,
+            dynamic_background: false,
         }
     }
 }
@@ -1674,7 +1674,7 @@ pub struct EffectsBConfig {
     #[serde(default = "default_scaling_factor")]
     pub font_scale: f32,
     /// When true, background shrinks to fit content instead of filling the window
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub dynamic_background: bool,
 }
 
@@ -1689,7 +1689,7 @@ impl Default for EffectsBConfig {
             stack_priority: false,
             show_header: false,
             font_scale: 1.0,
-            dynamic_background: true,
+            dynamic_background: false,
         }
     }
 }
@@ -1730,7 +1730,7 @@ pub struct CooldownTrackerConfig {
     #[serde(default = "default_scaling_factor")]
     pub font_scale: f32,
     /// When true, background shrinks to fit content instead of filling the window
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub dynamic_background: bool,
 }
 
@@ -1749,7 +1749,7 @@ impl Default for CooldownTrackerConfig {
             show_target_name: false,
             show_header: false,
             font_scale: 1.0,
-            dynamic_background: true,
+            dynamic_background: false,
         }
     }
 }
@@ -1789,7 +1789,7 @@ pub struct DotTrackerConfig {
     #[serde(default = "default_scaling_factor")]
     pub font_scale: f32,
     /// When true, background shrinks to fit content instead of filling the window
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub dynamic_background: bool,
 }
 
@@ -1815,7 +1815,7 @@ impl Default for DotTrackerConfig {
             show_header: false,
             show_countdown: true,
             font_scale: 1.0,
-            dynamic_background: true,
+            dynamic_background: false,
         }
     }
 }
@@ -1911,7 +1911,7 @@ pub struct OverlaySettings {
     #[serde(default = "default_scaling_factor")]
     pub metric_font_scale: f32,
     /// When true, metric overlay backgrounds shrink to fit content
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub metric_dynamic_background: bool,
     #[serde(default = "default_opacity")]
     pub personal_opacity: u8,
@@ -1985,7 +1985,7 @@ impl Default for OverlaySettings {
             metric_stack_from_bottom: false,
             metric_scaling_factor: 1.0,
             metric_font_scale: 1.0,
-            metric_dynamic_background: true,
+            metric_dynamic_background: false,
             personal_opacity: 180,
             class_icons_enabled: true,
             default_appearances: HashMap::new(),
