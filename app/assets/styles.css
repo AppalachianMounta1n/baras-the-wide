@@ -141,6 +141,26 @@ body {
   overflow: hidden;
 }
 
+/* Thin dark scrollbars (WebView2 on Windows uses webkit prefix) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-medium) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+
 /* Global select styling for dark theme */
 select {
   padding: 0.4em 2em 0.4em 0.6em;
