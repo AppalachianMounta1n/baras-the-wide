@@ -364,7 +364,7 @@ impl PersonalOverlay {
                     // earlier row that had to shrink (e.g., difficulty <= encounter name).
                     let (text_w, _) = self
                         .frame
-                        .measure_text_styled(&value, font_size, false, false);
+                        .measure_text_styled(&value, font_size, true, false);
                     let fit_fs = if text_w > content_width && text_w > 0.0 {
                         (font_size * content_width / text_w).max(font_size * 0.55)
                     } else {
@@ -375,10 +375,13 @@ impl PersonalOverlay {
                     // Center horizontally
                     let (fitted_w, _) = self
                         .frame
-                        .measure_text_styled(&value, actual_fs, false, false);
+                        .measure_text_styled(&value, actual_fs, true, false);
                     let cx = padding + (content_width - fitted_w) * 0.5;
+                    let shadow = crate::widgets::colors::text_shadow();
                     self.frame
-                        .draw_text_glowed(&value, cx, y, actual_fs, value_color);
+                        .draw_text_styled(&value, cx + 1.0, y + 1.0, actual_fs, shadow, true, false);
+                    self.frame
+                        .draw_text_styled(&value, cx, y, actual_fs, value_color, true, false);
                 } else {
                     // Metric single-value rows (APM, Combat Time, etc.)
                     // Use 0.8x value font to match compound row values
