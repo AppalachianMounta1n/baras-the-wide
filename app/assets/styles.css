@@ -141,11 +141,10 @@ body {
   overflow: hidden;
 }
 
-/* Thin dark scrollbars (WebView2 on Windows uses webkit prefix) */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-medium) transparent;
-}
+/* Thin dark scrollbars — use webkit pseudo-elements for consistent look
+   across WebView2 (Windows) and WebKitGTK (Linux). Standard properties
+   (scrollbar-width/scrollbar-color) override webkit pseudos on WebKitGTK
+   and produce a less visible overlay scrollbar, so we avoid them. */
 *::-webkit-scrollbar {
   width: 6px;
   height: 6px;
