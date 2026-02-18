@@ -1057,7 +1057,7 @@ fn EffectEditForm(
                                         "Disciplines"
                                         span {
                                             class: "help-icon",
-                                            title: "Restrict this effect to specific player disciplines. If empty, the effect applies to all disciplines.",
+                                            title: "Only activate this effect when your local player is one of the selected disciplines. If empty, the effect applies to all disciplines.",
                                             "?"
                                         }
                                     }

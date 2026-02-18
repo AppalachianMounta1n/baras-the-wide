@@ -1405,6 +1405,7 @@ impl CombatService {
                         session_guard.current_line = Some(parse_result.line_count);
 
                         // Import session state from subprocess using shared IPC contract
+                        let mut player_context = None;
                         if let Some(cache) = &mut session_guard.session_cache {
                             // Restore player, area, disciplines, and encounter history
                             let generation_count = cache.restore_from_worker_output(&parse_result);
@@ -1420,6 +1421,17 @@ impl CombatService {
                             // Sync current_area_id from subprocess so timer definition reloads work
                             if parse_result.area.area_id != 0 {
                                 self.shared.current_area_id.store(parse_result.area.area_id, Ordering::SeqCst);
+                            }
+
+                            // Capture player context before releasing cache borrow.
+                            // discipline_id comes from player_disciplines (not cache.player,
+                            // which doesn't have it after worker restore)
+                            if cache.player_initialized {
+                                let disc_id = cache.player_disciplines
+                                    .get(&cache.player.id)
+                                    .map(|p| p.discipline_id)
+                                    .unwrap_or(0);
+                                player_context = Some((cache.player.id, disc_id));
                             }
 
                             // Check if there's an incomplete encounter (parquet file exists but no summary)
@@ -1466,6 +1478,16 @@ impl CombatService {
                                 
                                 // Create fresh encounter with correct area context
                                 cache.push_new_encounter();
+                            }
+                        }
+
+                        // Sync player context to effect tracker so discipline-scoped
+                        // effects work immediately (tracker missed historical signals)
+                        if let Some((player_id, discipline_id)) = player_context {
+                            if let Some(tracker) = session_guard.effect_tracker() {
+                                if let Ok(mut tracker) = tracker.lock() {
+                                    tracker.set_player_context(player_id, discipline_id);
+                                }
                             }
                         }
 

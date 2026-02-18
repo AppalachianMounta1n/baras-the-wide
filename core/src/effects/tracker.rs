@@ -449,6 +449,11 @@ impl EffectTracker {
     }
 
     /// Set the player's alacrity percentage for duration calculations
+    pub fn set_player_context(&mut self, player_id: i64, discipline_id: i64) {
+        self.local_player_id = Some(player_id);
+        self.local_player_discipline = Discipline::from_guid(discipline_id);
+    }
+
     pub fn set_alacrity(&mut self, alacrity_percent: f32) {
         self.alacrity_percent = alacrity_percent;
     }
@@ -1862,12 +1867,16 @@ impl SignalHandler for EffectTracker {
                         } else if let Some(target) =
                             encounter.and_then(|e| e.get_current_target(*source_id))
                         {
-                            // Encounter has target but we don't have cached name - look it up
-                            let name = encounter
-                                .and_then(|e| e.players.get(&target))
-                                .map(|p| p.name)
-                                .unwrap_or(*source_name);
-                            (target, name, EntityType::Player)
+                            // Encounter has target - look up name and entity type
+                            let player_info = encounter
+                                .and_then(|e| e.players.get(&target));
+                            let name = player_info.map(|p| p.name).unwrap_or(*source_name);
+                            let etype = if player_info.is_some() {
+                                EntityType::Player
+                            } else {
+                                EntityType::Npc
+                            };
+                            (target, name, etype)
                         } else {
                             // No target info - default to self (always a player)
                             (*source_id, *source_name, EntityType::Player)
