@@ -133,6 +133,15 @@ pub struct ActiveEffect {
 
     /// Whether to fire alert on expiration (vs on apply)
     pub alert_on_expire: bool,
+
+    /// Whether this effect was expired by the app's duration timer (heuristic)
+    /// rather than an authoritative EffectRemoved signal.
+    ///
+    /// Timer-expired effects remain in `active_effects` so that `refresh_abilities`
+    /// can still revive them (the game duration may exceed our estimate). They are
+    /// hidden from display and alerts fire normally on timer expiry.
+    /// After a grace period, the effect is hard-removed for GC.
+    pub timer_expired: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -213,6 +222,7 @@ impl ActiveEffect {
             on_end_alert_fired: false,
             alert_text,
             alert_on_expire,
+            timer_expired: false,
         }
     }
 
@@ -240,6 +250,8 @@ impl ActiveEffect {
 
         // Clear removed state if we were fading out (effect came back)
         self.removed_at = None;
+        // Clear timer-expired state (refresh revives the effect)
+        self.timer_expired = false;
         // Reset on-end alert so it can fire again
         self.on_end_alert_fired = false;
     }
@@ -265,6 +277,7 @@ impl ActiveEffect {
         self.applied_instant = now.checked_sub(lag_duration).unwrap_or(now);
 
         self.removed_at = None;
+        self.timer_expired = false;
         self.on_end_alert_fired = false;
     }
 

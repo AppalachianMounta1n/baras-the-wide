@@ -22,6 +22,12 @@ use crate::timers::FiredAlert;
 use super::{ActiveEffect, AlertTrigger, DisplayTarget, EffectDefinition, EffectKey, RefreshTrigger};
 
 /// Hardcoded ability IDs for AoE DOTs that need special handling.
+/// Grace period (ms) after the app's duration timer expires before hard-removing
+/// an effect from the tracker. During this window, `refresh_abilities` can still
+/// revive the effect — the timer is a heuristic and the in-game buff may outlast it.
+/// An authoritative `EffectRemoved` signal always removes immediately, bypassing this.
+const TIMER_EXPIRY_GRACE_MS: i64 = 8000;
+
 /// These abilities spread/refresh DOTs on multiple targets and don't follow
 /// the normal single-target cast pattern. Used for:
 /// 1. Damage-based AoE refresh detection (no ApplyEffect on refresh)
@@ -638,28 +644,28 @@ impl EffectTracker {
     pub fn raid_frame_effects(&self) -> impl Iterator<Item = &ActiveEffect> {
         self.active_effects
             .values()
-            .filter(|e| e.display_target == DisplayTarget::RaidFrames && e.removed_at.is_none())
+            .filter(|e| e.display_target == DisplayTarget::RaidFrames && e.removed_at.is_none() && !e.timer_expired)
     }
 
     /// Get effects destined for Effects A overlay
     pub fn effects_a(&self) -> impl Iterator<Item = &ActiveEffect> {
         self.active_effects
             .values()
-            .filter(|e| e.display_target == DisplayTarget::EffectsA && e.removed_at.is_none())
+            .filter(|e| e.display_target == DisplayTarget::EffectsA && e.removed_at.is_none() && !e.timer_expired)
     }
 
     /// Get effects destined for Effects B overlay
     pub fn effects_b(&self) -> impl Iterator<Item = &ActiveEffect> {
         self.active_effects
             .values()
-            .filter(|e| e.display_target == DisplayTarget::EffectsB && e.removed_at.is_none())
+            .filter(|e| e.display_target == DisplayTarget::EffectsB && e.removed_at.is_none() && !e.timer_expired)
     }
 
     /// Get effects destined for cooldown tracker
     pub fn cooldown_effects(&self) -> impl Iterator<Item = &ActiveEffect> {
         self.active_effects
             .values()
-            .filter(|e| e.display_target == DisplayTarget::Cooldowns && e.removed_at.is_none())
+            .filter(|e| e.display_target == DisplayTarget::Cooldowns && e.removed_at.is_none() && !e.timer_expired)
     }
 
     /// Get effects destined for DOT tracker, grouped by target entity
@@ -667,7 +673,7 @@ impl EffectTracker {
         let mut by_target: std::collections::HashMap<i64, Vec<&ActiveEffect>> =
             std::collections::HashMap::new();
         for effect in self.active_effects.values() {
-            if effect.removed_at.is_none() && effect.display_target == DisplayTarget::DotTracker {
+            if effect.removed_at.is_none() && !effect.timer_expired && effect.display_target == DisplayTarget::DotTracker {
                 by_target
                     .entry(effect.target_entity_id)
                     .or_default()
@@ -681,7 +687,7 @@ impl EffectTracker {
     pub fn effects_overlay_effects(&self) -> impl Iterator<Item = &ActiveEffect> {
         self.active_effects
             .values()
-            .filter(|e| e.display_target == DisplayTarget::EffectsOverlay && e.removed_at.is_none())
+            .filter(|e| e.display_target == DisplayTarget::EffectsOverlay && e.removed_at.is_none() && !e.timer_expired)
     }
 
     /// Drain the queue of targets for raid frame registration attempts.
@@ -701,12 +707,27 @@ impl EffectTracker {
         let mut ended_effects: Vec<(String, Option<String>, bool)> = Vec::new();
 
         for effect in self.active_effects.values_mut() {
-            // Mark duration-expired effects as removed
-            if effect.removed_at.is_none()
-                && effect.has_duration_expired(current_time)
-                && effect.mark_removed()
-            {
-                self.ticking_count = self.ticking_count.saturating_sub(1);
+            // Handle duration-expired effects.
+            // Timer expiry is a heuristic — the in-game effect may outlast our estimate.
+            // Instead of immediately removing, mark as timer_expired so the effect stays
+            // in active_effects and can be revived by refresh_abilities.
+            // After the grace period, hard-remove for GC.
+            if effect.removed_at.is_none() && effect.has_duration_expired(current_time) {
+                if !effect.timer_expired {
+                    // First tick after timer expiry — mark as timer-expired
+                    effect.timer_expired = true;
+                    self.ticking_count = self.ticking_count.saturating_sub(1);
+                }
+
+                // After grace period, hard-remove (GC on next retain pass)
+                if let Some(expires_at) = effect.expires_at {
+                    let since_expiry_ms = current_time
+                        .signed_duration_since(expires_at)
+                        .num_milliseconds();
+                    if since_expiry_ms > TIMER_EXPIRY_GRACE_MS {
+                        effect.mark_removed();
+                    }
+                }
             }
 
             // Collect alert info for effects that just ended (any reason)
