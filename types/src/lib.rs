@@ -1985,6 +1985,9 @@ pub struct OverlaySettings {
     /// Auto-hide overlays when local player is in a conversation
     #[serde(default)]
     pub hide_during_conversations: bool,
+    /// Auto-hide overlays when not in a live session (historical, logged out, etc.)
+    #[serde(default)]
+    pub hide_when_not_live: bool,
 }
 
 impl Default for OverlaySettings {
@@ -2029,6 +2032,7 @@ impl Default for OverlaySettings {
             notes_overlay: NotesOverlayConfig::default(),
             notes_opacity: 180,
             hide_during_conversations: false,
+            hide_when_not_live: false,
         }
     }
 }

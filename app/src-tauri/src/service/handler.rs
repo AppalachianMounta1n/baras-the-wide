@@ -338,7 +338,7 @@ impl ServiceHandle {
     /// falling back to the session start time from the filename.
     const STALE_SESSION_MINUTES: i64 = 15;
 
-    fn is_session_stale(
+    pub(crate) fn is_session_stale(
         last_event_time: Option<chrono::NaiveDateTime>,
         session_start: Option<chrono::NaiveDateTime>,
     ) -> bool {

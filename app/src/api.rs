@@ -150,6 +150,12 @@ pub async fn toggle_visibility(currently_visible: bool) -> bool {
     }
 }
 
+/// Apply or remove the "not live" auto-hide based on current session state.
+/// Called when the user toggles the hide_when_not_live setting.
+pub async fn apply_not_live_auto_hide() {
+    invoke("apply_not_live_auto_hide", JsValue::NULL).await;
+}
+
 /// Toggle move mode for all overlays
 pub async fn toggle_move_mode() -> Result<bool, String> {
     let result = invoke("toggle_move_mode", JsValue::NULL).await;

@@ -442,6 +442,11 @@ pub fn App() -> Element {
         .unwrap_or(false);
     let show_empty_state = !has_player;
 
+    // Auto-hide indicator: overlays are auto-hidden when setting is enabled and session is not live
+    let is_stale = session.as_ref().map(|s| s.stale_session).unwrap_or(false);
+    let overlays_auto_hidden = overlay_settings().hide_when_not_live
+        && (!live_tailing || session_ended() || is_stale || !has_player);
+
     // ─────────────────────────────────────────────────────────────────────────
     // Render
     // ─────────────────────────────────────────────────────────────────────────
@@ -644,6 +649,14 @@ pub fn App() -> Element {
                             }
                         }); },
                         i { class: if is_visible { "fa-solid fa-eye" } else { "fa-solid fa-eye-slash" } }
+                    }
+                    if overlays_auto_hidden {
+                        span {
+                            class: "auto-hide-indicator",
+                            title: "Overlays auto-hidden (not live)",
+                            i { class: "fa-solid fa-eye-slash" }
+                            " Auto"
+                        }
                     }
                     button {
                         class: if is_move_mode { "btn btn-header-overlay active" } else { "btn btn-header-overlay" },
@@ -997,6 +1010,61 @@ pub fn App() -> Element {
                                 i { class: "fa-solid fa-screwdriver-wrench" }
                                 span { " Customize" }
                             }
+                            div { class: "overlay-auto-hide-toggles",
+                                label {
+                                    class: "toggle-switch-label",
+                                    title: "Automatically hide overlays when viewing historical files or when logged out",
+                                    span { class: "toggle-switch",
+                                        input {
+                                            r#type: "checkbox",
+                                            checked: overlay_settings().hide_when_not_live,
+                                            onchange: move |e| {
+                                                let enabled = e.checked();
+                                                let mut toast = use_toast();
+                                                spawn(async move {
+                                                    if let Some(mut cfg) = api::get_config().await {
+                                                        cfg.overlay_settings.hide_when_not_live = enabled;
+                                                        if let Err(err) = api::update_config(&cfg).await {
+                                                            toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                                        } else {
+                                                            overlay_settings.set(cfg.overlay_settings);
+                                                            api::apply_not_live_auto_hide().await;
+                                                        }
+                                                    }
+                                                });
+                                            },
+                                        }
+                                        span { class: "toggle-slider" }
+                                    }
+                                    span { class: "toggle-text", "Auto-hide when not live" }
+                                }
+                                label {
+                                    class: "toggle-switch-label",
+                                    title: "Automatically hide overlays during in-game conversations",
+                                    span { class: "toggle-switch",
+                                        input {
+                                            r#type: "checkbox",
+                                            checked: overlay_settings().hide_during_conversations,
+                                            onchange: move |e| {
+                                                let enabled = e.checked();
+                                                let mut toast = use_toast();
+                                                spawn(async move {
+                                                    if let Some(mut cfg) = api::get_config().await {
+                                                        cfg.overlay_settings.hide_during_conversations = enabled;
+                                                        if let Err(err) = api::update_config(&cfg).await {
+                                                            toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                                        } else {
+                                                            overlay_settings.set(cfg.overlay_settings);
+                                                        }
+                                                    }
+                                                });
+                                            },
+                                        }
+                                        span { class: "toggle-slider" }
+                                    }
+                                    span { class: "toggle-text", "Hide in conversations" }
+                                }
+                            }
                             div { class: "profile-selector",
                                 if profile_names().is_empty() {
                                     // Empty state: no profiles exist
@@ -1303,30 +1371,6 @@ pub fn App() -> Element {
                                         }
                                     }
                                 }
-                            }
-                        }
-
-                        // Behavior settings
-                        h4 { class: "subsection-title text-muted", "Behavior" }
-                        div { class: "settings-row",
-                            label { class: "checkbox-label",
-                                input {
-                                    r#type: "checkbox",
-                                    checked: overlay_settings().hide_during_conversations,
-                                    onchange: move |e| {
-                                        let enabled = e.checked();
-                                        let mut toast = use_toast();
-                                        spawn(async move {
-                                            if let Some(mut cfg) = api::get_config().await {
-                                                cfg.overlay_settings.hide_during_conversations = enabled;
-                                                if let Err(err) = api::update_config(&cfg).await {
-                                                    toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
-                                                }
-                                            }
-                                        });
-                                    },
-                                }
-                                span { class: "text-button-style", "Hide during conversations" }
                             }
                         }
 

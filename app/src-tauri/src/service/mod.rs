@@ -156,6 +156,8 @@ pub enum OverlayUpdate {
     ConversationStarted,
     /// Local player exited conversation - restore overlays if we hid them
     ConversationEnded,
+    /// Session liveness changed (historical mode entered/exited, player logged out/in)
+    NotLiveStateChanged { is_live: bool },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -223,6 +225,12 @@ impl SignalHandler for CombatSignalHandler {
                 self.shared.in_combat.store(true, Ordering::SeqCst);
                 let _ = self.trigger_tx.try_send(MetricsTrigger::CombatStarted);
                 let _ = self.session_event_tx.send(SessionEvent::CombatStarted);
+                // If overlays were auto-hidden for not-live, restore them — combat means live
+                if self.shared.not_live_hiding_active.load(Ordering::SeqCst) {
+                    let _ = self
+                        .overlay_tx
+                        .try_send(OverlayUpdate::NotLiveStateChanged { is_live: true });
+                }
             }
             GameSignal::CombatEnded { .. } => {
                 self.shared.in_combat.store(false, Ordering::SeqCst);
@@ -878,6 +886,9 @@ impl CombatService {
                     let _ = self
                         .app_handle
                         .emit("session-updated", "TailingModeChanged");
+                    let _ = self
+                        .overlay_tx
+                        .try_send(OverlayUpdate::NotLiveStateChanged { is_live: false });
                     self.start_tailing(path).await;
                 }
                 ServiceCommand::ResumeLiveTailing => {
@@ -886,6 +897,9 @@ impl CombatService {
                     let _ = self
                         .app_handle
                         .emit("session-updated", "TailingModeChanged");
+                    let _ = self
+                        .overlay_tx
+                        .try_send(OverlayUpdate::NotLiveStateChanged { is_live: true });
                     let newest = {
                         let index = self.shared.directory_index.read().await;
                         index.newest_file().map(|f| f.path.clone())
@@ -1013,6 +1027,9 @@ impl CombatService {
 
         // Resume live tailing mode (restart means we want to watch for new files)
         self.shared.is_live_tailing.store(true, Ordering::SeqCst);
+        let _ = self
+            .overlay_tx
+            .try_send(OverlayUpdate::NotLiveStateChanged { is_live: true });
 
         // Start new watcher (reads directory from config)
         self.start_watcher().await;
@@ -1076,6 +1093,9 @@ impl CombatService {
             self.pending_file = Some(path);
             // Emit event so frontend can show "session ended" indicator
             let _ = self.app_handle.emit("session-ended", ());
+            let _ = self
+                .overlay_tx
+                .try_send(OverlayUpdate::NotLiveStateChanged { is_live: false });
             return;
         }
 
@@ -1123,6 +1143,9 @@ impl CombatService {
                     "Pending file now has content, switching"
                 );
                 self.pending_file = None;
+                let _ = self
+                    .overlay_tx
+                    .try_send(OverlayUpdate::NotLiveStateChanged { is_live: true });
                 self.start_tailing(path).await;
             }
         }
@@ -1593,6 +1616,15 @@ impl CombatService {
             elapsed_ms = timer.elapsed().as_millis() as u64,
             "Parse completed"
         );
+
+        // Check if this live session is actually stale or empty (no player data).
+        // This catches the case where the app starts tailing an old/empty file.
+        // We emit the event unconditionally — the router checks the setting.
+        if self.shared.is_session_not_live().await {
+            let _ = self
+                .overlay_tx
+                .try_send(OverlayUpdate::NotLiveStateChanged { is_live: false });
+        }
 
         // Trigger initial metrics send after file processing
         let _ = trigger_tx.try_send(MetricsTrigger::InitialLoad);

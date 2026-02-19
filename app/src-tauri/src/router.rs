@@ -516,7 +516,43 @@ async fn process_overlay_update(
                     shared
                         .overlays_visible_before_conversation
                         .store(false, Ordering::SeqCst);
-                    let _ = OverlayManager::temporary_show_all(overlay_state, service_handle).await;
+                    let _ =
+                        OverlayManager::temporary_show_all(overlay_state, service_handle).await;
+                }
+            }
+        }
+        OverlayUpdate::NotLiveStateChanged { is_live } => {
+            // Check if auto-hide when not live is enabled
+            let hide_enabled = shared
+                .config
+                .read()
+                .await
+                .overlay_settings
+                .hide_when_not_live;
+            if !hide_enabled {
+                return;
+            }
+
+            if !is_live {
+                // Session is no longer live — hide overlays if they're visible
+                let currently_visible = overlay_state
+                    .lock()
+                    .ok()
+                    .is_some_and(|s| s.overlays_visible && !s.overlays.is_empty());
+
+                if currently_visible {
+                    shared.activate_not_live_hiding();
+                    let _ =
+                        OverlayManager::temporary_hide_all(overlay_state, service_handle).await;
+                }
+            } else {
+                // Session is live again — restore overlays if we were the ones who hid them
+                if shared.deactivate_not_live_hiding() {
+                    let _ = OverlayManager::temporary_show_all(
+                        overlay_state,
+                        service_handle,
+                    )
+                    .await;
                 }
             }
         }
