@@ -834,13 +834,9 @@ show_on_hp_overlay = false
 is_kill_target = false
 
 [[boss.phases]]
-id = "apex_main"
-name = "Apex"
-trigger = { type = "any_of", conditions = [
-  { type = "combat_start" },
-  { type = "phase_ended", phase_id = "apex_transformer" },
-  { type = "phase_ended", phase_id = "apex_voltinator" },
-] }
+id = "apex_start"
+name = "Apex Start"
+trigger = { type = "combat_start" }
 
 [[boss.phases]]
 id = "apex_transformer"
@@ -851,30 +847,28 @@ end_trigger = { type = "boss_hp_below", hp_percent = 10.0, selector = [
 ] }
 
 [[boss.phases]]
-id = "apex_voltinator"
-name = "Voltinator"
-trigger = { type = "ability_cast", abilities = [
-  4310755595780096,
-], source = { selector = [
-  "Apex Vanguard",
-] } }
-end_trigger = { type = "effect_removed", effects = [
-  4310755595780426,
-], target = { selector = [
-  "Apex Vanguard",
-] } }
+id = "apex_photogensis"
+name = "Apex Phase 1"
+trigger = { type = "phase_ended", phase_id = "apex_transformer" }
+end_trigger = { type = "any_of", conditions = [
+  { type = "boss_hp_below", hp_percent = 59.0 },
+] }
 
+[[boss.phases]]
+id = "apex_main_2"
+name = "Apex Phase 2"
+trigger = { type = "phase_ended", phase_id = "apex_phase_1" }
 [[boss.phases]]
 id = "apex_burn"
 name = "Burn"
 trigger = { type = "ability_cast", abilities = [4329997049266176] }
 
-[[boss.challenges]]
-id = "apex_volt_dmg"
-name = "Voltinator Damage"
-metric = "damage"
-phase = "apex_voltinator"
-
+# [[boss.challenges]]
+# id = "apex_volt_dmg"
+# name = "Voltinator Damage"
+# metric = "damage"
+# phase = "apex_voltinator"
+#
 [[boss.timer]]
 id = "apex_photo_hp"
 name = "Photogenesis HP"
