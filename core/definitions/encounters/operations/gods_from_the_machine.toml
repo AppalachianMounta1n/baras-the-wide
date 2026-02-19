@@ -309,8 +309,9 @@ type = "phase_ended"
 phase_id = "izax_p4"
 
 [boss.phases.end_trigger]
-type = "time_elapsed"
-secs = 120.0
+type = "ability_cast"
+abilities = [4168751092072448]
+source = { selector = ["IZAX"] }
 
 [[boss.phases]]
 id = "izax_burn"
