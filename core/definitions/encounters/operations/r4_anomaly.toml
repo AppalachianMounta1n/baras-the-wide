@@ -273,15 +273,6 @@ color = [180, 29, 224, 255]
 difficulties = ["veteran"]
 
 [[boss.timer]]
-id = "watchdog_missiles_cs"
-name = "Missiles 1st"
-display_text = "The Missiles"
-trigger = { type = "combat_start" }
-duration_secs = 6.5
-color = [224, 129, 29, 255]
-difficulties = ["veteran"]
-
-[[boss.timer]]
 id = "watchdog_bombs_p1"
 name = "PMX4 Bombs 1st"
 display_text = "PMX4 Bombs"
@@ -332,22 +323,6 @@ trigger = { type = "timer_expires", timer_id = "watchdog_wd_protocol_swap" }
 duration_secs = 12.0
 color = [180, 29, 224, 255]
 difficulties = ["veteran"]
-
-[[boss.timer]]
-id = "watchdog_missiles_cancel"
-name = "Missiles Cancel"
-trigger = { type = "any_of", conditions = [
-  { type = "ability_cast", abilities = [
-    4471709495197696,
-  ] },
-  { type = "ability_cast", abilities = [
-    4472963625648128,
-  ] },
-] }
-is_alert = true
-alert_text = "Missiles Canceled"
-color = [224, 129, 29, 255]
-difficulties = ["veteran", "master"]
 
 [[boss.timer]]
 id = "watchdog_degauss"
@@ -403,16 +378,6 @@ trigger = { type = "timer_expires", timer_id = "watchdog_bombs_p2_1st" }
 duration_secs = 12.0
 color = [31, 24, 224, 255]
 difficulties = ["veteran"]
-
-[[boss.timer]]
-id = "watchdog_missiles"
-name = "Missiles"
-trigger = { type = "ability_cast", abilities = [4468587053973504] }
-cancel_trigger = { type = "timer_started", timer_id = "watchdog_missiles_cancel" }
-duration_secs = 11.5
-color = [224, 129, 29, 255]
-difficulties = ["veteran", "master"]
-phases = ["wd_main", "wd_stalker", "wd_beam"]
 
 [[boss.timer]]
 id = "watchdog_missiles_burn"
