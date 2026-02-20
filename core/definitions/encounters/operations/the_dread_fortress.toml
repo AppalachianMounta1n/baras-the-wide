@@ -840,3 +840,20 @@ color = [219, 33, 32, 255]
 difficulties = ["veteran", "master"]
 cancel_trigger = { type = "counter_reaches", counter_id = "finger_deaths", value = 6 }
 chains_to = "brontes_fingers_knock"
+
+[[boss.timer]]
+id = "brontes_arcing_assault"
+name = "Arcing Assault"
+duration_secs = 17.0
+alert_on = "none"
+color = [153, 0, 255, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+can_be_refreshed = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [3308920114249728]
+source = "any"
+target = "any"
