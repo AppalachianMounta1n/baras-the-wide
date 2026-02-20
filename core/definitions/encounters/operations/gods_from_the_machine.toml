@@ -238,3 +238,682 @@ name = "IZAX"
 ids = [4108097563918336]
 is_boss = true
 is_kill_target = true
+
+[[boss.phases]]
+id = "izax_p1"
+name = "P1"
+display_text = "Claws"
+resets_counters = []
+
+[boss.phases.start_trigger]
+type = "combat_start"
+
+[boss.phases.end_trigger]
+type = "boss_hp_below"
+hp_percent = 97.0
+selector = ["IZAX"]
+
+[[boss.phases]]
+id = "izax_p2"
+name = "P2"
+display_text = "Beams"
+resets_counters = []
+
+[boss.phases.start_trigger]
+type = "phase_ended"
+phase_id = "izax_p1"
+
+[boss.phases.end_trigger]
+type = "boss_hp_below"
+hp_percent = 80.0
+selector = ["IZAX"]
+
+[[boss.phases]]
+id = "izax_p3"
+name = "P3"
+display_text = "Omniblast"
+resets_counters = []
+
+[boss.phases.start_trigger]
+type = "phase_ended"
+phase_id = "izax_p2"
+
+[boss.phases.end_trigger]
+type = "boss_hp_below"
+hp_percent = 60.0
+selector = ["IZAX"]
+
+[[boss.phases]]
+id = "izax_p4"
+name = "P4"
+display_text = "Purple Orb"
+resets_counters = []
+
+[boss.phases.start_trigger]
+type = "phase_ended"
+phase_id = "izax_p3"
+
+[boss.phases.end_trigger]
+type = "boss_hp_below"
+hp_percent = 59.0
+selector = ["IZAX"]
+
+[[boss.phases]]
+id = "izax_p5"
+name = "P5"
+display_text = "Frogger"
+resets_counters = []
+
+[boss.phases.start_trigger]
+type = "phase_ended"
+phase_id = "izax_p4"
+
+[boss.phases.end_trigger]
+type = "ability_cast"
+abilities = [4168751092072448]
+source = { selector = ["IZAX"] }
+
+[[boss.phases]]
+id = "izax_burn"
+name = "Burn"
+resets_counters = []
+
+[boss.phases.start_trigger]
+type = "phase_ended"
+phase_id = "izax_p5"
+
+[boss.phases.end_trigger]
+type = "combat_end"
+[[boss.timer]]
+id = "izax_induction"
+name = "Induction"
+display_text = "Induction"
+duration_secs = 34.0
+alert_text = "Cascade"
+color = [38, 210, 213, 255]
+phases = ["izax_p1", "izax_p2", "izax_p3", "izax_p4"]
+difficulties = ["veteran", "master"]
+enabled = true
+show_at_secs = 4.0
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = []
+source = "boss"
+target = "any"
+
+
+[[boss.timer]]
+id = "izax_induction_a"
+name = "Induction A"
+display_text = "Induction"
+duration_secs = 30.0
+is_alert = true
+alert_text = "Cascade"
+color = [38, 210, 213, 255]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [4168128321814528]
+source = "boss"
+target = "any"
+
+
+[[boss.timer]]
+id = "izax_induction_d"
+name = "Induction D"
+display_text = "Induction D"
+duration_secs = 30.0
+is_alert = true
+alert_text = "Move OUT"
+color = [38, 210, 213, 255]
+phases = ["izax_p1", "izax_p2", "izax_p3", "izax_p4"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "effect_applied"
+effects = [4168128321814528]
+source = "boss"
+target = "local_player"
+
+[[boss.timer]]
+id = "izax_p1_slam"
+name = "P1 Slam"
+display_text = "Slam"
+duration_secs = 26.0
+color = [255, 128, 0, 255]
+phases = ["izax_p1"]
+difficulties = ["veteran", "master"]
+enabled = true
+show_at_secs = 5.0
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "combat_start"
+
+[boss.timer.cancel_trigger]
+type = "phase_ended"
+phase_id = "izax_p1"
+
+
+[[boss.timer]]
+id = "izax_p2_explosion_1"
+name = "P2 Explosion 1"
+display_text = "Explosion"
+duration_secs = 12.0
+color = [255, 128, 0, 255]
+phases = ["izax_p2"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [4168794041745408]
+source = "boss"
+target = "any"
+
+[boss.timer.cancel_trigger]
+type = "phase_ended"
+phase_id = "izax_p2"
+
+[[boss.timer]]
+id = "izax_p2_explosion_2"
+name = "P2 Explosion 2"
+display_text = "Explosion"
+duration_secs = 7.0
+color = [212, 255, 0, 255]
+phases = ["izax_p2"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "izax_p2_explosion_1"
+
+[boss.timer.cancel_trigger]
+type = "phase_ended"
+phase_id = "izax_p2"
+
+
+[[boss.timer]]
+id = "izax_p2_hull_cutters"
+name = "P2 Hull Cutters"
+display_text = "Hull Cutters"
+duration_secs = 36.0
+color = [157, 160, 19, 255]
+phases = ["izax_p2"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [4160719503228928]
+source = "boss"
+target = "any"
+
+[boss.timer.cancel_trigger]
+type = "phase_entered"
+phase_id = "izax_p2"
+
+[[boss.timer]]
+id = "izax_p2_knockback"
+name = "P2 Knockback"
+display_text = "Knockback"
+duration_secs = 15.0
+color = [255, 0, 0, 255]
+phases = ["izax_p2"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "effect_applied"
+effects = [4161715935641600]
+source = "boss"
+target = "any"
+
+[boss.timer.cancel_trigger]
+type = "phase_ended"
+phase_id = "izax_p2"
+
+[[boss.timer]]
+id = "izax_p3_interrupt"
+name = "P3 Interrupt"
+display_text = "Interrupt"
+duration_secs = 30.0
+is_alert = true
+alert_text = "Interrupt"
+color = [0, 0, 255, 255]
+phases = ["izax_p3"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "effect_removed"
+effects = [4162922821451776]
+source = "boss"
+target = "any"
+
+[[boss.timer]]
+id = "izax_p3_reposition"
+name = "P3 Reposition"
+display_text = "Reposition"
+duration_secs = 14.0
+color = [255, 0, 0, 255]
+phases = ["izax_p3"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "damage_taken"
+abilities = [4163068850339840]
+source = "any"
+target = "boss"
+
+[boss.timer.cancel_trigger]
+type = "phase_ended"
+phase_id = "izax_p3"
+
+[[boss.timer]]
+id = "izax_p3_shield"
+name = "P3 Shield"
+display_text = "Shield"
+duration_secs = 30.0
+is_alert = true
+alert_text = "Shield"
+color = [0, 255, 0, 255]
+phases = ["izax_p3"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "effect_applied"
+effects = [4162922821451776]
+source = "any"
+target = "boss"
+
+[[boss.timer]]
+id = "izax_p3_shield_down"
+name = "P3 Shield Down"
+display_text = "Shield Down"
+duration_secs = 12.0
+color = [0, 255, 0, 255]
+phases = ["izax_p3"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "effect_removed"
+effects = [4162922821451776]
+source = "any"
+target = "boss"
+
+[boss.timer.cancel_trigger]
+type = "phase_ended"
+phase_id = "izax_p3"
+
+[[boss.timer]]
+id = "izax_p3_tether_droids"
+name = "P3 Tether Droids"
+display_text = "Tether Droids"
+duration_secs = 5.0
+color = [255, 0, 0, 255]
+phases = ["izax_p3"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_b"
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "izax_p3_reposition"
+
+[boss.timer.cancel_trigger]
+type = "phase_ended"
+phase_id = "izax_p3"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "izax_p4_missile_volley_1"
+name = "P4 Missile Volley 1"
+display_text = "Missile Volley 1"
+duration_secs = 13.0
+color = [255, 0, 0, 255]
+phases = ["izax_p4"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_b"
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [4163854829355008]
+source = "boss"
+target = "any"
+
+[boss.timer.cancel_trigger]
+type = "timer_expires"
+timer_id = "izax_p4_missile_volley_1"
+
+[[boss.timer]]
+id = "izax_p4_missile_volley_2"
+name = "P4 Missile Volley 2"
+display_text = "Missile Volley 2"
+duration_secs = 11.0
+color = [255, 0, 0, 255]
+phases = ["izax_p4"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_b"
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "izax_p4_missile_volley_1"
+
+[boss.timer.cancel_trigger]
+type = "timer_expires"
+timer_id = "izax_p4_missile_volley_2"
+
+[[boss.timer]]
+id = "izax_p4_missile_volley_3"
+name = "P4 Missile Volley 3"
+display_text = "Missile Volley 3"
+duration_secs = 11.0
+color = [255, 0, 0, 255]
+phases = ["izax_p4"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_b"
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "izax_p4_missile_volley_2"
+
+[boss.timer.cancel_trigger]
+type = "timer_expires"
+timer_id = "izax_p4_missile_volley_3"
+
+[[boss.timer]]
+id = "izax_p4_missile_volley_4"
+name = "P4 Missile Volley 4"
+display_text = "Missile Volley 4"
+duration_secs = 11.0
+color = [255, 0, 0, 255]
+phases = ["izax_p4"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_b"
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "izax_p4_missile_volley_3"
+
+[boss.timer.cancel_trigger]
+type = "timer_expires"
+timer_id = "izax_p4_missile_volley_4"
+
+[[boss.timer]]
+id = "izax_p4_reposition_1st_m"
+name = "P4 Reposition 1st_M"
+display_text = "Reposition 1st_M"
+duration_secs = 80.0
+color = [225, 0, 255, 255]
+phases = ["izax_p4"]
+difficulties = ["master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "effect_applied"
+effects = [4173226447994880]
+source = "any"
+target = "boss"
+
+[boss.timer.cancel_trigger]
+type = "phase_ended"
+phase_id = "izax_p4"
+
+[[boss.timer]]
+id = "izax_p4_reposition_m"
+name = "P4 Reposition_M"
+display_text = "Reposition_M"
+duration_secs = 80.0
+color = [186, 0, 189, 255]
+phases = ["izax_p4"]
+difficulties = ["master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "ability_cast"
+abilities = [4166341615419392]
+source = "boss"
+target = "any"
+
+[boss.timer.cancel_trigger]
+type = "timer_expires"
+timer_id = "izax_p4_missile_volley_1"
+
+[[boss.timer]]
+id = "izax_p5_explosion"
+name = "P5 Explosion"
+display_text = "Explosion"
+duration_secs = 10.0
+color = [255, 174, 0, 255]
+phases = ["izax_p5"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "phase_ended"
+phase_id = "izax_p5"
+
+[boss.timer.cancel_trigger]
+type = "phase_entered"
+phase_id = "izax_burn"
+
+[[boss.timer]]
+id = "izax_p5_scyva"
+name = "P5 SCYVA"
+display_text = "SCYVA"
+duration_secs = 11.0
+color = [0, 255, 17, 255]
+phases = ["izax_p5"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_b"
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "izax_p4_missile_volley_4"
+
+[boss.timer.cancel_trigger]
+type = "timer_expires"
+timer_id = "izax_p5_scyva"
+
+[[boss.timer]]
+id = "izax_p5_tether_drone"
+name = "P5 Tether Drone"
+display_text = "Tether Drone"
+duration_secs = 31.0
+color = [255, 0, 0, 255]
+phases = ["izax_p5"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "entity_death"
+selector = [4164821196996608]
+
+[boss.timer.cancel_trigger]
+type = "phase_ended"
+phase_id = "izax_p5"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "izax_p6_radiation"
+name = "P6 Radiation"
+display_text = "Radiation"
+duration_secs = 28.0
+color = [255, 0, 0, 255]
+phases = ["izax_burn"]
+difficulties = ["veteran", "master"]
+enabled = true
+display_target = "timers_b"
+
+[boss.timer.trigger]
+type = "effect_applied"
+effects = [4168746797105152]
+source = "any"
+target = "boss"
+
+[boss.timer.cancel_trigger]
+type = "phase_ended"
+phase_id = "izax_p5"
+
+[[boss.timer]]
+id = "izax_p6_wipe"
+name = "P6 Wipe"
+display_text = "P6 Wipe"
+duration_secs = 22.0
+color = [255, 0, 0, 255]
+phases = ["izax_burn"]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "timer_expires"
+timer_id = "izax_p6_radiation"
+
+[boss.timer.cancel_trigger]
+type = "combat_end"
+
+[[boss.timer]]
+id = "izax_phase_2"
+name = "Phase 2"
+duration_secs = 30.0
+is_alert = true
+color = [0, 228, 5, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "phase_ended"
+phase_id = "izax_p1"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "izax_phase_3"
+name = "Phase 3"
+duration_secs = 30.0
+is_alert = true
+color = [0, 228, 5, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "phase_ended"
+phase_id = "izax_p2"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "izax_phase_4"
+name = "Phase 4"
+duration_secs = 30.0
+is_alert = true
+color = [0, 228, 5, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "phase_ended"
+phase_id = "izax_p3"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "izax_phase_5"
+name = "Phase 5"
+duration_secs = 30.0
+is_alert = true
+color = [0, 228, 5, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "phase_ended"
+phase_id = "izax_p4"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.timer]]
+id = "izax_burn"
+name = "Burn"
+duration_secs = 30.0
+is_alert = true
+color = [0, 228, 5, 255]
+difficulties = ["story", "veteran", "master"]
+enabled = true
+display_target = "timers_a"
+
+[boss.timer.trigger]
+type = "phase_ended"
+phase_id = "izax_p5"
+
+[boss.timer.audio]
+enabled = false
+offset = 0
+countdown_start = 0
+
+[[boss.challenges]]
+id = "izax_burn_dps"
+name = "BURN DPS"
+display_text = "BURN DPS"
+metric = "damage"
+enabled = true
+color = [255, 0, 0, 255]
+columns = "per_second_percent"
+
+[[boss.challenges.conditions]]
+type = "phase"
+phase_ids = ["izax_burn"]

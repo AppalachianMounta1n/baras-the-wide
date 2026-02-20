@@ -16,7 +16,7 @@ use baras_core::boss::{
 };
 use baras_core::dsl::{AudioConfig, Trigger};
 use baras_core::effects::{DisplayTarget, EFFECTS_DSL_VERSION, EffectDefinition};
-use baras_types::{AbilitySelector, EffectSelector, EntityFilter};
+use baras_types::{AbilitySelector, AlertTrigger, EffectSelector, EntityFilter};
 
 use super::effects::{load_user_effects_file, save_user_effects};
 use super::encounters::{ensure_user_dir, get_bundled_encounters_dir};
@@ -256,6 +256,14 @@ fn convert_trigger(xml: &XmlTrigger) -> Trigger {
             source,
             target,
         },
+        "HEAL" => Trigger::HealingTaken {
+            abilities: build_ability_selectors(
+                xml.ability_guid.as_deref(),
+                xml.ability.as_deref(),
+            ),
+            source,
+            target,
+        },
         "ABILITY_ACTIVATED" => Trigger::AbilityCast {
             abilities: build_ability_selectors(
                 xml.ability_guid.as_deref(),
@@ -326,8 +334,8 @@ fn convert_to_boss_timer(xml: &XmlConfigTimer) -> BossTimerDefinition {
         trigger,
         duration_secs: xml.interval.unwrap_or(0.0),
         is_alert,
-        alert_on: Default::default(),
-        alert_text: None,
+        alert_on: if is_alert { AlertTrigger::OnApply } else { Default::default() },
+        alert_text: if is_alert { Some(name.to_string()) } else { None },
         color,
         phases: Vec::new(),
         counter_condition: None,
@@ -358,6 +366,8 @@ fn convert_to_effect(xml: &XmlConfigTimer) -> EffectDefinition {
 
     let color = xml.color.as_deref().and_then(parse_color);
 
+    let is_alert = xml.interval.map_or(true, |v| v <= 0.0);
+
     EffectDefinition {
         id,
         name: name.to_string(),
@@ -373,7 +383,7 @@ fn convert_to_effect(xml: &XmlConfigTimer) -> EffectDefinition {
         cooldown_ready_secs: 0.0,
         color,
         show_at_secs: 0.0,
-        display_target: DisplayTarget::EffectsOverlay,
+        display_target: if is_alert { DisplayTarget::None } else { DisplayTarget::EffectsOverlay },
         icon_ability_id: None,
         show_icon: true,
         display_source: false,
@@ -382,8 +392,9 @@ fn convert_to_effect(xml: &XmlConfigTimer) -> EffectDefinition {
         track_outside_combat: true,
         on_apply_trigger_timer: None,
         on_expire_trigger_timer: None,
-        alert_text: None,
-        alert_on: Default::default(),
+        is_alert,
+        alert_text: if is_alert { Some(name.to_string()) } else { None },
+        alert_on: if is_alert { AlertTrigger::OnApply } else { Default::default() },
         audio: convert_audio(xml),
     }
 }
@@ -442,7 +453,7 @@ fn group_timers(xml_timers: &[XmlConfigTimer]) -> GroupedTimers {
                 .as_ref()
                 .and_then(|t| t.trigger_type.as_deref())
                 .unwrap_or("");
-            if trigger_type == "EFFECT_GAINED" || trigger_type == "EFFECT_LOST" {
+            if matches!(trigger_type, "EFFECT_GAINED" | "EFFECT_LOST" | "DAMAGE" | "HEAL" | "ABILITY_ACTIVATED") {
                 effects.push(convert_to_effect(xml));
             } else {
                 skipped_unsupported_effects += 1;

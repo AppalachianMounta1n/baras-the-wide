@@ -3,6 +3,8 @@
 //! This crate contains serializable configuration types that are shared between
 //! the native backend (baras-core) and the WASM frontend (app-ui).
 
+pub mod formatting;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -258,6 +260,19 @@ pub struct PlayerDeath {
     pub name: String,
     /// Time of death in seconds from combat start
     pub death_time_secs: f32,
+}
+
+/// Final health state of an NPC in an encounter.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NpcHealthRow {
+    pub name: String,
+    /// Combat time (seconds) when this NPC first appeared
+    pub first_seen_secs: f32,
+    /// Combat time (seconds) when this NPC died, if it died
+    pub death_time_secs: Option<f32>,
+    pub max_hp: i64,
+    pub final_hp: i64,
+    pub final_hp_pct: f32,
 }
 
 /// A single row in the combat log viewer.
@@ -717,6 +732,16 @@ pub enum Trigger {
         target: EntityFilter,
     },
 
+    /// Healing is received from an ability. [TPC]
+    HealingTaken {
+        #[serde(default)]
+        abilities: Vec<AbilitySelector>,
+        #[serde(default)]
+        source: EntityFilter,
+        #[serde(default)]
+        target: EntityFilter,
+    },
+
     // ─── HP Thresholds [TPC] ───────────────────────────────────────────────
     /// Boss HP drops below threshold. [TPC]
     BossHpBelow {
@@ -800,6 +825,7 @@ impl Trigger {
             Self::EffectApplied { .. } => "Effect Applied",
             Self::EffectRemoved { .. } => "Effect Removed",
             Self::DamageTaken { .. } => "Damage Taken",
+            Self::HealingTaken { .. } => "Healing Taken",
             Self::BossHpBelow { .. } => "Boss HP Below",
             Self::BossHpAbove { .. } => "Boss HP Above",
             Self::NpcAppears { .. } => "NPC Appears",
@@ -827,6 +853,7 @@ impl Trigger {
             Self::EffectApplied { .. } => "effect_applied",
             Self::EffectRemoved { .. } => "effect_removed",
             Self::DamageTaken { .. } => "damage_taken",
+            Self::HealingTaken { .. } => "healing_taken",
             Self::BossHpBelow { .. } => "boss_hp_below",
             Self::BossHpAbove { .. } => "boss_hp_above",
             Self::NpcAppears { .. } => "npc_appears",
@@ -960,14 +987,70 @@ impl OverlayAppearanceConfig {
 // Personal Stats
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Stats that can be displayed on the personal overlay
+/// Category for personal stats (used for auto-coloring and grouping)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PersonalStatCategory {
+    /// Contextual info (encounter name, difficulty, time, spec, phase)
+    Info,
+    /// Damage metrics
+    Damage,
+    /// Healing metrics
+    Healing,
+    /// Damage taken / mitigation metrics
+    Mitigation,
+    /// Threat metrics
+    Threat,
+    /// Defensive tank stats (defense %, shield %)
+    Defensive,
+    /// Utility metrics (APM)
+    Utility,
+}
+
+/// Stats that can be displayed on the personal overlay.
+///
+/// Compound groups (e.g., `DamageGroup`) render multiple values in a single row.
+/// Info stats and APM remain as single-value rows.
+///
+/// Legacy individual metric variants (Dps, Hps, etc.) are preserved for config
+/// compatibility but render as no-ops (skipped during display). Users should
+/// manually switch to compound groups in their settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PersonalStat {
+    // ── Info (single-value rows) ──
     EncounterName,
     Difficulty,
     EncounterTime,
     EncounterCount,
+    ClassDiscipline,
+
+    // ── Compound metric groups ──
+    /// DPS  |  Total  |  Crit: X%
+    DamageGroup,
+    /// Boss DPS  |  Boss Total
+    BossDamageGroup,
+    /// HPS  |  eHPS  |  Eff: X%
+    HealingGroup,
+    /// Total  |  Total Eff  |  Crit: X%
+    HealingAdvanced,
+    /// TPS  |  Total
+    ThreatGroup,
+    /// eDTPS  |  Total Taken
+    MitigationGroup,
+    /// Def: X%  |  Shield: X%
+    DefensiveGroup,
+    /// Phase  |  Time
+    PhaseGroup,
+
+    // ── Standalone metric ──
     Apm,
+
+    // ── Layout ──
+    /// Visual separator line (not a real stat)
+    Separator,
+
+    // ── Legacy variants (no-ops, kept for config compatibility) ──
+    // These deserialize from old configs but are skipped during rendering.
+    // Not shown in the "add stats" UI. Users should switch to compound groups.
     Dps,
     EDps,
     BossDps,
@@ -982,10 +1065,7 @@ pub enum PersonalStat {
     DamageCritPct,
     HealCritPct,
     EffectiveHealPct,
-    ClassDiscipline,
-    /// Current boss phase (if any)
     Phase,
-    /// Time in current phase
     PhaseTime,
 }
 
@@ -997,25 +1077,126 @@ impl PersonalStat {
             Self::Difficulty => "Difficulty",
             Self::EncounterTime => "Duration",
             Self::EncounterCount => "Encounter",
-            Self::Apm => "APM",
-            Self::Dps => "DPS",
-            Self::EDps => "eDPS",
-            Self::BossDps => "Boss DPS",
-            Self::BossDamage => "Boss Damage",
-            Self::TotalDamage => "Total Damage",
-            Self::Hps => "HPS",
-            Self::EHps => "eHPS",
-            Self::TotalHealing => "Total Healing",
-            Self::Dtps => "eDTPS",
-            Self::Tps => "TPS",
-            Self::TotalThreat => "Total Threat",
-            Self::DamageCritPct => "Dmg Crit %",
-            Self::HealCritPct => "Heal Crit %",
-            Self::EffectiveHealPct => "Eff Heal %",
             Self::ClassDiscipline => "Spec",
-            Self::Phase => "Phase",
-            Self::PhaseTime => "Phase Time",
+            Self::DamageGroup => "Damage",
+            Self::BossDamageGroup => "Boss Dmg",
+            Self::HealingGroup => "Healing",
+            Self::HealingAdvanced => "Heal+",
+            Self::ThreatGroup => "Threat",
+            Self::MitigationGroup => "DTPS",
+            Self::DefensiveGroup => "Defense",
+            Self::PhaseGroup => "Phase",
+            Self::Apm => "APM",
+            Self::Separator => "── Separator ──",
+            // Legacy no-ops
+            Self::Dps => "DPS (legacy)",
+            Self::EDps => "eDPS (legacy)",
+            Self::BossDps => "Boss DPS (legacy)",
+            Self::TotalDamage => "Total Damage (legacy)",
+            Self::BossDamage => "Boss Damage (legacy)",
+            Self::Hps => "HPS (legacy)",
+            Self::EHps => "eHPS (legacy)",
+            Self::TotalHealing => "Total Healing (legacy)",
+            Self::Dtps => "eDTPS (legacy)",
+            Self::Tps => "TPS (legacy)",
+            Self::TotalThreat => "Total Threat (legacy)",
+            Self::DamageCritPct => "Dmg Crit % (legacy)",
+            Self::HealCritPct => "Heal Crit % (legacy)",
+            Self::EffectiveHealPct => "Eff Heal % (legacy)",
+            Self::Phase => "Phase (legacy)",
+            Self::PhaseTime => "Phase Time (legacy)",
         }
+    }
+
+    /// Whether this stat is a legacy no-op (kept for config compatibility only)
+    pub fn is_legacy(&self) -> bool {
+        matches!(
+            self,
+            Self::Dps
+                | Self::EDps
+                | Self::BossDps
+                | Self::TotalDamage
+                | Self::BossDamage
+                | Self::Hps
+                | Self::EHps
+                | Self::TotalHealing
+                | Self::Dtps
+                | Self::Tps
+                | Self::TotalThreat
+                | Self::DamageCritPct
+                | Self::HealCritPct
+                | Self::EffectiveHealPct
+                | Self::Phase
+                | Self::PhaseTime
+        )
+    }
+
+    /// Get the category for this stat (used for auto-coloring)
+    pub fn category(&self) -> PersonalStatCategory {
+        match self {
+            Self::EncounterName
+            | Self::Difficulty
+            | Self::EncounterTime
+            | Self::EncounterCount
+            | Self::ClassDiscipline => PersonalStatCategory::Info,
+
+            Self::DamageGroup | Self::BossDamageGroup => PersonalStatCategory::Damage,
+
+            Self::HealingGroup | Self::HealingAdvanced => PersonalStatCategory::Healing,
+
+            Self::MitigationGroup => PersonalStatCategory::Mitigation,
+
+            Self::ThreatGroup => PersonalStatCategory::Threat,
+
+            Self::DefensiveGroup => PersonalStatCategory::Defensive,
+
+            Self::PhaseGroup => PersonalStatCategory::Info,
+
+            Self::Apm => PersonalStatCategory::Utility,
+
+            Self::Separator => PersonalStatCategory::Info,
+
+            // Legacy no-ops — map to their original categories
+            Self::Dps | Self::EDps | Self::BossDps | Self::TotalDamage | Self::BossDamage => {
+                PersonalStatCategory::Damage
+            }
+            Self::Hps
+            | Self::EHps
+            | Self::TotalHealing
+            | Self::HealCritPct
+            | Self::EffectiveHealPct => PersonalStatCategory::Healing,
+            Self::DamageCritPct => PersonalStatCategory::Damage,
+            Self::Dtps => PersonalStatCategory::Mitigation,
+            Self::Tps | Self::TotalThreat => PersonalStatCategory::Threat,
+            Self::Phase | Self::PhaseTime => PersonalStatCategory::Info,
+        }
+    }
+
+    /// Whether this stat is informational context (not a combat metric)
+    pub fn is_info(&self) -> bool {
+        matches!(
+            self,
+            Self::EncounterName
+                | Self::Difficulty
+                | Self::EncounterTime
+                | Self::EncounterCount
+                | Self::ClassDiscipline
+        )
+    }
+
+    /// Whether this stat renders as a compound multi-value row
+    pub fn is_compound(&self) -> bool {
+        matches!(
+            self,
+            Self::DamageGroup
+                | Self::BossDamageGroup
+                | Self::HealingGroup
+                | Self::HealingAdvanced
+                | Self::ThreatGroup
+                | Self::MitigationGroup
+                | Self::DefensiveGroup
+                | Self::PhaseGroup
+        )
     }
 
     /// Get all stats in display order
@@ -1026,23 +1207,16 @@ impl PersonalStat {
             Self::EncounterTime,
             Self::EncounterCount,
             Self::ClassDiscipline,
+            Self::DamageGroup,
+            Self::BossDamageGroup,
+            Self::HealingGroup,
+            Self::HealingAdvanced,
+            Self::ThreatGroup,
+            Self::MitigationGroup,
+            Self::DefensiveGroup,
+            Self::PhaseGroup,
             Self::Apm,
-            Self::Dps,
-            Self::EDps,
-            Self::BossDamage,
-            Self::BossDps,
-            Self::TotalDamage,
-            Self::Hps,
-            Self::EHps,
-            Self::TotalHealing,
-            Self::Dtps,
-            Self::Tps,
-            Self::TotalThreat,
-            Self::DamageCritPct,
-            Self::HealCritPct,
-            Self::EffectiveHealPct,
-            Self::Phase,
-            Self::PhaseTime,
+            Self::Separator,
         ]
     }
 }
@@ -1056,6 +1230,22 @@ pub struct PersonalOverlayConfig {
     pub font_color: Color,
     #[serde(default = "default_font_color")]
     pub label_color: Color,
+    /// Font scale multiplier (1.0 - 2.0, default 1.0)
+    #[serde(default = "default_scaling_factor")]
+    pub font_scale: f32,
+    /// When true, background shrinks to fit content instead of filling the window
+    #[serde(default)]
+    pub dynamic_background: bool,
+    /// When true, value text is automatically colored by stat category
+    /// (red for damage, green for healing, orange for mitigation, blue for threat)
+    #[serde(default = "default_true")]
+    pub auto_color_values: bool,
+    /// Line spacing multiplier (0.7 - 1.5, default 1.0)
+    #[serde(default = "default_scaling_factor")]
+    pub line_spacing: f32,
+    /// When true, stats with zero/empty values are hidden
+    #[serde(default)]
+    pub hide_empty_values: bool,
 }
 
 fn default_personal_stats() -> Vec<PersonalStat> {
@@ -1063,9 +1253,11 @@ fn default_personal_stats() -> Vec<PersonalStat> {
         PersonalStat::EncounterName,
         PersonalStat::Difficulty,
         PersonalStat::EncounterTime,
-        PersonalStat::Dps,
-        PersonalStat::Hps,
-        PersonalStat::Dtps,
+        PersonalStat::Separator,
+        PersonalStat::DamageGroup,
+        PersonalStat::HealingGroup,
+        PersonalStat::MitigationGroup,
+        PersonalStat::Separator,
         PersonalStat::Apm,
     ]
 }
@@ -1076,6 +1268,11 @@ impl Default for PersonalOverlayConfig {
             visible_stats: default_personal_stats(),
             font_color: overlay_colors::WHITE,
             label_color: overlay_colors::WHITE,
+            font_scale: 1.0,
+            dynamic_background: false,
+            auto_color_values: true,
+            line_spacing: 1.0,
+            hide_empty_values: false,
         }
     }
 }
@@ -1202,6 +1399,12 @@ pub struct BossHealthConfig {
     pub show_percent: bool,
     #[serde(default = "default_true")]
     pub show_target: bool,
+    /// Font scale multiplier (1.0 - 2.0, default 1.0)
+    #[serde(default = "default_scaling_factor")]
+    pub font_scale: f32,
+    /// When true, background shrinks to fit content instead of filling the window
+    #[serde(default)]
+    pub dynamic_background: bool,
 }
 
 fn default_boss_bar_color() -> Color {
@@ -1215,6 +1418,8 @@ impl Default for BossHealthConfig {
             font_color: overlay_colors::WHITE,
             show_percent: true,
             show_target: true,
+            font_scale: 1.0,
+            dynamic_background: false,
         }
     }
 }
@@ -1238,6 +1443,12 @@ pub struct TimerOverlayConfig {
     /// Sort by remaining time (vs. activation order)
     #[serde(default = "default_true")]
     pub sort_by_remaining: bool,
+    /// Font scale multiplier (1.0 - 2.0, default 1.0)
+    #[serde(default = "default_scaling_factor")]
+    pub font_scale: f32,
+    /// When true, background shrinks to fit content instead of filling the window
+    #[serde(default)]
+    pub dynamic_background: bool,
 }
 
 fn default_timer_bar_color() -> Color {
@@ -1254,6 +1465,8 @@ impl Default for TimerOverlayConfig {
             font_color: overlay_colors::WHITE,
             max_display: 10,
             sort_by_remaining: true,
+            font_scale: 1.0,
+            dynamic_background: false,
         }
     }
 }
@@ -1358,6 +1571,12 @@ pub struct ChallengeOverlayConfig {
     /// Layout direction for challenge cards
     #[serde(default)]
     pub layout: ChallengeLayout,
+    /// Font scale multiplier (1.0 - 2.0, default 1.0)
+    #[serde(default = "default_scaling_factor")]
+    pub font_scale: f32,
+    /// When true, background shrinks to fit content instead of filling the window
+    #[serde(default)]
+    pub dynamic_background: bool,
 }
 
 fn default_challenge_bar_color() -> Color {
@@ -1376,6 +1595,8 @@ impl Default for ChallengeOverlayConfig {
             show_duration: true,
             max_display: 4,
             layout: ChallengeLayout::Vertical,
+            font_scale: 1.0,
+            dynamic_background: false,
         }
     }
 }
@@ -1408,6 +1629,12 @@ pub struct EffectsAConfig {
     /// Show header title above overlay
     #[serde(default)]
     pub show_header: bool,
+    /// Font scale multiplier (1.0 - 2.0, default 1.0)
+    #[serde(default = "default_scaling_factor")]
+    pub font_scale: f32,
+    /// When true, background shrinks to fit content instead of filling the window
+    #[serde(default)]
+    pub dynamic_background: bool,
 }
 
 fn default_icon_size() -> u8 {
@@ -1427,6 +1654,8 @@ impl Default for EffectsAConfig {
             show_countdown: true,
             stack_priority: false,
             show_header: false,
+            font_scale: 1.0,
+            dynamic_background: false,
         }
     }
 }
@@ -1455,6 +1684,12 @@ pub struct EffectsBConfig {
     /// Show header title above overlay
     #[serde(default)]
     pub show_header: bool,
+    /// Font scale multiplier (1.0 - 2.0, default 1.0)
+    #[serde(default = "default_scaling_factor")]
+    pub font_scale: f32,
+    /// When true, background shrinks to fit content instead of filling the window
+    #[serde(default)]
+    pub dynamic_background: bool,
 }
 
 impl Default for EffectsBConfig {
@@ -1467,6 +1702,8 @@ impl Default for EffectsBConfig {
             show_countdown: true,
             stack_priority: false,
             show_header: false,
+            font_scale: 1.0,
+            dynamic_background: false,
         }
     }
 }
@@ -1503,6 +1740,12 @@ pub struct CooldownTrackerConfig {
     /// Show header title above overlay
     #[serde(default)]
     pub show_header: bool,
+    /// Font scale multiplier (1.0 - 2.0, default 1.0)
+    #[serde(default = "default_scaling_factor")]
+    pub font_scale: f32,
+    /// When true, background shrinks to fit content instead of filling the window
+    #[serde(default)]
+    pub dynamic_background: bool,
 }
 
 fn default_max_cooldowns() -> u8 {
@@ -1519,6 +1762,8 @@ impl Default for CooldownTrackerConfig {
             show_source_name: false,
             show_target_name: false,
             show_header: false,
+            font_scale: 1.0,
+            dynamic_background: false,
         }
     }
 }
@@ -1554,6 +1799,12 @@ pub struct DotTrackerConfig {
     /// Show countdown timers on icons
     #[serde(default = "default_true")]
     pub show_countdown: bool,
+    /// Font scale multiplier (1.0 - 2.0, default 1.0)
+    #[serde(default = "default_scaling_factor")]
+    pub font_scale: f32,
+    /// When true, background shrinks to fit content instead of filling the window
+    #[serde(default)]
+    pub dynamic_background: bool,
 }
 
 fn default_max_targets() -> u8 {
@@ -1577,6 +1828,8 @@ impl Default for DotTrackerConfig {
             show_source_name: false,
             show_header: false,
             show_countdown: true,
+            font_scale: 1.0,
+            dynamic_background: false,
         }
     }
 }
@@ -1594,6 +1847,8 @@ pub struct NotesOverlayConfig {
     /// Font color for notes text
     #[serde(default = "default_font_color")]
     pub font_color: Color,
+    #[serde(default)]
+    pub dynamic_background: bool,
 }
 
 fn default_notes_font_size() -> u8 {
@@ -1605,6 +1860,7 @@ impl Default for NotesOverlayConfig {
         Self {
             font_size: default_notes_font_size(),
             font_color: overlay_colors::WHITE,
+            dynamic_background: false,
         }
     }
 }
@@ -1668,6 +1924,12 @@ pub struct OverlaySettings {
     pub metric_stack_from_bottom: bool,
     #[serde(default = "default_scaling_factor")]
     pub metric_scaling_factor: f32,
+    /// Font scale multiplier for metric overlays (1.0 - 2.0, default 1.0)
+    #[serde(default = "default_scaling_factor")]
+    pub metric_font_scale: f32,
+    /// When true, metric overlay backgrounds shrink to fit content
+    #[serde(default)]
+    pub metric_dynamic_background: bool,
     #[serde(default = "default_opacity")]
     pub personal_opacity: u8,
     #[serde(default = "default_true")]
@@ -1725,6 +1987,9 @@ pub struct OverlaySettings {
     /// Auto-hide overlays when local player is in a conversation
     #[serde(default)]
     pub hide_during_conversations: bool,
+    /// Auto-hide overlays when not in a live session (historical, logged out, etc.)
+    #[serde(default)]
+    pub hide_when_not_live: bool,
 }
 
 impl Default for OverlaySettings {
@@ -1739,6 +2004,8 @@ impl Default for OverlaySettings {
             metric_show_empty_bars: true,
             metric_stack_from_bottom: false,
             metric_scaling_factor: 1.0,
+            metric_font_scale: 1.0,
+            metric_dynamic_background: false,
             personal_opacity: 180,
             class_icons_enabled: true,
             default_appearances: HashMap::new(),
@@ -1767,6 +2034,7 @@ impl Default for OverlaySettings {
             notes_overlay: NotesOverlayConfig::default(),
             notes_opacity: 180,
             hide_during_conversations: false,
+            hide_when_not_live: false,
         }
     }
 }
@@ -1915,6 +2183,11 @@ pub struct AppConfig {
     /// Used to show "What's New" popup only once per version.
     #[serde(default)]
     pub last_viewed_changelog_version: Option<String>,
+
+    /// Use European number formatting (swap `.` and `,` in numbers).
+    /// e.g., `1.50K` becomes `1,50K` and `1,500` becomes `1.500`.
+    #[serde(default)]
+    pub european_number_format: bool,
 }
 
 fn default_retention_days() -> u32 {
@@ -1952,6 +2225,7 @@ impl AppConfig {
             alacrity_percent: 0.0,
             latency_ms: 0,
             last_viewed_changelog_version: None,
+            european_number_format: false,
         }
     }
 }
@@ -2144,6 +2418,9 @@ pub struct UiSessionState {
 
     /// Effects Editor state
     pub effects_editor: EffectsEditorState,
+
+    /// Use European number formatting (swap `.` and `,`)
+    pub european_number_format: bool,
 }
 
 impl Default for UiSessionState {
@@ -2154,6 +2431,7 @@ impl Default for UiSessionState {
             combat_log: CombatLogSessionState::default(),
             encounter_builder: EncounterBuilderState::default(),
             effects_editor: EffectsEditorState::default(),
+            european_number_format: false,
         }
     }
 }

@@ -1,0 +1,14 @@
+[area]
+name = "Xenoanalyst"
+id = 137438993300
+
+[[boss]]
+id = "xeno"
+name = "Xenoanalyst"
+difficulties = ["story", "veteran"]
+
+[[boss.entities]]
+name = "Xenoanalyst"
+ids = [3213924027596800, 3213928322564096, 3213919732629504]
+is_boss = true
+is_kill_target = true

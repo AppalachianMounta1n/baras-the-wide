@@ -12,8 +12,9 @@ use tiny_skia::Color;
 use super::{Overlay, OverlayConfigUpdate, OverlayData};
 use crate::frame::OverlayFrame;
 use crate::platform::{OverlayConfig, PlatformError};
-use crate::utils::{color_from_rgba, format_duration_short, format_number, truncate_name};
+use crate::utils::{color_from_rgba, format_duration_short, truncate_name};
 use crate::widgets::{colors, Footer, ProgressBar};
+use baras_types::formatting;
 
 /// Data for the challenges overlay
 #[derive(Debug, Clone, Default)]
@@ -110,6 +111,7 @@ pub struct ChallengeOverlay {
     data: ChallengeData,
     background_alpha: u8,
     config: ChallengeOverlayConfig,
+    european_number_format: bool,
 }
 
 impl ChallengeOverlay {
@@ -127,6 +129,7 @@ impl ChallengeOverlay {
             data: ChallengeData::default(),
             background_alpha,
             config,
+            european_number_format: false,
         })
     }
 
@@ -146,15 +149,17 @@ impl ChallengeOverlay {
     pub fn render_overlay(&mut self) {
         let width = self.frame.width() as f32;
         let height = self.frame.height() as f32;
+        let scale = self.frame.scale_factor();
 
         let padding = self.frame.scaled(BASE_PADDING);
         let card_spacing = self.frame.scaled(BASE_CARD_SPACING);
         let mut bar_height = self.frame.scaled(BASE_BAR_HEIGHT);
         let mut bar_spacing = self.frame.scaled(BASE_BAR_SPACING);
-        let mut font_size = self.frame.scaled(BASE_FONT_SIZE);
-        let mut header_font_size = self.frame.scaled(BASE_HEADER_FONT_SIZE);
-        let mut duration_font_size = self.frame.scaled(BASE_DURATION_FONT_SIZE);
-        let mut bar_radius = 3.0 * self.frame.scale_factor();
+        let font_scale = self.config.font_scale.clamp(1.0, 2.0);
+        let mut font_size = self.frame.scaled(BASE_FONT_SIZE * font_scale);
+        let mut header_font_size = self.frame.scaled(BASE_HEADER_FONT_SIZE * font_scale);
+        let mut duration_font_size = self.frame.scaled(BASE_DURATION_FONT_SIZE * font_scale);
+        let mut bar_radius = 3.0 * scale;
 
         let font_color = color_from_rgba(self.config.font_color);
         let default_bar_color = color_from_rgba(self.config.default_bar_color);
@@ -164,9 +169,8 @@ impl ChallengeOverlay {
         let max_display = self.config.max_display as usize;
         let layout = self.config.layout;
 
-        self.frame.begin_frame();
-
         // Filter to enabled challenges only - clone to avoid borrow issues
+        // (must happen before begin_frame so we can compute content height for dynamic background)
         let enabled_challenges: Vec<ChallengeEntry> = self
             .data
             .entries
@@ -180,7 +184,7 @@ impl ChallengeOverlay {
         if num_visible > 0 {
             // Scale content up to fill available space when fewer challenges are shown.
             // Estimate per-card height: header + separator + player bars + optional footer
-            let sep_overhead = bar_spacing * 2.0 + 4.0 * self.frame.scale_factor();
+            let sep_overhead = bar_spacing * 2.0 + 4.0 * scale;
             let card_height_est = header_font_size
                 + sep_overhead
                 + MAX_PLAYERS as f32 * (bar_height + bar_spacing)
@@ -206,6 +210,60 @@ impl ChallengeOverlay {
             header_font_size *= content_scale;
             duration_font_size *= content_scale;
             bar_radius *= content_scale;
+        }
+
+        // Compute actual content height from final (scaled) dimensions for dynamic background
+        let content_height = if num_visible == 0 {
+            0.0
+        } else {
+            match layout {
+                ChallengeLayout::Vertical => {
+                    let mut h = padding;
+                    for (idx, challenge) in enabled_challenges.iter().enumerate() {
+                        if idx > 0 {
+                            h += card_spacing;
+                        }
+                        // Card header: title + separator
+                        h += header_font_size + bar_spacing * 2.0 + 2.0 + 4.0 * scale;
+                        // Player bars
+                        let num_players = challenge.by_player.len().min(MAX_PLAYERS);
+                        h += num_players as f32 * (bar_height + bar_spacing);
+                        // Footer
+                        if show_footer {
+                            h += 2.0 + bar_spacing + font_size + 6.0 * scale;
+                        }
+                    }
+                    h + padding
+                }
+                ChallengeLayout::Horizontal => {
+                    // All cards are same height (tallest card), side by side
+                    let tallest_card = enabled_challenges
+                        .iter()
+                        .map(|c| {
+                            let num_players = c.by_player.len().min(MAX_PLAYERS);
+                            let card_h = header_font_size
+                                + bar_spacing * 2.0
+                                + 2.0
+                                + 4.0 * scale
+                                + num_players as f32 * (bar_height + bar_spacing)
+                                + if show_footer {
+                                    2.0 + bar_spacing + font_size + 6.0 * scale
+                                } else {
+                                    0.0
+                                };
+                            card_h
+                        })
+                        .max_by(|a, b| a.partial_cmp(b).unwrap())
+                        .unwrap_or(0.0);
+                    padding * 2.0 + tallest_card
+                }
+            }
+        };
+
+        if self.config.dynamic_background {
+            self.frame.begin_frame_with_content_height(content_height);
+        } else {
+            self.frame.begin_frame();
         }
 
         match layout {
@@ -416,16 +474,8 @@ impl ChallengeOverlay {
     ) -> f32 {
         // Draw challenge name
         let title_y = y + header_font_size;
-        // Shadow for readability
-        self.frame.draw_text(
-            &challenge.name,
-            x + 1.0,
-            title_y + 1.0,
-            header_font_size,
-            colors::text_shadow(),
-        );
         self.frame
-            .draw_text(&challenge.name, x, title_y, header_font_size, font_color);
+            .draw_text_glowed(&challenge.name, x, title_y, header_font_size, font_color);
 
         // Draw duration in smaller font on the right if enabled
         if show_duration {
@@ -434,15 +484,7 @@ impl ChallengeOverlay {
             let duration_x = x + width - duration_width;
             // Align baseline with header text (adjust for smaller font)
             let duration_y = title_y - (header_font_size - duration_font_size) * 0.3;
-            // Shadow for readability
-            self.frame.draw_text(
-                &duration_str,
-                duration_x + 1.0,
-                duration_y + 1.0,
-                duration_font_size,
-                colors::text_shadow(),
-            );
-            self.frame.draw_text(
+            self.frame.draw_text_glowed(
                 &duration_str,
                 duration_x,
                 duration_y,
@@ -492,39 +534,40 @@ impl ChallengeOverlay {
                 .with_text_color(font_color);
 
             // Use per-challenge columns setting
+            let eu = self.european_number_format;
             match challenge.columns {
                 ChallengeColumns::TotalPercent => {
                     // 2-column: total | percent
                     bar = bar
-                        .with_center_text(format_number(player.value))
-                        .with_right_text(format!("{:.1}%", player.percent));
+                        .with_center_text(formatting::format_compact(player.value, eu))
+                        .with_right_text(formatting::format_pct(player.percent as f64, eu));
                 }
                 ChallengeColumns::TotalPerSecond => {
                     // 2-column: total | per_second
                     let per_sec_val = player.per_second.map(|ps| ps as i64).unwrap_or(0);
                     bar = bar
-                        .with_center_text(format_number(player.value))
-                        .with_right_text(format_number(per_sec_val));
+                        .with_center_text(formatting::format_compact(player.value, eu))
+                        .with_right_text(formatting::format_compact(per_sec_val, eu));
                 }
                 ChallengeColumns::PerSecondPercent => {
                     // 2-column: per_second | percent
                     let per_sec_val = player.per_second.map(|ps| ps as i64).unwrap_or(0);
                     bar = bar
-                        .with_center_text(format_number(per_sec_val))
-                        .with_right_text(format!("{:.1}%", player.percent));
+                        .with_center_text(formatting::format_compact(per_sec_val, eu))
+                        .with_right_text(formatting::format_pct(player.percent as f64, eu));
                 }
                 ChallengeColumns::TotalOnly => {
                     // Single column: just total
-                    bar = bar.with_right_text(format_number(player.value));
+                    bar = bar.with_right_text(formatting::format_compact(player.value, eu));
                 }
                 ChallengeColumns::PerSecondOnly => {
                     // Single column: just per_second
                     let per_sec_val = player.per_second.map(|ps| ps as i64).unwrap_or(0);
-                    bar = bar.with_right_text(format_number(per_sec_val));
+                    bar = bar.with_right_text(formatting::format_compact(per_sec_val, eu));
                 }
                 ChallengeColumns::PercentOnly => {
                     // Single column: just percent
-                    bar = bar.with_right_text(format!("{:.1}%", player.percent));
+                    bar = bar.with_right_text(formatting::format_pct(player.percent as f64, eu));
                 }
             }
 
@@ -563,32 +606,34 @@ impl ChallengeOverlay {
             .sum();
 
         // Use Footer widget for consistent alignment with metric overlays
+        let eu = self.european_number_format;
         let footer = match challenge.columns {
             ChallengeColumns::TotalPercent => {
                 // 2-column: total | 100%
                 Footer::new("100%".to_string())
-                    .with_secondary(format_number(total_sum))
+                    .with_secondary(formatting::format_compact(total_sum, eu))
                     .with_color(font_color)
             }
             ChallengeColumns::TotalPerSecond => {
                 // 2-column: total | per_second
-                Footer::new(format_number(total_per_sec as i64))
-                    .with_secondary(format_number(total_sum))
+                Footer::new(formatting::format_compact(total_per_sec as i64, eu))
+                    .with_secondary(formatting::format_compact(total_sum, eu))
                     .with_color(font_color)
             }
             ChallengeColumns::PerSecondPercent => {
                 // 2-column: per_second | 100%
                 Footer::new("100%".to_string())
-                    .with_secondary(format_number(total_per_sec as i64))
+                    .with_secondary(formatting::format_compact(total_per_sec as i64, eu))
                     .with_color(font_color)
             }
             ChallengeColumns::TotalOnly => {
                 // Single column: just total
-                Footer::new(format_number(total_sum)).with_color(font_color)
+                Footer::new(formatting::format_compact(total_sum, eu)).with_color(font_color)
             }
             ChallengeColumns::PerSecondOnly => {
                 // Single column: just per_second
-                Footer::new(format_number(total_per_sec as i64)).with_color(font_color)
+                Footer::new(formatting::format_compact(total_per_sec as i64, eu))
+                    .with_color(font_color)
             }
             ChallengeColumns::PercentOnly => {
                 // Single column: 100%
@@ -620,9 +665,10 @@ impl Overlay for ChallengeOverlay {
     }
 
     fn update_config(&mut self, config: OverlayConfigUpdate) {
-        if let OverlayConfigUpdate::Challenge(challenge_config, alpha) = config {
+        if let OverlayConfigUpdate::Challenge(challenge_config, alpha, european) = config {
             self.set_config(challenge_config);
             self.set_background_alpha(alpha);
+            self.european_number_format = european;
         }
     }
 

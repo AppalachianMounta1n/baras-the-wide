@@ -14,7 +14,8 @@ use baras_core::game_data::Discipline;
 use baras_core::query::{
     AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow,
     DamageTakenSummary, DataTab, EffectChartData, EffectWindow, EncounterTimeline,
-    EntityBreakdown, HpPoint, PlayerDeath, RaidOverviewRow, TimeRange, TimeSeriesPoint,
+    EntityBreakdown, HpPoint, NpcHealthRow, PlayerDeath, RaidOverviewRow, TimeRange,
+    TimeSeriesPoint,
 };
 use tauri::{AppHandle, Emitter};
 
@@ -286,13 +287,14 @@ impl ServiceHandle {
             (None, None)
         };
 
-        // Check if this is a stale session (last event >15 min ago).
+        // Check if this is a stale session (last event >15 min ago, or game process closed).
         // Only relevant for live-tailing mode — historical sessions are inherently "not live".
         let stale_session = if is_live {
             // Use the live session's last_event_time (updated on every process_event call)
             // rather than the static directory-index snapshot which becomes stale during tailing.
             let live_last_event = session.last_event_time;
             Self::is_session_stale(live_last_event, start_datetime)
+                || self.shared.not_live_hiding_active.load(Ordering::SeqCst)
         } else {
             false
         };
@@ -337,7 +339,7 @@ impl ServiceHandle {
     /// falling back to the session start time from the filename.
     const STALE_SESSION_MINUTES: i64 = 15;
 
-    fn is_session_stale(
+    pub(crate) fn is_session_stale(
         last_event_time: Option<chrono::NaiveDateTime>,
         session_start: Option<chrono::NaiveDateTime>,
     ) -> bool {
@@ -1240,6 +1242,40 @@ impl ServiceHandle {
             .await
             .query()
             .query_player_deaths()
+            .await
+    }
+
+    /// Query final health state of all NPCs in an encounter.
+    pub async fn query_npc_health(
+        &self,
+        encounter_idx: Option<u32>,
+        time_range: Option<TimeRange>,
+    ) -> Result<Vec<NpcHealthRow>, String> {
+        let session_guard = self.shared.session.read().await;
+        let session = session_guard.as_ref().ok_or("No active session")?;
+        let session = session.read().await;
+
+        if let Some(idx) = encounter_idx {
+            let dir = session.encounters_dir().ok_or("No encounters directory")?;
+            let path = dir.join(baras_core::storage::encounter_filename(idx));
+            if !path.exists() {
+                return Err(format!("Encounter file not found: {:?}", path));
+            }
+            self.shared.query_context.register_parquet(&path).await?;
+        } else {
+            let writer = session
+                .encounter_writer()
+                .ok_or("No live encounter buffer")?;
+            let batch = writer.to_record_batch().ok_or("Live buffer is empty")?;
+            self.shared.query_context.register_batch(batch).await?;
+        }
+
+        self.shared
+            .query_context
+            .query()
+            .await
+            .query()
+            .query_npc_health(time_range.as_ref())
             .await
     }
 

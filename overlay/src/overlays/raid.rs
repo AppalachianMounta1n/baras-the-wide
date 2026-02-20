@@ -499,6 +499,7 @@ pub struct RaidOverlay {
     last_render: Instant,
     /// Pending registry actions to be sent to the service
     pending_registry_actions: Vec<RaidRegistryAction>,
+    european_number_format: bool,
 }
 
 impl RaidOverlay {
@@ -528,6 +529,7 @@ impl RaidOverlay {
             needs_render: true,                            // Initial render needed
             last_render: Instant::now() - RENDER_INTERVAL, // Allow immediate first render
             pending_registry_actions: Vec::new(),
+            european_number_format: false,
         })
     }
 
@@ -1156,7 +1158,7 @@ impl RaidOverlay {
             colors::white()
         };
         self.frame
-            .draw_text(&text, text_x, text_y, font_size, text_color);
+            .draw_text_glowed(&text, text_x, text_y, font_size, text_color);
 
         // Clear button (×) for ALL occupied frames (including self)
         if !raid_frame.is_empty() {
@@ -1177,7 +1179,7 @@ impl RaidOverlay {
             let text_x = btn_x + btn_size * 0.3;
             let text_y = btn_y + btn_size * 0.75; // Baseline near bottom
             self.frame
-                .draw_text("x", text_x, text_y, btn_font, colors::white());
+                .draw_text_glowed("x", text_x, text_y, btn_font, colors::white());
         }
     }
 
@@ -1192,7 +1194,7 @@ impl RaidOverlay {
         let y = self.frame.height() as f32 - 16.0;
 
         self.frame
-            .draw_text(&text, x, y, 10.0, colors::raid_overflow());
+            .draw_text_glowed(&text, x, y, 10.0, colors::raid_overflow());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1254,9 +1256,10 @@ impl Overlay for RaidOverlay {
     }
 
     fn update_config(&mut self, config: OverlayConfigUpdate) {
-        if let OverlayConfigUpdate::Raid(raid_config, alpha) = config {
+        if let OverlayConfigUpdate::Raid(raid_config, alpha, european) = config {
             self.config = raid_config;
             self.frame.set_background_alpha(alpha);
+            self.european_number_format = european;
             self.needs_render = true;
         }
     }

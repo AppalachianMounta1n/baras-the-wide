@@ -116,6 +116,20 @@ pub enum Trigger {
         target: EntityFilter,
     },
 
+    /// Healing is received from an ability. [TPC]
+    /// Useful for tracking incoming heals or heal-triggered effects.
+    HealingTaken {
+        /// Ability selectors (ID or name).
+        #[serde(default)]
+        abilities: Vec<AbilitySelector>,
+        /// Who healed (default: any)
+        #[serde(default = "EntityFilter::default_any")]
+        source: EntityFilter,
+        /// Who received the healing (default: any)
+        #[serde(default = "EntityFilter::default_any")]
+        target: EntityFilter,
+    },
+
     // ─── HP Thresholds [TPC / P only] ──────────────────────────────────────
     /// Boss HP drops below threshold. [TPC]
     BossHpBelow {
@@ -207,6 +221,7 @@ impl Trigger {
             | Self::EffectApplied { .. }
             | Self::EffectRemoved { .. }
             | Self::DamageTaken { .. }
+            | Self::HealingTaken { .. }
             | Self::BossHpBelow { .. }
             | Self::NpcAppears { .. }
             | Self::EntityDeath { .. }
@@ -266,7 +281,8 @@ impl Trigger {
             Self::AbilityCast { source, .. }
             | Self::EffectApplied { source, .. }
             | Self::EffectRemoved { source, .. }
-            | Self::DamageTaken { source, .. } => Some(source),
+            | Self::DamageTaken { source, .. }
+            | Self::HealingTaken { source, .. } => Some(source),
             _ => None,
         }
     }
@@ -278,6 +294,7 @@ impl Trigger {
             Self::EffectApplied { target, .. }
             | Self::EffectRemoved { target, .. }
             | Self::DamageTaken { target, .. }
+            | Self::HealingTaken { target, .. }
             | Self::TargetSet { target, .. } => Some(target),
             _ => None,
         }
@@ -311,6 +328,11 @@ impl Trigger {
                 target,
             },
             Self::DamageTaken { abilities, .. } => Self::DamageTaken {
+                abilities,
+                source,
+                target,
+            },
+            Self::HealingTaken { abilities, .. } => Self::HealingTaken {
                 abilities,
                 source,
                 target,
@@ -382,6 +404,22 @@ impl Trigger {
             Self::AnyOf { conditions } => conditions
                 .iter()
                 .any(|c| c.matches_damage_taken(ability_id, ability_name)),
+            _ => false,
+        }
+    }
+
+    /// Check if trigger matches healing taken from an ability.
+    pub fn matches_healing_taken(&self, ability_id: u64, ability_name: Option<&str>) -> bool {
+        match self {
+            Self::HealingTaken { abilities, .. } => {
+                !abilities.is_empty()
+                    && abilities
+                        .iter()
+                        .any(|s| s.matches(ability_id, ability_name))
+            }
+            Self::AnyOf { conditions } => conditions
+                .iter()
+                .any(|c| c.matches_healing_taken(ability_id, ability_name)),
             _ => false,
         }
     }

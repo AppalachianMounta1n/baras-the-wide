@@ -1,3 +1,45 @@
+# v2026.2.1700
+
+**If you are using the Personal Stats overlay you will have to reconfigure it**
+
+**Font Size scaling added to most overlays**
+
+**Dynamic background drawing added to most overlays for opacity lovers**
+
+I can't stop shipping features help me.
+
+## Data Explorer
+
+- Added NPC health table
+- Added fullscreen toggle for data explorer tabs
+- Data explorer sidebars can now be collapsed
+- Abilities and effects split into separate log view columns
+- Pinned headers for stat breakdown tabs
+- Fixed shield % calculations on personal overlay
+
+## Effects Tracker
+
+- Effects now support `healingtaken` and `damagetaken` trigger types
+- Fixed effects not being pruned when charges expire
+- Added stack priority option for vertical effect layout
+- Fixed issue with Corrosive Grenade/Shrap Bomb erroneously refreshing
+
+## Overlays
+
+- Personal overlay formatting and categories have been upgraded
+- Dynamic backgrounds with font scaling support added to overlays
+- All overlay text update for readability
+- Raid notes overlay now supports dynamic backgrounds
+
+## Encounters
+
+- Added Traitor Among The Chiss flashpoint
+
+## Misc
+
+- Config file is now backed up on save failure
+- Starparse timer import now recognizes Healing and damage taken triggers
+
 # v2026.2.1501
 
 ## Hotfix

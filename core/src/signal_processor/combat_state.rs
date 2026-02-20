@@ -547,12 +547,13 @@ fn handle_post_combat(
             });
         }
     } else if in_grace_window {
-        // During grace window, events are not accumulated but we still track their line numbers
-        // for per-encounter Parsely uploads (grace period events belong to this encounter)
+        // Grace window events belong to this encounter — accumulate them so trailing
+        // death/damage events are written to parquet (e.g. NPC deaths after ExitCombat)
         if let Some(enc) = cache.current_encounter_mut() {
+            enc.accumulate_data(event);
             enc.track_event_line(event.line_number);
+            was_accumulated = true;
         }
-        // was_accumulated remains false
     } else if effect_id == effect_id::DAMAGE {
         // Discard post-combat damage - start fresh encounter
         finalize_pending_combat_exit(cache, &mut signals);

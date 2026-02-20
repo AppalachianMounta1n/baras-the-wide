@@ -17,7 +17,8 @@ pub use config::{
     AlertsOverlayConfig, AppConfig, AppConfigExt, BossHealthConfig, ChallengeColumns,
     ChallengeLayout, ChallengeOverlayConfig, Color, HotkeySettings, MAX_PROFILES,
     OverlayAppearanceConfig, OverlayPositionConfig, OverlayProfile, OverlaySettings,
-    PersonalOverlayConfig, PersonalStat, RaidOverlaySettings, TimerOverlayConfig, overlay_colors,
+    PersonalOverlayConfig, PersonalStat, PersonalStatCategory, RaidOverlaySettings,
+    TimerOverlayConfig, overlay_colors,
 };
 pub use interner::{IStr, empty_istr, intern, resolve};
 pub use log_files::{DirectoryIndex, parse_log_filename};

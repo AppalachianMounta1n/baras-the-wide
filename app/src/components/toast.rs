@@ -6,6 +6,8 @@
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 
+use crate::api;
+
 /// Severity level for toast notifications.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ToastSeverity {
@@ -195,8 +197,14 @@ pub fn ToastFrame() -> Element {
                         if let Some(link) = &toast.link {
                             a {
                                 class: "toast-link",
-                                href: "{link}",
-                                target: "_blank",
+                                onclick: {
+                                    let link = link.clone();
+                                    move |e: Event<MouseData>| {
+                                        e.prevent_default();
+                                        let link = link.clone();
+                                        spawn(async move { api::open_url(&link).await; });
+                                    }
+                                },
                                 "{link}"
                             }
                         }

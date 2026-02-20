@@ -9,7 +9,7 @@ use super::{Overlay, OverlayConfigUpdate, OverlayData};
 use crate::frame::OverlayFrame;
 use crate::platform::{OverlayConfig, PlatformError};
 use crate::utils::color_from_rgba;
-use crate::widgets::{ProgressBar, colors};
+use crate::widgets::{colors, ProgressBar};
 
 /// A single effect entry for display
 #[derive(Debug, Clone)]
@@ -36,21 +36,8 @@ impl EffectEntry {
     }
 
     /// Format remaining time as MM:SS or S.s
-    pub fn format_time(&self) -> String {
-        if self.remaining_secs <= 0.0 {
-            return "0:00".to_string();
-        }
-
-        let secs = self.remaining_secs;
-        if secs >= 60.0 {
-            let mins = (secs / 60.0).floor() as u32;
-            let remaining_secs = (secs % 60.0).floor() as u32;
-            format!("{}:{:02}", mins, remaining_secs)
-        } else if secs >= 10.0 {
-            format!("{:.0}", secs)
-        } else {
-            format!("{:.1}", secs)
-        }
+    pub fn format_time(&self, european: bool) -> String {
+        baras_types::formatting::format_countdown(self.remaining_secs, "", "0:00", european)
     }
 
     /// Format display text (name + optional stacks)
@@ -85,6 +72,7 @@ pub struct EffectsOverlay {
     frame: OverlayFrame,
     config: TimerOverlayConfig, // Reuse timer config for now
     data: EffectsData,
+    european_number_format: bool,
 }
 
 impl EffectsOverlay {
@@ -102,6 +90,7 @@ impl EffectsOverlay {
             frame,
             config,
             data: EffectsData::default(),
+            european_number_format: false,
         })
     }
 
@@ -127,12 +116,10 @@ impl EffectsOverlay {
         let padding = self.frame.scaled(BASE_PADDING);
         let bar_height = self.frame.scaled(BASE_BAR_HEIGHT);
         let entry_spacing = self.frame.scaled(BASE_ENTRY_SPACING);
-        let font_size = self.frame.scaled(BASE_FONT_SIZE);
+        let font_scale = self.config.font_scale.clamp(1.0, 2.0);
+        let font_size = self.frame.scaled(BASE_FONT_SIZE * font_scale);
 
         let font_color = color_from_rgba(self.config.font_color);
-
-        // Begin frame (clear, background, border)
-        self.frame.begin_frame();
 
         // Sort entries in place if needed
         if self.config.sort_by_remaining {
@@ -141,8 +128,25 @@ impl EffectsOverlay {
                 .sort_by(|a, b| a.remaining_secs.partial_cmp(&b.remaining_secs).unwrap());
         }
 
-        // Nothing to render if no effects
+        // Compute content height for dynamic background
         let max_display = self.config.max_display as usize;
+        let num_entries = self.data.entries.iter().take(max_display).count();
+        let content_height = if num_entries > 0 {
+            padding * 2.0
+                + num_entries as f32 * bar_height
+                + (num_entries - 1).max(0) as f32 * entry_spacing
+        } else {
+            0.0
+        };
+
+        // Begin frame (clear, background, border)
+        if self.config.dynamic_background {
+            self.frame.begin_frame_with_content_height(content_height);
+        } else {
+            self.frame.begin_frame();
+        }
+
+        // Nothing to render if no effects
         if self.data.entries.is_empty() {
             self.frame.end_frame();
             return;
@@ -155,7 +159,7 @@ impl EffectsOverlay {
 
         for entry in self.data.entries.iter().take(max_display) {
             let bar_color = color_from_rgba(entry.color);
-            let time_text = entry.format_time();
+            let time_text = entry.format_time(self.european_number_format);
 
             // Draw effect bar with name on left, time on right
             ProgressBar::new(entry.display_name(), entry.progress())
@@ -200,9 +204,10 @@ impl Overlay for EffectsOverlay {
     }
 
     fn update_config(&mut self, config: OverlayConfigUpdate) {
-        if let OverlayConfigUpdate::Effects(effects_config, alpha) = config {
+        if let OverlayConfigUpdate::Effects(effects_config, alpha, european) = config {
             self.set_config(effects_config);
             self.set_background_alpha(alpha);
+            self.european_number_format = european;
         }
     }
 

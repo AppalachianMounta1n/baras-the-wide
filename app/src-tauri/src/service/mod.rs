@@ -6,6 +6,7 @@
 //! - CombatService: Background task that processes commands and updates shared state
 mod directory;
 mod handler;
+pub(crate) mod process_monitor;
 
 use crate::state::SharedState;
 pub use crate::state::{RaidSlotRegistry, RegisteredPlayer};
@@ -121,6 +122,8 @@ pub enum ServiceCommand {
     SendNotesToOverlay(NotesData),
     /// Reload area definitions for a new area (triggers notes update)
     ReloadAreaDefinitions(i64),
+    /// Start monitoring for the game process (triggered on first live event)
+    StartProcessMonitor,
 }
 
 /// Updates sent to the overlay system
@@ -156,6 +159,8 @@ pub enum OverlayUpdate {
     ConversationStarted,
     /// Local player exited conversation - restore overlays if we hid them
     ConversationEnded,
+    /// Session liveness changed (historical mode entered/exited, player logged out/in)
+    NotLiveStateChanged { is_live: bool },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -191,6 +196,8 @@ struct CombatSignalHandler {
     cmd_tx: mpsc::Sender<ServiceCommand>,
     /// Local player entity ID (set on first DisciplineChanged)
     local_player_id: Option<i64>,
+    /// Whether we've already requested the process monitor for this tailing session
+    monitor_requested: bool,
 }
 
 impl CombatSignalHandler {
@@ -208,6 +215,7 @@ impl CombatSignalHandler {
             overlay_tx,
             cmd_tx,
             local_player_id: None,
+            monitor_requested: false,
         }
     }
 }
@@ -218,11 +226,32 @@ impl SignalHandler for CombatSignalHandler {
         signal: &GameSignal,
         _encounter: Option<&baras_core::encounter::CombatEncounter>,
     ) {
+        // On first event processed, start monitoring the game process
+        // (only if auto-hide when not live is enabled — no point polling otherwise)
+        if !self.monitor_requested {
+            self.monitor_requested = true;
+            let should_monitor = self
+                .shared
+                .config
+                .try_read()
+                .map(|c| c.overlay_settings.hide_when_not_live)
+                .unwrap_or(true); // safe default: start monitor if lock unavailable
+            if should_monitor {
+                let _ = self.cmd_tx.try_send(ServiceCommand::StartProcessMonitor);
+            }
+        }
+
         match signal {
             GameSignal::CombatStarted { .. } => {
                 self.shared.in_combat.store(true, Ordering::SeqCst);
                 let _ = self.trigger_tx.try_send(MetricsTrigger::CombatStarted);
                 let _ = self.session_event_tx.send(SessionEvent::CombatStarted);
+                // If overlays were auto-hidden for not-live, restore them — combat means live
+                if self.shared.not_live_hiding_active.load(Ordering::SeqCst) {
+                    let _ = self
+                        .overlay_tx
+                        .try_send(OverlayUpdate::NotLiveStateChanged { is_live: true });
+                }
             }
             GameSignal::CombatEnded { .. } => {
                 self.shared.in_combat.store(false, Ordering::SeqCst);
@@ -334,6 +363,8 @@ pub struct CombatService {
     icon_cache: Option<Arc<baras_overlay::icons::IconCache>>,
     /// Pending file to switch to when it gets content (deferred rotation for empty files)
     pending_file: Option<PathBuf>,
+    /// Handle for the game process monitor task
+    process_monitor_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl CombatService {
@@ -410,6 +441,7 @@ impl CombatService {
             loaded_area_id: 0,
             icon_cache,
             pending_file: None,
+            process_monitor_handle: None,
         };
 
         let handle = ServiceHandle { cmd_tx, shared: shared.clone(), app_handle: app_handle.clone() };
@@ -878,6 +910,9 @@ impl CombatService {
                     let _ = self
                         .app_handle
                         .emit("session-updated", "TailingModeChanged");
+                    let _ = self
+                        .overlay_tx
+                        .try_send(OverlayUpdate::NotLiveStateChanged { is_live: false });
                     self.start_tailing(path).await;
                 }
                 ServiceCommand::ResumeLiveTailing => {
@@ -886,6 +921,9 @@ impl CombatService {
                     let _ = self
                         .app_handle
                         .emit("session-updated", "TailingModeChanged");
+                    let _ = self
+                        .overlay_tx
+                        .try_send(OverlayUpdate::NotLiveStateChanged { is_live: true });
                     let newest = {
                         let index = self.shared.directory_index.read().await;
                         index.newest_file().map(|f| f.path.clone())
@@ -907,6 +945,9 @@ impl CombatService {
                 ServiceCommand::SendNotesToOverlay(notes_data) => {
                     // Send specific boss notes to the overlay
                     let _ = self.overlay_tx.try_send(OverlayUpdate::NotesUpdated(notes_data));
+                }
+                ServiceCommand::StartProcessMonitor => {
+                    self.start_process_monitor();
                 }
                 ServiceCommand::ReloadAreaDefinitions(area_id) => {
                     // Reload definitions for the new area and update notes overlay
@@ -1013,6 +1054,9 @@ impl CombatService {
 
         // Resume live tailing mode (restart means we want to watch for new files)
         self.shared.is_live_tailing.store(true, Ordering::SeqCst);
+        let _ = self
+            .overlay_tx
+            .try_send(OverlayUpdate::NotLiveStateChanged { is_live: true });
 
         // Start new watcher (reads directory from config)
         self.start_watcher().await;
@@ -1076,6 +1120,9 @@ impl CombatService {
             self.pending_file = Some(path);
             // Emit event so frontend can show "session ended" indicator
             let _ = self.app_handle.emit("session-ended", ());
+            let _ = self
+                .overlay_tx
+                .try_send(OverlayUpdate::NotLiveStateChanged { is_live: false });
             return;
         }
 
@@ -1123,6 +1170,9 @@ impl CombatService {
                     "Pending file now has content, switching"
                 );
                 self.pending_file = None;
+                let _ = self
+                    .overlay_tx
+                    .try_send(OverlayUpdate::NotLiveStateChanged { is_live: true });
                 self.start_tailing(path).await;
             }
         }
@@ -1405,6 +1455,7 @@ impl CombatService {
                         session_guard.current_line = Some(parse_result.line_count);
 
                         // Import session state from subprocess using shared IPC contract
+                        let mut player_context = None;
                         if let Some(cache) = &mut session_guard.session_cache {
                             // Restore player, area, disciplines, and encounter history
                             let generation_count = cache.restore_from_worker_output(&parse_result);
@@ -1420,6 +1471,17 @@ impl CombatService {
                             // Sync current_area_id from subprocess so timer definition reloads work
                             if parse_result.area.area_id != 0 {
                                 self.shared.current_area_id.store(parse_result.area.area_id, Ordering::SeqCst);
+                            }
+
+                            // Capture player context before releasing cache borrow.
+                            // discipline_id comes from player_disciplines (not cache.player,
+                            // which doesn't have it after worker restore)
+                            if cache.player_initialized {
+                                let disc_id = cache.player_disciplines
+                                    .get(&cache.player.id)
+                                    .map(|p| p.discipline_id)
+                                    .unwrap_or(0);
+                                player_context = Some((cache.player.id, disc_id));
                             }
 
                             // Check if there's an incomplete encounter (parquet file exists but no summary)
@@ -1466,6 +1528,16 @@ impl CombatService {
                                 
                                 // Create fresh encounter with correct area context
                                 cache.push_new_encounter();
+                            }
+                        }
+
+                        // Sync player context to effect tracker so discipline-scoped
+                        // effects work immediately (tracker missed historical signals)
+                        if let Some((player_id, discipline_id)) = player_context {
+                            if let Some(tracker) = session_guard.effect_tracker() {
+                                if let Ok(mut tracker) = tracker.lock() {
+                                    tracker.set_player_context(player_id, discipline_id);
+                                }
                             }
                         }
 
@@ -1571,6 +1643,15 @@ impl CombatService {
             elapsed_ms = timer.elapsed().as_millis() as u64,
             "Parse completed"
         );
+
+        // Check if this live session is actually stale or empty (no player data).
+        // This catches the case where the app starts tailing an old/empty file.
+        // We emit the event unconditionally — the router checks the setting.
+        if self.shared.is_session_not_live().await {
+            let _ = self
+                .overlay_tx
+                .try_send(OverlayUpdate::NotLiveStateChanged { is_live: false });
+        }
 
         // Trigger initial metrics send after file processing
         let _ = trigger_tx.try_send(MetricsTrigger::InitialLoad);
@@ -1865,8 +1946,8 @@ impl CombatService {
                             }
                         }
 
-                        // Send text alerts to overlay (only those with alert_text_enabled)
-                        let text_alerts: Vec<_> = alerts.iter().filter(|a| a.alert_text_enabled).cloned().collect();
+                        // Send text alerts to overlay (only those with alert_text_enabled and not stale)
+                        let text_alerts: Vec<_> = alerts.iter().filter(|a| a.alert_text_enabled && a.timestamp >= tailing_started_at).cloned().collect();
                         if !text_alerts.is_empty() {
                             if overlay_tx.try_send(OverlayUpdate::AlertsFired(text_alerts)).is_err() {
                                 warn!("Overlay channel full, dropped timer alerts");
@@ -1901,6 +1982,9 @@ impl CombatService {
         // Reset combat state
         self.shared.in_combat.store(false, Ordering::SeqCst);
 
+        // Stop process monitor
+        self.stop_process_monitor();
+
         // Cancel effects task
         if let Some(handle) = self.effects_handle.take() {
             handle.abort();
@@ -1920,6 +2004,46 @@ impl CombatService {
         }
 
         *self.shared.session.write().await = None;
+    }
+
+    /// Start monitoring the game process. If the process disappears, emits
+    /// `NotLiveStateChanged { is_live: false }` to auto-hide overlays.
+    /// Only one monitor runs at a time; calling this while one is active is a no-op.
+    fn start_process_monitor(&mut self) {
+        if self.process_monitor_handle.is_some() {
+            return;
+        }
+
+        let overlay_tx = self.overlay_tx.clone();
+        let handle = tokio::spawn(async move {
+            // Check immediately on startup, then poll at intervals
+            loop {
+                match process_monitor::is_game_running().await {
+                    Some(true) => {}
+                    Some(false) => {
+                        info!("Game process no longer detected, emitting not-live event");
+                        let _ = overlay_tx
+                            .try_send(OverlayUpdate::NotLiveStateChanged { is_live: false });
+                        break;
+                    }
+                    None => {
+                        // Process check failed — safe default is to stop monitoring
+                        // and leave overlays visible
+                        break;
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+            }
+        });
+
+        self.process_monitor_handle = Some(handle);
+    }
+
+    /// Stop the game process monitor if running.
+    fn stop_process_monitor(&mut self) {
+        if let Some(handle) = self.process_monitor_handle.take() {
+            handle.abort();
+        }
     }
 
     async fn refresh_index(&mut self) {
@@ -2867,13 +2991,19 @@ impl CombatData {
             hps: player.hps as i32,
             ehps: player.ehps as i32,
             total_healing: player.total_healing,
+            total_healing_effective: player.total_healing_effective,
             dtps: player.dtps as i32,
             edtps: player.edtps as i32,
+            total_damage_taken: player.total_damage_taken,
+            total_damage_taken_effective: player.total_damage_taken_effective,
             tps: player.tps as i32,
             total_threat: player.total_threat,
             damage_crit_pct: player.damage_crit_pct,
             heal_crit_pct: player.heal_crit_pct,
             effective_heal_pct: player.effective_heal_pct,
+            defense_pct: player.defense_pct,
+            shield_pct: player.shield_pct,
+            total_shield_absorbed: player.total_shield_absorbed,
             current_phase: self.current_phase.clone(),
             phase_time_secs: self.phase_time_secs,
         })

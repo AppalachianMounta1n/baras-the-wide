@@ -472,6 +472,54 @@ ids = [3054404647256064, 3032766602018816]
 is_boss = true
 is_kill_target = true
 
+[[boss.phases]]
+id = "cartel_warlords_4_bosses"
+name = "4 Warlords"
+
+[boss.phases.start_trigger]
+type = "combat_start"
+
+[[boss.phases]]
+id = "cartel_warlords_3_bosses"
+name = "3 Warlords"
+
+[boss.phases.start_trigger]
+type = "counter_reaches"
+counter_id = "cartel_warlords_boss_deaths"
+value = 1
+
+[[boss.phases]]
+id = "cartel_warlords_2_bosses"
+name = "2 Warlords"
+
+[boss.phases.start_trigger]
+type = "counter_reaches"
+counter_id = "cartel_warlords_boss_deaths"
+value = 2
+
+[[boss.phases]]
+id = "cartel_warlords_1_boss"
+name = "1 Warlord"
+
+[boss.phases.start_trigger]
+type = "counter_reaches"
+counter_id = "cartel_warlords_boss_deaths"
+value = 3
+
+[[boss.counters]]
+id = "cartel_warlords_boss_deaths"
+name = "Boss deaths"
+initial_value = 0
+decrement = false
+
+[boss.counters.increment_on]
+type = "entity_death"
+selector = ["Horic", "Sunder", "Garr", "Tuchuk"]
+
+[boss.counters.reset_on]
+type = "combat_end"
+
+
 [[boss.timer]]
 id = "cartel_warlords_horic_spray"
 name = "Horic Spray"

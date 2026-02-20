@@ -8,7 +8,7 @@ mod raid_registry;
 
 pub use raid_registry::{RaidSlotRegistry, RegisteredPlayer};
 
-use std::sync::atomic::{AtomicBool, AtomicI64};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 
@@ -65,6 +65,12 @@ pub struct SharedState {
     /// Whether overlays were visible before conversation started (for restore)
     pub overlays_visible_before_conversation: AtomicBool,
 
+    // ─── Not-live auto-hide state ────────────────────────────────────────────
+    /// Whether overlays are temporarily hidden because session is not live
+    pub not_live_hiding_active: AtomicBool,
+    /// Whether overlays were visible before not-live hide triggered (for restore)
+    pub overlays_visible_before_not_live: AtomicBool,
+
     /// Shared query context for DataFusion queries (reuses SessionContext)
     pub query_context: QueryContext,
 
@@ -96,11 +102,69 @@ impl SharedState {
             // Conversation auto-hide state
             conversation_hiding_active: AtomicBool::new(false),
             overlays_visible_before_conversation: AtomicBool::new(false),
+            // Not-live auto-hide state
+            not_live_hiding_active: AtomicBool::new(false),
+            overlays_visible_before_not_live: AtomicBool::new(false),
             // Shared query context for DataFusion (reuses SessionContext across queries)
             query_context: QueryContext::new(),
             // Area cache - loaded from disk later in service startup
             area_cache: RwLock::new(LogAreaCache::new()),
         }
+    }
+
+    /// Check if the current session is "not live" — i.e. historical, stale, or has no player.
+    /// Returns `true` if overlays should be auto-hidden.
+    pub async fn is_session_not_live(&self) -> bool {
+        if !self.is_live_tailing.load(Ordering::SeqCst) {
+            return true;
+        }
+
+        let session_guard = self.session.read().await;
+        let Some(session) = session_guard.as_ref() else {
+            return true;
+        };
+
+        let s = session.read().await;
+        let has_player = s
+            .session_cache
+            .as_ref()
+            .map(|c| c.player_initialized)
+            .unwrap_or(false);
+
+        if !has_player {
+            return true;
+        }
+
+        // Stale check: no events in the last 15 minutes
+        let last_activity = s.last_event_time.or(s.game_session_date);
+        if let Some(last) = last_activity {
+            let elapsed = chrono::Local::now().naive_local().signed_duration_since(last);
+            if elapsed > chrono::Duration::minutes(15) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Mark overlays as auto-hidden due to not-live state.
+    /// Stores that overlays were visible before hiding so they can be restored.
+    pub fn activate_not_live_hiding(&self) {
+        self.not_live_hiding_active.store(true, Ordering::SeqCst);
+        self.overlays_visible_before_not_live
+            .store(true, Ordering::SeqCst);
+    }
+
+    /// Clear the not-live auto-hide state and return whether overlays should be restored.
+    pub fn deactivate_not_live_hiding(&self) -> bool {
+        if !self.not_live_hiding_active.load(Ordering::SeqCst) {
+            return false;
+        }
+        self.not_live_hiding_active.store(false, Ordering::SeqCst);
+        let was_visible = self.overlays_visible_before_not_live.load(Ordering::SeqCst);
+        self.overlays_visible_before_not_live
+            .store(false, Ordering::SeqCst);
+        was_visible
     }
 
     /// Execute a function with mutable access to the current session.

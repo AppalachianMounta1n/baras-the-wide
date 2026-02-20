@@ -11,6 +11,7 @@ use wasm_bindgen_futures::spawn_local as spawn;
 use crate::api;
 use crate::components::class_icons::{get_class_icon, get_role_icon};
 use crate::components::{ToastSeverity, use_parsely_upload, use_toast};
+use baras_types::formatting;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Upload State Tracking
@@ -120,22 +121,7 @@ pub struct ChallengePlayerSummary {
 // Helper Functions
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn format_duration(secs: i64) -> String {
-    let mins = secs / 60;
-    let secs = secs % 60;
-    format!("{}:{:02}", mins, secs)
-}
 
-/// Format number with 2 decimal places
-fn format_number(n: i64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.2}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000 {
-        format!("{:.2}K", n as f64 / 1_000.0)
-    } else {
-        n.to_string()
-    }
-}
 
 /// Group encounters into sections by area (based on is_phase_start flag or area change)
 fn group_by_area(
@@ -305,29 +291,32 @@ pub fn HistoryPanel(mut props: HistoryPanelProps) -> Element {
                     " Encounter History"
                 }
                 div { class: "history-controls",
-                label { class: "boss-filter-toggle",
-                    input {
-                        r#type: "checkbox",
-                        checked: *show_only_bosses.read(),
-                        onchange: move |e| {
-                            let checked = e.checked();
-                            show_only_bosses.set(checked);
-                            // Update parent state immediately (avoids bidirectional sync loop)
-                            if let Ok(mut state) = props.state.try_write() {
-                                state.data_explorer.show_only_bosses = checked;
-                            }
-                            let mut toast = use_toast();
-                            spawn(async move {
-                                if let Some(mut cfg) = api::get_config().await {
-                                    cfg.show_only_bosses = checked;
-                                    if let Err(err) = api::update_config(&cfg).await {
-                                        toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
-                                    }
+                label { class: "toggle-switch-label boss-filter-toggle",
+                    span { class: "toggle-switch",
+                        input {
+                            r#type: "checkbox",
+                            checked: *show_only_bosses.read(),
+                            onchange: move |e| {
+                                let checked = e.checked();
+                                show_only_bosses.set(checked);
+                                // Update parent state immediately (avoids bidirectional sync loop)
+                                if let Ok(mut state) = props.state.try_write() {
+                                    state.data_explorer.show_only_bosses = checked;
                                 }
-                            });
+                                let mut toast = use_toast();
+                                spawn(async move {
+                                    if let Some(mut cfg) = api::get_config().await {
+                                        cfg.show_only_bosses = checked;
+                                        if let Err(err) = api::update_config(&cfg).await {
+                                            toast.show(format!("Failed to save settings: {}", err), ToastSeverity::Normal);
+                                        }
+                                    }
+                                });
+                            }
                         }
+                        span { class: "toggle-slider" }
                     }
-                    span { "Bosses only" }
+                    span { class: "toggle-text", "Bosses only" }
                 }
                 span { class: "encounter-count",
                     "{filtered_history.len()}"
@@ -435,7 +424,7 @@ pub fn HistoryPanel(mut props: HistoryPanelProps) -> Element {
                                                                 }
                                                             }
                                                             td { class: "col-duration",
-                                                                "{format_duration(enc.duration_seconds)}"
+                                                                "{formatting::format_duration(enc.duration_seconds)}"
                                                             }
                                                             td { class: "col-result",
                                                                 span { class: "result-badge {success_class}",
@@ -623,6 +612,9 @@ fn EncounterDetail(
     // Format NPC list
     let npc_list = encounter.npc_names.join(", ");
 
+    let eu = state.read().european_number_format;
+    let format_number = |n: i64| formatting::format_compact(n, eu);
+
     // Column definitions for the table
     let columns = [
         SortColumn::Player,
@@ -649,7 +641,7 @@ fn EncounterDetail(
                 }
                 span { class: "detail-item",
                     i { class: "fa-solid fa-stopwatch" }
-                    " {format_duration(encounter.duration_seconds)}"
+                    " {formatting::format_duration(encounter.duration_seconds)}"
                 }
                 if let Some(end_time) = &encounter.end_time {
                     span { class: "detail-item",
@@ -754,9 +746,9 @@ fn EncounterDetail(
                                     td { class: "metric-value dtps", "{format_number(player.dtps)}" }
                                     td { class: "metric-value hps", "{format_number(player.hps)}" }
                                     td { class: "metric-value hps", "{format_number(player.ehps)}" }
-                                    td { class: "metric-value hps", "{player.effective_heal_pct:.1}%" }
+                                    td { class: "metric-value hps", "{formatting::format_pct_f32(player.effective_heal_pct, eu)}" }
                                     td { class: "metric-value hps", "{format_number(player.abs)}" }
-                                    td { class: "metric-value apm", "{player.apm:.1}" }
+                                    td { class: "metric-value apm", "{formatting::format_f32_1(player.apm, eu)}" }
                                 }
                             }
                         }
@@ -783,7 +775,7 @@ fn EncounterDetail(
                                         td { class: "metric-value dtps", "{format_number(tot_dtps)}" }
                                         td { class: "metric-value hps", "{format_number(tot_hps)}" }
                                         td { class: "metric-value hps", "{format_number(tot_ehps)}" }
-                                        td { class: "metric-value hps", "{eff_pct:.1}%" }
+                                        td { class: "metric-value hps", "{formatting::format_pct_f32(eff_pct, eu)}" }
                                         td { class: "metric-value hps", "{format_number(tot_abs)}" }
                                         td { class: "metric-value apm", "—" }
                                     }
@@ -804,7 +796,7 @@ fn EncounterDetail(
                     div { class: "challenge-cards",
                         for challenge in encounter.challenges.iter() {
                             {
-                                let duration_str = format_duration(challenge.duration_secs as i64);
+                                let duration_str = formatting::format_duration(challenge.duration_secs as i64);
                                 let per_sec_str = challenge.per_second
                                     .map(|ps| format_number(ps as i64))
                                     .unwrap_or_default();
@@ -839,7 +831,7 @@ fn EncounterDetail(
                                                                     span { class: "challenge-player-ps", "{ps_str}/s" }
                                                                 }
                                                                 span { class: "challenge-player-value", "{format_number(player.value)}" }
-                                                                span { class: "challenge-player-pct", "{player.percent:.1}%" }
+                                                                span { class: "challenge-player-pct", "{formatting::format_pct_f32(player.percent, eu)}" }
                                                             }
                                                         }
                                                     }

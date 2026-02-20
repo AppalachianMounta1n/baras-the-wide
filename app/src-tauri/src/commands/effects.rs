@@ -74,6 +74,8 @@ pub struct EffectListItem {
     pub on_expire_trigger_timer: Option<String>,
 
     // Alerts
+    #[serde(default)]
+    pub is_alert: bool,
     pub alert_text: Option<String>,
     pub alert_on: AlertTrigger,
 
@@ -109,6 +111,7 @@ impl EffectListItem {
             track_outside_combat: def.track_outside_combat,
             on_apply_trigger_timer: def.on_apply_trigger_timer.clone(),
             on_expire_trigger_timer: def.on_expire_trigger_timer.clone(),
+            is_alert: def.is_alert,
             alert_text: def.alert_text.clone(),
             alert_on: def.alert_on,
             audio: def.audio.clone(),
@@ -136,6 +139,7 @@ impl EffectListItem {
             track_outside_combat: self.track_outside_combat,
             on_apply_trigger_timer: self.on_apply_trigger_timer.clone(),
             on_expire_trigger_timer: self.on_expire_trigger_timer.clone(),
+            is_alert: self.is_alert,
             alert_text: self.alert_text.clone(),
             alert_on: self.alert_on,
             audio: self.audio.clone(),
@@ -154,7 +158,9 @@ impl EffectListItem {
             Trigger::EffectApplied { effects, .. } | Trigger::EffectRemoved { effects, .. } => {
                 !effects.is_empty() || !self.refresh_abilities.is_empty()
             }
-            Trigger::AbilityCast { abilities, .. } => {
+            Trigger::AbilityCast { abilities, .. }
+            | Trigger::DamageTaken { abilities, .. }
+            | Trigger::HealingTaken { abilities, .. } => {
                 !abilities.is_empty() || !self.refresh_abilities.is_empty()
             }
             _ => false,

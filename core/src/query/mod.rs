@@ -30,7 +30,7 @@ use column_helpers::*;
 pub use baras_types::{
     AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow,
     DamageTakenSummary, DataTab, EffectChartData, EffectWindow, EncounterTimeline,
-    EntityBreakdown, GcdSlot, GroupedEntityNames, HpPoint, PhaseSegment, PlayerDeath,
+    EntityBreakdown, GcdSlot, GroupedEntityNames, HpPoint, NpcHealthRow, PhaseSegment, PlayerDeath,
     RaidOverviewRow, RotationAnalysis, RotationCycle, RotationEvent, TimeRange, TimeSeriesPoint,
 };
 

@@ -12,6 +12,7 @@ use crate::api::{self, EffectChartData, EffectWindow, HpPoint, TimeRange, TimeSe
 use crate::components::ability_icon::AbilityIcon;
 use crate::components::class_icons::get_class_icon;
 use crate::utils::js_set;
+use baras_types::formatting;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ECharts JS Interop
@@ -599,16 +600,7 @@ fn build_hp_chart_option(
 // Helper Functions
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn format_duration(secs: f32) -> String {
-    let total_secs = secs as i32;
-    let mins = total_secs / 60;
-    let secs = total_secs % 60;
-    format!("{}:{:02}", mins, secs)
-}
 
-fn format_pct(pct: f32) -> String {
-    format!("{:.1}%", pct)
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component
@@ -625,6 +617,15 @@ pub struct ChartsPanelProps {
     /// Local player name for default selection
     #[props(default)]
     pub local_player: Option<String>,
+    /// Whether entity sidebar is collapsed
+    #[props(default)]
+    pub entity_collapsed: bool,
+    /// Callback to toggle entity sidebar collapse
+    #[props(default)]
+    pub on_toggle_entity: EventHandler<()>,
+    /// European number format (swaps `.` and `,`)
+    #[props(default)]
+    pub european: bool,
 }
 
 #[component]
@@ -986,81 +987,91 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
     let hp_empty = hp_data.read().is_empty();
 
     rsx! {
-        div { class: "charts-panel",
+        div { class: if props.entity_collapsed { "charts-panel sidebar-collapsed" } else { "charts-panel" },
             // Entity sidebar
-            aside { class: "charts-sidebar",
-                div { class: "sidebar-section",
-                    h4 { "Player" }
-                    div { class: "entity-list",
-                        for name in entity_list.iter() {
-                            {
-                                let n = name.clone();
-                                let is_selected = selected_entity.read().as_ref() == Some(&n);
-                                let icon = class_icons.read().get(&n).cloned();
-                                rsx! {
-                                    div {
-                                        class: if is_selected { "entity-item selected" } else { "entity-item" },
-                                        onclick: {
-                                            let n = n.clone();
-                                            move |_| {
-                                                let current = selected_entity.read().clone();
-                                                if current.as_ref() == Some(&n) {
-                                                    selected_entity.set(None);
-                                                } else {
-                                                    selected_entity.set(Some(n.clone()));
+            aside { class: if props.entity_collapsed { "charts-sidebar collapsed" } else { "charts-sidebar" },
+                div { class: "entity-header",
+                    button {
+                        class: "sidebar-collapse-btn",
+                        title: if props.entity_collapsed { "Expand sidebar" } else { "Collapse sidebar" },
+                        onclick: move |_| props.on_toggle_entity.call(()),
+                        i { class: if props.entity_collapsed { "fa-solid fa-angles-right" } else { "fa-solid fa-angles-left" } }
+                    }
+                }
+                if !props.entity_collapsed {
+                    div { class: "sidebar-section",
+                        h4 { "Player" }
+                        div { class: "entity-list",
+                            for name in entity_list.iter() {
+                                {
+                                    let n = name.clone();
+                                    let is_selected = selected_entity.read().as_ref() == Some(&n);
+                                    let icon = class_icons.read().get(&n).cloned();
+                                    rsx! {
+                                        div {
+                                            class: if is_selected { "entity-item selected" } else { "entity-item" },
+                                            onclick: {
+                                                let n = n.clone();
+                                                move |_| {
+                                                    let current = selected_entity.read().clone();
+                                                    if current.as_ref() == Some(&n) {
+                                                        selected_entity.set(None);
+                                                    } else {
+                                                        selected_entity.set(Some(n.clone()));
+                                                    }
+                                                }
+                                            },
+                                            if let Some(icon_name) = &icon {
+                                                if let Some(icon_asset) = get_class_icon(icon_name) {
+                                                    img {
+                                                        class: "entity-class-icon",
+                                                        src: *icon_asset,
+                                                        alt: ""
+                                                    }
                                                 }
                                             }
-                                        },
-                                        if let Some(icon_name) = &icon {
-                                            if let Some(icon_asset) = get_class_icon(icon_name) {
-                                                img {
-                                                    class: "entity-class-icon",
-                                                    src: *icon_asset,
-                                                    alt: ""
-                                                }
-                                            }
+                                            "{name}"
                                         }
-                                        "{name}"
                                     }
                                 }
                             }
                         }
                     }
-                }
-                div { class: "sidebar-section",
-                    h4 { "Charts" }
-                    div { class: "chart-toggles",
-                        label {
-                            input {
-                                r#type: "checkbox",
-                                checked: *show_dps.read(),
-                                onchange: move |e| show_dps.set(e.checked())
+                    div { class: "sidebar-section",
+                        h4 { "Charts" }
+                        div { class: "chart-toggles",
+                            label {
+                                input {
+                                    r#type: "checkbox",
+                                    checked: *show_dps.read(),
+                                    onchange: move |e| show_dps.set(e.checked())
+                                }
+                                span { class: "toggle-dps", "DPS" }
                             }
-                            span { class: "toggle-dps", "DPS" }
-                        }
-                        label {
-                            input {
-                                r#type: "checkbox",
-                                checked: *show_hps.read(),
-                                onchange: move |e| show_hps.set(e.checked())
+                            label {
+                                input {
+                                    r#type: "checkbox",
+                                    checked: *show_hps.read(),
+                                    onchange: move |e| show_hps.set(e.checked())
+                                }
+                                span { class: "toggle-hps", "HPS" }
                             }
-                            span { class: "toggle-hps", "HPS" }
-                        }
-                        label {
-                            input {
-                                r#type: "checkbox",
-                                checked: *show_dtps.read(),
-                                onchange: move |e| show_dtps.set(e.checked())
+                            label {
+                                input {
+                                    r#type: "checkbox",
+                                    checked: *show_dtps.read(),
+                                    onchange: move |e| show_dtps.set(e.checked())
+                                }
+                                span { class: "toggle-dtps", "DTPS" }
                             }
-                            span { class: "toggle-dtps", "DTPS" }
-                        }
-                        label {
-                            input {
-                                r#type: "checkbox",
-                                checked: *show_hp.read(),
-                                onchange: move |e| show_hp.set(e.checked())
+                            label {
+                                input {
+                                    r#type: "checkbox",
+                                    checked: *show_hp.read(),
+                                    onchange: move |e| show_hp.set(e.checked())
+                                }
+                                span { class: "toggle-hp", "HP%" }
                             }
-                            span { class: "toggle-hp", "HP%" }
                         }
                     }
                 }
@@ -1068,6 +1079,14 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
 
             // Main content area (charts + effects below)
             div { class: "charts-main",
+                if props.entity_collapsed {
+                    if let Some(name) = selected_entity.read().as_ref() {
+                        div { class: "selected-entity-indicator",
+                            i { class: "fa-solid fa-user" }
+                            span { "{name}" }
+                        }
+                    }
+                }
                 // Charts area
                 div { class: "charts-area",
                     if *loading.read() {
@@ -1151,8 +1170,8 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
                                                         "{effect.effect_name}"
                                                     }
                                                     td { class: "num", "{effect.count}" }
-                                                    td { class: "num", "{format_duration(effect.total_duration_secs)}" }
-                                                    td { class: "num", "{format_pct(effect.uptime_pct)}" }
+                                                    td { class: "num", "{formatting::format_duration_f32(effect.total_duration_secs)}" }
+                                                    td { class: "num", "{formatting::format_pct_f32(effect.uptime_pct, props.european)}" }
                                                 }
                                             }
                                         }
@@ -1201,8 +1220,8 @@ pub fn ChartsPanel(props: ChartsPanelProps) -> Element {
                                                     },
                                                     td { "{effect.effect_name}" }
                                                     td { class: "num", "{effect.count}" }
-                                                    td { class: "num", "{format_duration(effect.total_duration_secs)}" }
-                                                    td { class: "num", "{format_pct(effect.uptime_pct)}" }
+                                                    td { class: "num", "{formatting::format_duration_f32(effect.total_duration_secs)}" }
+                                                    td { class: "num", "{formatting::format_pct_f32(effect.uptime_pct, props.european)}" }
                                                 }
                                             }
                                         }

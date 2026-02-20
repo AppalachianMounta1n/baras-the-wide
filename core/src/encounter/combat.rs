@@ -847,7 +847,8 @@ impl CombatEncounter {
         let defense_type = event.details.defense_type_id;
         let is_defense = matches!(
             defense_type,
-            defense_type::DODGE
+            defense_type::MISS
+                | defense_type::DODGE
                 | defense_type::PARRY
                 | defense_type::RESIST
                 | defense_type::DEFLECT
@@ -910,17 +911,23 @@ impl CombatEncounter {
                 .entry(event.target_entity.log_id)
                 .or_default();
 
+            // Count all incoming attacks (hits + full avoidances) for defense %.
+            if is_defense || event.details.dmg_amount > 0 {
+                target.attacks_received += 1;
+            }
+            if is_defense {
+                target.defense_count += 1;
+            }
+
             if event.details.dmg_amount > 0 {
                 target.damage_received += event.details.dmg_amount as i64;
                 target.damage_received_effective += event.details.dmg_effective as i64;
                 target.damage_absorbed += event.details.dmg_absorbed as i64;
-                target.attacks_received += 1;
+                // Only hits that land can proc a shield roll, so this is
+                // the correct denominator for shield %.
+                target.hits_received += 1;
 
-                if is_defense {
-                    target.defense_count += 1;
-                }
-
-                if is_natural_shield {
+                if defense_type == defense_type::SHIELD {
                     target.shield_roll_count += 1;
                     target.shield_roll_absorbed += event.details.dmg_absorbed as i64;
                 }
@@ -985,8 +992,8 @@ impl CombatEncounter {
                 } else {
                     0.0
                 };
-                let shield_pct = if acc.attacks_received > 0 {
-                    (acc.shield_roll_count as f32 / acc.attacks_received as f32) * 100.0
+                let shield_pct = if acc.hits_received > 0 {
+                    (acc.shield_roll_count as f32 / acc.hits_received as f32) * 100.0
                 } else {
                     0.0
                 };

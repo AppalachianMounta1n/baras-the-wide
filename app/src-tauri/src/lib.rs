@@ -43,6 +43,24 @@ fn spawn_auto_show_overlays(overlay_state: SharedOverlayState, service_handle: S
             return;
         }
 
+        // If "hide when not live" is enabled, check whether the session is actually live.
+        // The initial file parse may have completed during our delay, revealing a stale
+        // or empty session. In that case, skip showing overlays and mark the auto-hide
+        // as active so they restore when the session becomes live.
+        if config.overlay_settings.hide_when_not_live {
+            // Check if the game process is running — if not, don't show overlays at all.
+            // This avoids the flash of overlays appearing then hiding when BARAS starts
+            // without SWTOR running.
+            let game_running = service::process_monitor::is_game_running()
+                .await
+                .unwrap_or(true); // safe default: assume running if check fails
+
+            if !game_running || service_handle.shared.is_session_not_live().await {
+                service_handle.shared.activate_not_live_hiding();
+                return;
+            }
+        }
+
         // Use OverlayManager to show all enabled overlays
         let _ = OverlayManager::show_all(&overlay_state, &service_handle).await;
     });
@@ -158,6 +176,7 @@ pub fn run() {
             commands::hide_overlay,
             commands::hide_all_overlays,
             commands::show_all_overlays,
+            commands::apply_not_live_auto_hide,
             commands::toggle_move_mode,
             commands::toggle_raid_rearrange,
             commands::get_overlay_status,
@@ -253,6 +272,7 @@ pub fn run() {
             commands::query_source_names,
             commands::query_target_names,
             commands::query_player_deaths,
+            commands::query_npc_health,
             commands::query_rotation,
             commands::query_damage_taken_summary,
             commands::query_encounter_timeline,

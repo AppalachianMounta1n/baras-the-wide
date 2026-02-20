@@ -277,6 +277,11 @@ impl TimerDefinition {
         self.trigger.matches_damage_taken(ability_id, ability_name)
     }
 
+    /// Check if this timer triggers when healing is taken from an ability.
+    pub fn matches_healing_taken(&self, ability_id: u64, ability_name: Option<&str>) -> bool {
+        self.trigger.matches_healing_taken(ability_id, ability_name)
+    }
+
     /// Check if this timer is active for a given encounter context
     pub fn is_active_for_context(
         &self,

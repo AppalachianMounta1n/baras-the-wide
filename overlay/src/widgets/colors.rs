@@ -72,6 +72,40 @@ pub fn label_dim() -> Color {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Personal Stat Category Colors
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Damage stat value color (red)
+#[inline]
+pub fn stat_damage() -> Color {
+    Color::from_rgba8(220, 80, 80, 255)
+}
+
+/// Healing stat value color (green)
+#[inline]
+pub fn stat_healing() -> Color {
+    Color::from_rgba8(80, 200, 80, 255)
+}
+
+/// Mitigation/DTPS stat value color (brownish orange)
+#[inline]
+pub fn stat_mitigation() -> Color {
+    Color::from_rgba8(210, 150, 60, 255)
+}
+
+/// Threat stat value color (blue)
+#[inline]
+pub fn stat_threat() -> Color {
+    Color::from_rgba8(80, 140, 220, 255)
+}
+
+/// Separator line color (subtle)
+#[inline]
+pub fn separator_line() -> Color {
+    Color::from_rgba8(80, 80, 80, 180)
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Effect Type Colors
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -251,6 +285,12 @@ pub fn effect_bar_border() -> Color {
 #[inline]
 pub fn text_shadow() -> Color {
     Color::from_rgba8(0, 0, 0, 160)
+}
+
+/// Yellow countdown/charge text for icons (SWTOR style)
+#[inline]
+pub fn icon_countdown() -> Color {
+    Color::from_rgba8(255, 210, 0, 255)
 }
 
 /// Muted/inactive text

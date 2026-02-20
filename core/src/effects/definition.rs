@@ -157,6 +157,11 @@ pub struct EffectDefinition {
     pub on_expire_trigger_timer: Option<String>,
 
     // ─── Alerts ────────────────────────────────────────────────────────────────
+    /// If true, fires as instant alert (no active effect created).
+    /// Only shows alert text and plays audio on trigger — no duration tracking.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_alert: bool,
+
     /// Text to display in the alerts overlay
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alert_text: Option<String>,
@@ -195,6 +200,16 @@ impl EffectDefinition {
     /// Check if this is an AbilityCast trigger
     pub fn is_ability_cast_trigger(&self) -> bool {
         matches!(self.trigger, Trigger::AbilityCast { .. })
+    }
+
+    /// Check if this is a DamageTaken trigger
+    pub fn is_damage_taken_trigger(&self) -> bool {
+        matches!(self.trigger, Trigger::DamageTaken { .. })
+    }
+
+    /// Check if this is a HealingTaken trigger
+    pub fn is_healing_taken_trigger(&self) -> bool {
+        matches!(self.trigger, Trigger::HealingTaken { .. })
     }
 
     /// Check if an effect ID/name matches this definition's trigger

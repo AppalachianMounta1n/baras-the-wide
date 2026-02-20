@@ -191,15 +191,15 @@ fn EntityRow(
                                     let item = EncounterItem::Entity(updated.clone());
                                     // Entity uses name as ID, so pass original_name for lookup
                                     let orig_id = if original_name != updated.name { Some(original_name.clone()) } else { None };
+                                    // Update parent state synchronously so props refresh and dirty indicator clears
+                                    let new_list: Vec<_> = all.iter()
+                                        .map(|e| if e.name == original_name { updated.clone() } else { e.clone() })
+                                        .collect();
+                                    on_change.call(new_list);
                                     on_status.call(("Saving...".to_string(), false));
                                     spawn(async move {
                                         match api::update_encounter_item(&boss_id, &file_path, &item, orig_id.as_deref()).await {
                                             Ok(_) => {
-                                                // Update local state
-                                                let new_list: Vec<_> = all.iter()
-                                                    .map(|e| if e.name == original_name { updated.clone() } else { e.clone() })
-                                                    .collect();
-                                                on_change.call(new_list);
                                                 on_status.call(("Saved".to_string(), false));
                                             }
                                             Err(_) => on_status.call(("Failed to save".to_string(), true)),

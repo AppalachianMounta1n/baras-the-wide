@@ -30,7 +30,8 @@ fn get_trigger_filters(trigger: &Trigger) -> (EntityFilter, EntityFilter) {
         Trigger::EffectApplied { source, target, .. }
         | Trigger::EffectRemoved { source, target, .. }
         | Trigger::AbilityCast { source, target, .. }
-        | Trigger::DamageTaken { source, target, .. } => (source.clone(), target.clone()),
+        | Trigger::DamageTaken { source, target, .. }
+        | Trigger::HealingTaken { source, target, .. } => (source.clone(), target.clone()),
         _ => (EntityFilter::Any, EntityFilter::Any),
     }
 }
@@ -57,7 +58,9 @@ fn get_trigger_effects(trigger: &Trigger) -> (bool, Vec<EffectSelector>) {
 /// Get abilities from an ability-based trigger
 fn get_trigger_abilities(trigger: &Trigger) -> Vec<AbilitySelector> {
     match trigger {
-        Trigger::AbilityCast { abilities, .. } => abilities.clone(),
+        Trigger::AbilityCast { abilities, .. }
+        | Trigger::DamageTaken { abilities, .. }
+        | Trigger::HealingTaken { abilities, .. } => abilities.clone(),
         _ => vec![],
     }
 }
@@ -89,6 +92,13 @@ fn set_trigger_source(trigger: Trigger, source: EntityFilter) -> Trigger {
         Trigger::DamageTaken {
             abilities, target, ..
         } => Trigger::DamageTaken {
+            abilities,
+            source,
+            target,
+        },
+        Trigger::HealingTaken {
+            abilities, target, ..
+        } => Trigger::HealingTaken {
             abilities,
             source,
             target,
@@ -128,6 +138,13 @@ fn set_trigger_target(trigger: Trigger, target: EntityFilter) -> Trigger {
             source,
             target,
         },
+        Trigger::HealingTaken {
+            abilities, source, ..
+        } => Trigger::HealingTaken {
+            abilities,
+            source,
+            target,
+        },
         other => other,
     }
 }
@@ -153,6 +170,16 @@ fn set_trigger_effects(trigger: Trigger, effects: Vec<EffectSelector>) -> Trigge
 fn set_trigger_abilities(trigger: Trigger, abilities: Vec<AbilitySelector>) -> Trigger {
     match trigger {
         Trigger::AbilityCast { source, target, .. } => Trigger::AbilityCast {
+            abilities,
+            source,
+            target,
+        },
+        Trigger::DamageTaken { source, target, .. } => Trigger::DamageTaken {
+            abilities,
+            source,
+            target,
+        },
+        Trigger::HealingTaken { source, target, .. } => Trigger::HealingTaken {
             abilities,
             source,
             target,
@@ -192,6 +219,7 @@ fn default_effect(name: String) -> EffectListItem {
         track_outside_combat: true,
         on_apply_trigger_timer: None,
         on_expire_trigger_timer: None,
+        is_alert: false,
         alert_text: None,
         alert_on: AlertTrigger::None,
         audio: AudioConfig::default(),
@@ -207,6 +235,10 @@ enum EffectTriggerType {
     EffectBased,
     /// Track based on ability cast (for procs/cooldowns)
     AbilityCast,
+    /// Track based on damage taken from an ability
+    DamageTaken,
+    /// Track based on healing taken from an ability
+    HealingTaken,
 }
 
 impl EffectTriggerType {
@@ -214,17 +246,21 @@ impl EffectTriggerType {
         match self {
             Self::EffectBased => "Effect Based",
             Self::AbilityCast => "Ability Cast",
+            Self::DamageTaken => "Damage Taken",
+            Self::HealingTaken => "Healing Taken",
         }
     }
 
     fn all() -> &'static [Self] {
-        &[Self::EffectBased, Self::AbilityCast]
+        &[Self::EffectBased, Self::AbilityCast, Self::DamageTaken, Self::HealingTaken]
     }
 
     /// Determine trigger type from effect data
     fn from_effect(effect: &EffectListItem) -> Self {
         match &effect.trigger {
             Trigger::AbilityCast { .. } => Self::AbilityCast,
+            Trigger::DamageTaken { .. } => Self::DamageTaken,
+            Trigger::HealingTaken { .. } => Self::HealingTaken,
             _ => Self::EffectBased,
         }
     }
@@ -789,10 +825,14 @@ fn EffectRow(
                     if !is_draft {
                         span { class: "effect-id-inline", "{effect.id}" }
                     }
-                    span { class: "effect-target-badge", "{effect.display_target.label()}" }
+                    if effect.is_alert {
+                        span { class: "tag tag-alert", "Alert" }
+                    } else {
+                        span { class: "effect-target-badge", "{effect.display_target.label()}" }
 
-                    if let Some(dur) = effect.duration_secs {
-                        span { class: "effect-duration", "{dur:.0}s" }
+                        if let Some(dur) = effect.duration_secs {
+                            span { class: "effect-duration", "{dur:.0}s" }
+                        }
                     }
                 }
 
@@ -963,54 +1003,56 @@ fn EffectEditForm(
                                     }
                                 }
 
-                                // Display Text
-                                div { class: "form-row-hz",
-                                    label { "Display Text" }
-                                    input {
-                                        r#type: "text",
-                                        class: "input-inline",
-                                        style: "width: 200px;",
-                                        placeholder: "{draft().name}",
-                                        value: "{draft().display_text.clone().unwrap_or_default()}",
-                                        oninput: move |e| {
-                                            let mut d = draft();
-                                            d.display_text = if e.value().is_empty() { None } else { Some(e.value()) };
-                                            draft.set(d);
+                                if !draft().is_alert {
+                                    // Display Text
+                                    div { class: "form-row-hz",
+                                        label { "Display Text" }
+                                        input {
+                                            r#type: "text",
+                                            class: "input-inline",
+                                            style: "width: 200px;",
+                                            placeholder: "{draft().name}",
+                                            value: "{draft().display_text.clone().unwrap_or_default()}",
+                                            oninput: move |e| {
+                                                let mut d = draft();
+                                                d.display_text = if e.value().is_empty() { None } else { Some(e.value()) };
+                                                draft.set(d);
+                                            }
                                         }
                                     }
-                                }
 
-                                // Display Target
-                                div { class: "form-row-hz",
-                                    label { class: "flex items-center",
-                                        "Display Target"
-                                        span {
-                                            class: "help-icon",
-                                            title: "Sets which overlay displays this effect when triggered",
-                                            "?"
+                                    // Display Target
+                                    div { class: "form-row-hz",
+                                        label { class: "flex items-center",
+                                            "Display Target"
+                                            span {
+                                                class: "help-icon",
+                                                title: "Sets which overlay displays this effect when triggered",
+                                                "?"
+                                            }
                                         }
-                                    }
-                                    select {
-                                        class: "select-inline",
-                                        value: "{draft().display_target.label()}",
-                                        onchange: move |e| {
-                                            let mut d = draft();
-                                            d.display_target = match e.value().as_str() {
-                                                "None" => DisplayTarget::None,
-                                                "Raid Frames" => DisplayTarget::RaidFrames,
-                                                "Effects A" => DisplayTarget::EffectsA,
-                                                "Effects B" => DisplayTarget::EffectsB,
-                                                "Cooldowns" => DisplayTarget::Cooldowns,
-                                                "DOT Tracker" => DisplayTarget::DotTracker,
-                                                "Effects Overlay" => DisplayTarget::EffectsOverlay,
-                                                _ => d.display_target,
-                                            };
-                                            draft.set(d);
-                                        },
-                                        for target in DisplayTarget::all() {
-                                            option {
-                                                value: "{target.label()}",
-                                                "{target.label()}"
+                                        select {
+                                            class: "select-inline",
+                                            value: "{draft().display_target.label()}",
+                                            onchange: move |e| {
+                                                let mut d = draft();
+                                                d.display_target = match e.value().as_str() {
+                                                    "None" => DisplayTarget::None,
+                                                    "Raid Frames" => DisplayTarget::RaidFrames,
+                                                    "Effects A" => DisplayTarget::EffectsA,
+                                                    "Effects B" => DisplayTarget::EffectsB,
+                                                    "Cooldowns" => DisplayTarget::Cooldowns,
+                                                    "DOT Tracker" => DisplayTarget::DotTracker,
+                                                    "Effects Overlay" => DisplayTarget::EffectsOverlay,
+                                                    _ => d.display_target,
+                                                };
+                                                draft.set(d);
+                                            },
+                                            for target in DisplayTarget::all() {
+                                                option {
+                                                    value: "{target.label()}",
+                                                    "{target.label()}"
+                                                }
                                             }
                                         }
                                     }
@@ -1022,7 +1064,7 @@ fn EffectEditForm(
                                         "Disciplines"
                                         span {
                                             class: "help-icon",
-                                            title: "Restrict this effect to specific player disciplines. If empty, the effect applies to all disciplines.",
+                                            title: "Only activate this effect when your local player is one of the selected disciplines. If empty, the effect applies to all disciplines.",
                                             "?"
                                         }
                                     }
@@ -1053,79 +1095,102 @@ fn EffectEditForm(
                                     }
                                 }
 
-                                // Icon ID with preview
-                                div { class: "form-row-hz",
-                                    label { class: "flex items-center",
-                                        "Icon ID"
-                                        span {
-                                            class: "help-icon",
-                                            title: "Ability ID to use for the icon. Leave blank to auto-detect from trigger.",
-                                            "?"
-                                        }
-                                    }
-                                    input {
-                                        r#type: "text",
-                                        class: "input-inline",
-                                        style: "width: 140px;",
-                                        placeholder: "(auto)",
-                                        value: "{draft().icon_ability_id.map(|id| id.to_string()).unwrap_or_default()}",
-                                        oninput: move |e| {
-                                            let mut d = draft();
-                                            d.icon_ability_id = if e.value().is_empty() {
-                                                None
-                                            } else {
-                                                e.value().parse::<u64>().ok()
-                                            };
-                                            draft.set(d);
-                                        }
-                                    }
-                                    // Icon preview
-                                    if let Some(ref url) = icon_preview_url() {
-                                        img {
-                                            src: "{url}",
-                                            class: "icon-preview",
-                                            width: "24",
-                                            height: "24",
-                                            alt: "Icon preview"
-                                        }
-                                    } else if draft().icon_ability_id.is_some() {
-                                        span { class: "text-muted text-xs", "(not found)" }
-                                    }
-                                }
-
-                                // Show Icon
-                                div { class: "form-row-hz",
-                                    label { "Show Icon" }
-                                    input {
-                                        r#type: "checkbox",
-                                        checked: draft().show_icon,
-                                        onchange: move |e| {
-                                            let mut d = draft();
-                                            d.show_icon = e.checked();
-                                            draft.set(d);
-                                        }
-                                    }
-                                }
-
-                                // Display Source - only for personal overlays
-                                if matches!(draft().display_target, DisplayTarget::EffectsA | DisplayTarget::EffectsB | DisplayTarget::Cooldowns) {
+                                if !draft().is_alert {
+                                    // Icon ID with preview
                                     div { class: "form-row-hz",
                                         label { class: "flex items-center",
-                                            "Display Source"
+                                            "Icon ID"
                                             span {
                                                 class: "help-icon",
-                                                title: "Show who applied this effect on the overlay",
+                                                title: "Ability ID to use for the icon. Leave blank to auto-detect from trigger.",
                                                 "?"
                                             }
                                         }
                                         input {
-                                            r#type: "checkbox",
-                                            checked: draft().display_source,
-                                            onchange: move |e| {
+                                            r#type: "text",
+                                            class: "input-inline",
+                                            style: "width: 140px;",
+                                            placeholder: "(auto)",
+                                            value: "{draft().icon_ability_id.map(|id| id.to_string()).unwrap_or_default()}",
+                                            oninput: move |e| {
                                                 let mut d = draft();
-                                                d.display_source = e.checked();
+                                                d.icon_ability_id = if e.value().is_empty() {
+                                                    None
+                                                } else {
+                                                    e.value().parse::<u64>().ok()
+                                                };
                                                 draft.set(d);
                                             }
+                                        }
+                                        // Icon preview
+                                        if let Some(ref url) = icon_preview_url() {
+                                            img {
+                                                src: "{url}",
+                                                class: "icon-preview",
+                                                width: "24",
+                                                height: "24",
+                                                alt: "Icon preview"
+                                            }
+                                        } else if draft().icon_ability_id.is_some() {
+                                            span { class: "text-muted text-xs", "(not found)" }
+                                        }
+                                    }
+
+                                    // Show Icon
+                                    div { class: "form-row-hz",
+                                        label { "Show Icon" }
+                                        input {
+                                            r#type: "checkbox",
+                                            checked: draft().show_icon,
+                                            onchange: move |e| {
+                                                let mut d = draft();
+                                                d.show_icon = e.checked();
+                                                draft.set(d);
+                                            }
+                                        }
+                                    }
+
+                                    // Display Source - only for personal overlays
+                                    if matches!(draft().display_target, DisplayTarget::EffectsA | DisplayTarget::EffectsB | DisplayTarget::Cooldowns) {
+                                        div { class: "form-row-hz",
+                                            label { class: "flex items-center",
+                                                "Display Source"
+                                                span {
+                                                    class: "help-icon",
+                                                    title: "Show who applied this effect on the overlay",
+                                                    "?"
+                                                }
+                                            }
+                                            input {
+                                                r#type: "checkbox",
+                                                checked: draft().display_source,
+                                                onchange: move |e| {
+                                                    let mut d = draft();
+                                                    d.display_source = e.checked();
+                                                    draft.set(d);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Instant Alert Only
+                                div { class: "form-row-hz",
+                                    label { class: "flex items-center",
+                                        "Instant Alert Only"
+                                        span {
+                                            class: "help-icon",
+                                            title: "Shows a brief alert notification instead of tracking the effect. No duration, no overlay bar/icon — only alert text and audio fire on trigger.",
+                                            "?"
+                                        }
+                                    }
+                                    input {
+                                        r#type: "checkbox",
+                                        checked: draft().is_alert,
+                                        onchange: move |e| {
+                                            let mut d = draft();
+                                            d.is_alert = e.checked();
+                                            draft.set(d);
                                         }
                                     }
                                 }
@@ -1170,6 +1235,8 @@ fn EffectEditForm(
                                             let new_type = match e.value().as_str() {
                                                 "Effect Based" => EffectTriggerType::EffectBased,
                                                 "Ability Cast" => EffectTriggerType::AbilityCast,
+                                                "Damage Taken" => EffectTriggerType::DamageTaken,
+                                                "Healing Taken" => EffectTriggerType::HealingTaken,
                                                 _ => trigger_type(),
                                             };
                                             trigger_type.set(new_type);
@@ -1183,6 +1250,16 @@ fn EffectEditForm(
                                                     target,
                                                 },
                                                 EffectTriggerType::AbilityCast => Trigger::AbilityCast {
+                                                    abilities: vec![],
+                                                    source,
+                                                    target,
+                                                },
+                                                EffectTriggerType::DamageTaken => Trigger::DamageTaken {
+                                                    abilities: vec![],
+                                                    source,
+                                                    target,
+                                                },
+                                                EffectTriggerType::HealingTaken => Trigger::HealingTaken {
                                                     abilities: vec![],
                                                     source,
                                                     target,
@@ -1280,81 +1357,83 @@ fn EffectEditForm(
                                     }
                                 }
 
-                                // Refresh Abilities
-                                div { class: "form-row-hz", style: "align-items: flex-start;",
-                                    AbilitySelectorEditor {
-                                        label: "Refresh Abilities",
-                                        selectors: draft().refresh_abilities.iter().map(|r| r.ability().clone()).collect(),
-                                        on_change: move |ids: Vec<AbilitySelector>| {
-                                            let mut d = draft();
-                                            d.refresh_abilities = ids.into_iter().map(RefreshAbility::Simple).collect();
-                                            draft.set(d);
+                                if !draft().is_alert {
+                                    // Refresh Abilities
+                                    div { class: "form-row-hz", style: "align-items: flex-start;",
+                                        AbilitySelectorEditor {
+                                            label: "Refresh Abilities",
+                                            selectors: draft().refresh_abilities.iter().map(|r| r.ability().clone()).collect(),
+                                            on_change: move |ids: Vec<AbilitySelector>| {
+                                                let mut d = draft();
+                                                d.refresh_abilities = ids.into_iter().map(RefreshAbility::Simple).collect();
+                                                draft.set(d);
+                                            }
                                         }
                                     }
-                                }
 
-                                // ─── Behavior Options ──────────────────────────────────
-                                span { class: "text-sm font-bold text-secondary mt-sm", "Behavior" }
+                                    // ─── Behavior Options ──────────────────────────────────
+                                    span { class: "text-sm font-bold text-secondary mt-sm", "Behavior" }
 
-                                label {
-                                    class: "flex items-center gap-xs text-sm mt-xs",
-                                    input {
-                                        r#type: "checkbox",
-                                        checked: draft().is_refreshed_on_modify,
-                                        onchange: move |e| {
-                                            let mut d = draft();
-                                            d.is_refreshed_on_modify = e.checked();
-                                            draft.set(d);
+                                    label {
+                                        class: "flex items-center gap-xs text-sm mt-xs",
+                                        input {
+                                            r#type: "checkbox",
+                                            checked: draft().is_refreshed_on_modify,
+                                            onchange: move |e| {
+                                                let mut d = draft();
+                                                d.is_refreshed_on_modify = e.checked();
+                                                draft.set(d);
+                                            }
+                                        }
+                                        span { class: "flex items-center",
+                                            "Refresh Duration When Charges Modified"
+                                            span {
+                                                class: "help-icon",
+                                                title: "Reset timer when effect stacks change",
+                                                "?"
+                                            }
                                         }
                                     }
-                                    span { class: "flex items-center",
-                                        "Refresh Duration When Charges Modified"
-                                        span {
-                                            class: "help-icon",
-                                            title: "Reset timer when effect stacks change",
-                                            "?"
-                                        }
-                                    }
-                                }
 
-                                label {
-                                    class: "flex items-center gap-xs text-sm",
-                                    input {
-                                        r#type: "checkbox",
-                                        checked: draft().persist_past_death,
-                                        onchange: move |e| {
-                                            let mut d = draft();
-                                            d.persist_past_death = e.checked();
-                                            draft.set(d);
+                                    label {
+                                        class: "flex items-center gap-xs text-sm",
+                                        input {
+                                            r#type: "checkbox",
+                                            checked: draft().persist_past_death,
+                                            onchange: move |e| {
+                                                let mut d = draft();
+                                                d.persist_past_death = e.checked();
+                                                draft.set(d);
+                                            }
+                                        }
+                                        span { class: "flex items-center",
+                                            "Persist Past Death"
+                                            span {
+                                                class: "help-icon",
+                                                title: "Keep showing effect after player dies",
+                                                "?"
+                                            }
                                         }
                                     }
-                                    span { class: "flex items-center",
-                                        "Persist Past Death"
-                                        span {
-                                            class: "help-icon",
-                                            title: "Keep showing effect after player dies",
-                                            "?"
-                                        }
-                                    }
-                                }
 
-                                label {
-                                    class: "flex items-center gap-xs text-sm",
-                                    input {
-                                        r#type: "checkbox",
-                                        checked: draft().track_outside_combat,
-                                        onchange: move |e| {
-                                            let mut d = draft();
-                                            d.track_outside_combat = e.checked();
-                                            draft.set(d);
+                                    label {
+                                        class: "flex items-center gap-xs text-sm",
+                                        input {
+                                            r#type: "checkbox",
+                                            checked: draft().track_outside_combat,
+                                            onchange: move |e| {
+                                                let mut d = draft();
+                                                d.track_outside_combat = e.checked();
+                                                draft.set(d);
+                                            }
                                         }
-                                    }
-                                    span { class: "flex items-center",
-                                        "Track Outside Combat"
-                                        span {
-                                            class: "help-icon",
-                                            title: "Continue tracking this effect between combat encounters",
-                                            "?"
+                                        span { class: "flex items-center",
+                                            "Track Outside Combat"
+                                            span {
+                                                class: "help-icon",
+                                                title: "Continue tracking this effect between combat encounters",
+                                                "?"
+                                            }
                                         }
                                     }
                                 }
@@ -1366,6 +1445,7 @@ fn EffectEditForm(
                     div { class: "effect-edit-right",
 
                         // ─── Timing Card ─────────────────────────────────────────────
+                        if !draft().is_alert {
                         div { class: "form-card",
                             div { class: "form-card-header",
                                 i { class: "fa-solid fa-clock" }
@@ -1503,6 +1583,7 @@ fn EffectEditForm(
                                 }
                             }
                         }
+                        }
 
                         // ─── Alerts Card ─────────────────────────────────────────────
                         div { class: "form-card",
@@ -1534,35 +1615,49 @@ fn EffectEditForm(
                                     }
                                 }
 
-                                div { class: "form-row-hz",
-                                    label { class: "flex items-center",
-                                        "Alert On"
-                                        span {
-                                            class: "help-icon",
-                                            title: "When to show alert text: on effect start, on effect end, or never",
-                                            "?"
+                                if draft().is_alert {
+                                    div { class: "form-row-hz",
+                                        label { class: "flex items-center",
+                                            "Alert On"
+                                            span {
+                                                class: "help-icon",
+                                                title: "Instant alerts always fire when triggered",
+                                                "?"
+                                            }
                                         }
+                                        span { class: "text-sm text-secondary", "On trigger (instant)" }
                                     }
-                                    select {
-                                        class: "select-inline",
-                                        value: "{effect_alert_label(&draft().alert_on)}",
-                                        onchange: move |e| {
-                                            let mut d = draft();
-                                            d.alert_on = match e.value().as_str() {
-                                                "Effect Start" => AlertTrigger::OnApply,
-                                                "Effect End" => AlertTrigger::OnExpire,
-                                                _ => AlertTrigger::None,
-                                            };
-                                            draft.set(d);
-                                        },
-                                        for trigger in AlertTrigger::all() {
-                                            {
-                                                let label = effect_alert_label(trigger);
-                                                rsx! {
-                                                    option {
-                                                        value: "{label}",
-                                                        selected: *trigger == draft().alert_on,
-                                                        "{label}"
+                                } else {
+                                    div { class: "form-row-hz",
+                                        label { class: "flex items-center",
+                                            "Alert On"
+                                            span {
+                                                class: "help-icon",
+                                                title: "When to show alert text: on effect start, on effect end, or never",
+                                                "?"
+                                            }
+                                        }
+                                        select {
+                                            class: "select-inline",
+                                            value: "{effect_alert_label(&draft().alert_on)}",
+                                            onchange: move |e| {
+                                                let mut d = draft();
+                                                d.alert_on = match e.value().as_str() {
+                                                    "Effect Start" => AlertTrigger::OnApply,
+                                                    "Effect End" => AlertTrigger::OnExpire,
+                                                    _ => AlertTrigger::None,
+                                                };
+                                                draft.set(d);
+                                            },
+                                            for trigger in AlertTrigger::all() {
+                                                {
+                                                    let label = effect_alert_label(trigger);
+                                                    rsx! {
+                                                        option {
+                                                            value: "{label}",
+                                                            selected: *trigger == draft().alert_on,
+                                                            "{label}"
+                                                        }
                                                     }
                                                 }
                                             }
@@ -1657,79 +1752,81 @@ fn EffectEditForm(
                                         }
                                     }
 
-                                    div { class: "form-row-hz",
-                                        label { class: "flex items-center",
-                                            "Audio Offset"
-                                            span {
-                                                class: "help-icon",
-                                                title: "When to play the sound relative to effect expiration",
-                                                "?"
-                                            }
-                                        }
-                                        select {
-                                            class: "select-inline",
-                                            style: "width: 120px;",
-                                            value: "{draft().audio.offset}",
-                                            onchange: move |e| {
-                                                if let Ok(val) = e.value().parse::<u8>() {
-                                                    let mut d = draft();
-                                                    d.audio.offset = val;
-                                                    draft.set(d);
+                                    if !draft().is_alert {
+                                        div { class: "form-row-hz",
+                                            label { class: "flex items-center",
+                                                "Audio Offset"
+                                                span {
+                                                    class: "help-icon",
+                                                    title: "When to play the sound relative to effect expiration",
+                                                    "?"
                                                 }
-                                            },
-                                            option { value: "0", "On expiration" }
-                                            option { value: "1", "1s before" }
-                                            option { value: "2", "2s before" }
-                                            option { value: "3", "3s before" }
-                                            option { value: "4", "4s before" }
-                                            option { value: "5", "5s before" }
-                                            option { value: "6", "6s before" }
-                                            option { value: "7", "7s before" }
-                                            option { value: "8", "8s before" }
-                                            option { value: "9", "9s before" }
-                                            option { value: "10", "10s before" }
-                                        }
-                                    }
-
-                                    div { class: "form-row-hz",
-                                        label { class: "flex items-center",
-                                            "Voice"
-                                            span {
-                                                class: "help-icon",
-                                                title: "Voice countdown starting at the specified seconds remaining",
-                                                "?"
                                             }
-                                        }
-                                        div { class: "flex items-center gap-md",
                                             select {
                                                 class: "select-inline",
-                                                style: "width: 80px;",
-                                                value: "{draft().audio.countdown_start}",
+                                                style: "width: 120px;",
+                                                value: "{draft().audio.offset}",
                                                 onchange: move |e| {
                                                     if let Ok(val) = e.value().parse::<u8>() {
                                                         let mut d = draft();
-                                                        d.audio.countdown_start = val;
+                                                        d.audio.offset = val;
                                                         draft.set(d);
                                                     }
                                                 },
-                                                option { value: "0", "Off" }
-                                                option { value: "3", "3s" }
-                                                option { value: "5", "5s" }
-                                                option { value: "10", "10s" }
+                                                option { value: "0", "On expiration" }
+                                                option { value: "1", "1s before" }
+                                                option { value: "2", "2s before" }
+                                                option { value: "3", "3s before" }
+                                                option { value: "4", "4s before" }
+                                                option { value: "5", "5s before" }
+                                                option { value: "6", "6s before" }
+                                                option { value: "7", "7s before" }
+                                                option { value: "8", "8s before" }
+                                                option { value: "9", "9s before" }
+                                                option { value: "10", "10s before" }
                                             }
-                                            select {
-                                                class: "select-inline",
-                                                style: "width: 100px;",
-                                                value: "{draft().audio.countdown_voice.clone().unwrap_or_else(|| \"Amy\".to_string())}",
-                                                onchange: move |e| {
-                                                    let mut d = draft();
-                                                    d.audio.countdown_voice = if e.value() == "Amy" { None } else { Some(e.value()) };
-                                                    draft.set(d);
-                                                },
-                                                option { value: "Amy", "Amy" }
-                                                option { value: "Jim", "Jim" }
-                                                option { value: "Yolo", "Yolo" }
-                                                option { value: "Nerevar", "Nerevar" }
+                                        }
+
+                                        div { class: "form-row-hz",
+                                            label { class: "flex items-center",
+                                                "Voice"
+                                                span {
+                                                    class: "help-icon",
+                                                    title: "Voice countdown starting at the specified seconds remaining",
+                                                    "?"
+                                                }
+                                            }
+                                            div { class: "flex items-center gap-md",
+                                                select {
+                                                    class: "select-inline",
+                                                    style: "width: 80px;",
+                                                    value: "{draft().audio.countdown_start}",
+                                                    onchange: move |e| {
+                                                        if let Ok(val) = e.value().parse::<u8>() {
+                                                            let mut d = draft();
+                                                            d.audio.countdown_start = val;
+                                                            draft.set(d);
+                                                        }
+                                                    },
+                                                    option { value: "0", "Off" }
+                                                    option { value: "3", "3s" }
+                                                    option { value: "5", "5s" }
+                                                    option { value: "10", "10s" }
+                                                }
+                                                select {
+                                                    class: "select-inline",
+                                                    style: "width: 100px;",
+                                                    value: "{draft().audio.countdown_voice.clone().unwrap_or_else(|| \"Amy\".to_string())}",
+                                                    onchange: move |e| {
+                                                        let mut d = draft();
+                                                        d.audio.countdown_voice = if e.value() == "Amy" { None } else { Some(e.value()) };
+                                                        draft.set(d);
+                                                    },
+                                                    option { value: "Amy", "Amy" }
+                                                    option { value: "Jim", "Jim" }
+                                                    option { value: "Yolo", "Yolo" }
+                                                    option { value: "Nerevar", "Nerevar" }
+                                                }
                                             }
                                         }
                                     }

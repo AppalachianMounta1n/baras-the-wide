@@ -88,6 +88,41 @@ pub async fn hide_all_overlays(
     OverlayManager::hide_all(&state, &service).await
 }
 
+/// Apply or remove the "not live" auto-hide based on current session state.
+/// Called by the frontend when the user toggles the hide_when_not_live setting.
+#[tauri::command]
+pub async fn apply_not_live_auto_hide(
+    state: State<'_, SharedOverlayState>,
+    service: State<'_, ServiceHandle>,
+) -> Result<bool, String> {
+    let config = service.config().await;
+    let shared = &service.shared;
+
+    if config.overlay_settings.hide_when_not_live {
+        // Setting was just enabled — check if we should hide now
+        if shared.is_session_not_live().await {
+            let currently_visible = state
+                .lock()
+                .ok()
+                .is_some_and(|s| s.overlays_visible && !s.overlays.is_empty());
+
+            if currently_visible {
+                shared.activate_not_live_hiding();
+                let _ = OverlayManager::temporary_hide_all(&state, &service).await;
+                return Ok(true);
+            }
+        }
+    } else {
+        // Setting was just disabled — restore if we were hiding
+        if shared.deactivate_not_live_hiding() {
+            let _ = OverlayManager::temporary_show_all(&state, &service).await;
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Move Mode and Status
 // ─────────────────────────────────────────────────────────────────────────────
@@ -223,7 +258,9 @@ pub async fn refresh_overlay_settings(
 pub async fn preview_overlay_settings(
     settings: OverlaySettings,
     overlay_state: State<'_, SharedOverlayState>,
+    service: State<'_, ServiceHandle>,
 ) -> Result<bool, String> {
+    let european = service.config().await.european_number_format;
     let overlays: Vec<_> = {
         let s = overlay_state.lock().map_err(|e| e.to_string())?;
         s.all_overlays()
@@ -233,7 +270,7 @@ pub async fn preview_overlay_settings(
     };
 
     for (kind, tx) in overlays {
-        let config_update = OverlayManager::create_config_update(kind, &settings);
+        let config_update = OverlayManager::create_config_update(kind, &settings, european);
         let _ = tx.send(OverlayCommand::UpdateConfig(config_update)).await;
     }
 

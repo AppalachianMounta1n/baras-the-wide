@@ -487,6 +487,37 @@ fn check_signal_based_trigger(
             }
         }),
 
+        // Healing taken - delegate ID matching, then check source/target filters
+        Trigger::HealingTaken { .. } => signals.iter().any(|s| {
+            if let GameSignal::HealingDone {
+                ability_id,
+                ability_name,
+                source_npc_id,
+                source_name,
+                target_npc_id,
+                target_name,
+                ..
+            } = s
+            {
+                let ability_name_str = crate::context::resolve(*ability_name);
+
+                if !trigger.matches_healing_taken(*ability_id as u64, Some(ability_name_str)) {
+                    return false;
+                }
+
+                check_signal_source_target(
+                    trigger,
+                    entities,
+                    *source_npc_id,
+                    *source_name,
+                    *target_npc_id,
+                    *target_name,
+                )
+            } else {
+                false
+            }
+        }),
+
         // Counter-specific: never trigger
         Trigger::Never => false,
 

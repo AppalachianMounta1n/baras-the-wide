@@ -10,8 +10,7 @@
 //! 1. `EffectRemoved` signal received from game (authoritative)
 //! 2. Duration timer expires (fallback for missed/missing remove events)
 //!
-//! After removal, a brief fade-out animation plays before the effect
-//! is deleted from the tracker.
+//! After removal, the effect is immediately deleted from the tracker.
 
 use std::time::{Duration, Instant};
 
@@ -19,9 +18,6 @@ use chrono::NaiveDateTime;
 
 use super::DisplayTarget;
 use crate::context::IStr;
-
-/// How long to show a faded effect after removal before deleting
-const FADE_DURATION: Duration = Duration::from_secs(2);
 
 /// An active effect instance on a specific entity
 ///
@@ -75,10 +71,10 @@ pub struct ActiveEffect {
     /// Total duration (cached for fill calculations)
     pub duration: Option<Duration>,
 
-    // ─── Removal state (system time for UI) ─────────────────────────────────
-    /// When the effect was removed (system time)
+    // ─── Removal state ─────────────────────────────────────────────────────
+    /// When the effect was removed (system time).
     /// Set by either EffectRemoved signal OR duration expiry.
-    /// Used for fade-out animation. None = still active.
+    /// Effect is immediately deleted from tracker on next tick.
     pub removed_at: Option<Instant>,
 
     // ─── State ──────────────────────────────────────────────────────────────
@@ -137,6 +133,15 @@ pub struct ActiveEffect {
 
     /// Whether to fire alert on expiration (vs on apply)
     pub alert_on_expire: bool,
+
+    /// Whether this effect was expired by the app's duration timer (heuristic)
+    /// rather than an authoritative EffectRemoved signal.
+    ///
+    /// Timer-expired effects remain in `active_effects` so that `refresh_abilities`
+    /// can still revive them (the game duration may exceed our estimate). They are
+    /// hidden from display and alerts fire normally on timer expiry.
+    /// After a grace period, the effect is hard-removed for GC.
+    pub timer_expired: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -217,6 +222,7 @@ impl ActiveEffect {
             on_end_alert_fired: false,
             alert_text,
             alert_on_expire,
+            timer_expired: false,
         }
     }
 
@@ -244,7 +250,34 @@ impl ActiveEffect {
 
         // Clear removed state if we were fading out (effect came back)
         self.removed_at = None;
+        // Clear timer-expired state (refresh revives the effect)
+        self.timer_expired = false;
         // Reset on-end alert so it can fire again
+        self.on_end_alert_fired = false;
+    }
+
+    /// Refresh only the duration (without updating last_refreshed_at)
+    ///
+    /// Used by ModifyCharges with is_refreshed_on_modify. Unlike `refresh()`,
+    /// this does NOT update `last_refreshed_at`, so the stale-removal window
+    /// (which guards against DOT reapplication) isn't affected.
+    pub fn refresh_duration(&mut self, event_timestamp: NaiveDateTime, duration: Duration) {
+        self.expires_at =
+            Some(event_timestamp + chrono::Duration::milliseconds(duration.as_millis() as i64));
+        self.duration = Some(duration);
+
+        let now_system = chrono::Local::now().naive_local();
+        let lag_ms = now_system
+            .signed_duration_since(event_timestamp)
+            .num_milliseconds()
+            .max(0) as u64;
+        let lag_duration = Duration::from_millis(lag_ms);
+
+        let now = Instant::now();
+        self.applied_instant = now.checked_sub(lag_duration).unwrap_or(now);
+
+        self.removed_at = None;
+        self.timer_expired = false;
         self.on_end_alert_fired = false;
     }
 
@@ -276,25 +309,6 @@ impl ActiveEffect {
     /// Check if the effect is still active (not removed and not expired)
     pub fn is_active(&self, current_game_time: NaiveDateTime) -> bool {
         self.removed_at.is_none() && !self.has_duration_expired(current_game_time)
-    }
-
-    /// Check if the effect has finished fading and should be deleted
-    pub fn should_remove(&self) -> bool {
-        self.removed_at
-            .map(|t| t.elapsed() > FADE_DURATION)
-            .unwrap_or(false)
-    }
-
-    /// Get opacity for rendering (1.0 = full, fades to 0.0 after removal)
-    pub fn opacity(&self) -> f32 {
-        match self.removed_at {
-            None => 1.0,
-            Some(removed) => {
-                let elapsed = removed.elapsed().as_secs_f32();
-                let fade_secs = FADE_DURATION.as_secs_f32();
-                (1.0 - elapsed / fade_secs).max(0.0)
-            }
-        }
     }
 
     /// Get fill percentage for countdown display (1.0 = full, 0.0 = expired)
@@ -471,8 +485,8 @@ impl ActiveEffect {
     ///
     /// Uses BASE duration (excludes ready state time)
     pub fn check_expiration_audio(&mut self) -> bool {
-        // Don't play if effect was manually removed (cleansed, clicked off, etc.)
-        if self.removed_at.is_some() {
+        // Audio must be enabled for this effect
+        if !self.audio_enabled {
             return false;
         }
 
@@ -489,6 +503,12 @@ impl ActiveEffect {
         // Already fired
         if self.audio_played {
             return false;
+        }
+
+        // Fire if effect was removed early (charges depleted, cleansed, etc.)
+        if self.removed_at.is_some() {
+            self.audio_played = true;
+            return true;
         }
 
         // Use base remaining (excludes ready state)
@@ -508,16 +528,18 @@ impl ActiveEffect {
     /// Returns Some(text) when alert should fire, None otherwise.
     /// Uses same window as audio expiration [0, 0.3)
     pub fn check_expiration_alert(&mut self) -> Option<&str> {
-        if self.removed_at.is_some() {
-            return None;
-        }
-
         if !self.alert_on_expire {
             return None;
         }
 
         if self.on_end_alert_fired {
             return None;
+        }
+
+        // Fire if effect was removed early (charges depleted, cleansed, etc.)
+        if self.removed_at.is_some() {
+            self.on_end_alert_fired = true;
+            return self.alert_text.as_deref();
         }
 
         let remaining = self.remaining_base_secs_realtime();

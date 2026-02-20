@@ -150,6 +150,12 @@ pub async fn toggle_visibility(currently_visible: bool) -> bool {
     }
 }
 
+/// Apply or remove the "not live" auto-hide based on current session state.
+/// Called when the user toggles the hide_when_not_live setting.
+pub async fn apply_not_live_auto_hide() {
+    invoke("apply_not_live_auto_hide", JsValue::NULL).await;
+}
+
 /// Toggle move mode for all overlays
 pub async fn toggle_move_mode() -> Result<bool, String> {
     let result = invoke("toggle_move_mode", JsValue::NULL).await;
@@ -861,8 +867,9 @@ pub async fn install_update() -> Result<(), String> {
 pub use baras_types::{
     AbilityBreakdown, BreakdownMode, CombatLogFilters, CombatLogFindMatch, CombatLogRow,
     DamageTakenSummary, DataTab, EffectChartData, EffectWindow, EncounterTimeline,
-    EntityBreakdown, GcdSlot, GroupedEntityNames, HpPoint, PhaseSegment, PlayerDeath,
-    RaidOverviewRow, RotationAnalysis, RotationCycle, RotationEvent, TimeRange, TimeSeriesPoint,
+    EntityBreakdown, GcdSlot, GroupedEntityNames, HpPoint, NpcHealthRow, PhaseSegment,
+    PlayerDeath, RaidOverviewRow, RotationAnalysis, RotationCycle, RotationEvent, TimeRange,
+    TimeSeriesPoint,
 };
 
 /// Query ability breakdown for an encounter and data tab.
@@ -967,6 +974,27 @@ pub async fn query_raid_overview(
         js_set(&obj, "durationSecs", &JsValue::NULL);
     }
     let result = invoke("query_raid_overview", obj.into()).await;
+    from_js(result)
+}
+
+/// Query final health state of all NPCs in an encounter.
+pub async fn query_npc_health(
+    encounter_idx: Option<u32>,
+    time_range: Option<&TimeRange>,
+) -> Option<Vec<NpcHealthRow>> {
+    let obj = js_sys::Object::new();
+    if let Some(idx) = encounter_idx {
+        js_set(&obj, "encounterIdx", &JsValue::from_f64(idx as f64));
+    } else {
+        js_set(&obj, "encounterIdx", &JsValue::NULL);
+    }
+    if let Some(tr) = time_range {
+        let tr_js = serde_wasm_bindgen::to_value(tr).unwrap_or(JsValue::NULL);
+        js_set(&obj, "timeRange", &tr_js);
+    } else {
+        js_set(&obj, "timeRange", &JsValue::NULL);
+    }
+    let result = invoke("query_npc_health", obj.into()).await;
     from_js(result)
 }
 

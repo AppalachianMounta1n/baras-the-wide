@@ -150,6 +150,7 @@ fn PhaseRow(
             // Expanded content
             if expanded {
                 {
+                    let all_phases_for_save = all_phases.clone();
                     let all_phases_for_delete = all_phases.clone();
                     let bwp_for_save = boss_with_path.clone();
                     let bwp_for_delete = boss_with_path.clone();
@@ -161,6 +162,12 @@ fn PhaseRow(
                                 encounter_data: encounter_data,
                                 on_dirty: move |dirty: bool| is_dirty.set(dirty),
                                 on_save: move |updated: PhaseDefinition| {
+                                    // Update parent state synchronously so props refresh and dirty indicator clears
+                                    let mut current = all_phases_for_save.clone();
+                                    if let Some(idx) = current.iter().position(|p| p.id == updated.id) {
+                                        current[idx] = updated.clone();
+                                        on_change.call(current);
+                                    }
                                     on_status.call(("Saving...".to_string(), false));
                                     let boss_id = bwp_for_save.boss.id.clone();
                                     let file_path = bwp_for_save.file_path.clone();

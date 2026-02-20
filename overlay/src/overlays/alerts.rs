@@ -78,6 +78,7 @@ pub struct AlertsOverlay {
     config: AlertsOverlayConfig,
     /// Active alerts (managed internally, newest first)
     entries: Vec<AlertEntry>,
+    european_number_format: bool,
 }
 
 impl AlertsOverlay {
@@ -95,6 +96,7 @@ impl AlertsOverlay {
             frame,
             config,
             entries: Vec::new(),
+            european_number_format: false,
         })
     }
 
@@ -211,9 +213,10 @@ impl Overlay for AlertsOverlay {
     }
 
     fn update_config(&mut self, config: OverlayConfigUpdate) {
-        if let OverlayConfigUpdate::Alerts(alerts_config, alpha) = config {
+        if let OverlayConfigUpdate::Alerts(alerts_config, alpha, european) = config {
             self.set_config(alerts_config);
             self.set_background_alpha(alpha);
+            self.european_number_format = european;
         }
     }
 

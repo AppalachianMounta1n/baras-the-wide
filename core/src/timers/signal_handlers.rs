@@ -496,6 +496,63 @@ pub(super) fn handle_damage_taken(
     );
 }
 
+/// Handle healing taken - check for HealingTaken triggers
+pub(super) fn handle_healing_taken(
+    manager: &mut TimerManager,
+    encounter: Option<&CombatEncounter>,
+    ability_id: i64,
+    ability_name: IStr,
+    source_id: i64,
+    source_type: EntityType,
+    source_name: IStr,
+    source_npc_id: i64,
+    target_id: i64,
+    target_type: EntityType,
+    target_name: IStr,
+    target_npc_id: i64,
+    timestamp: NaiveDateTime,
+) {
+    let ability_id = ability_id as u64;
+    let ability_name_str = crate::context::resolve(ability_name);
+
+    let matching: Vec<_> = manager
+        .definitions
+        .values()
+        .filter(|d| {
+            d.matches_healing_taken(ability_id, Some(&ability_name_str))
+                && manager.is_definition_active(d, encounter)
+                && manager.matches_source_target_filters(
+                    &d.trigger,
+                    get_entities(encounter),
+                    source_id,
+                    source_type,
+                    source_name,
+                    source_npc_id,
+                    target_id,
+                    target_type,
+                    target_name,
+                    target_npc_id,
+                )
+        })
+        .cloned()
+        .collect();
+
+    for def in matching {
+        let instance_id = if def.per_target {
+            Some(target_id)
+        } else {
+            None
+        };
+        manager.start_timer(&def, timestamp, instance_id);
+    }
+
+    // Check for cancel triggers on healing taken
+    manager.cancel_timers_matching(
+        |t| matches!(t, TimerTrigger::HealingTaken { abilities, .. } if abilities.iter().any(|s| s.matches(ability_id, Some(&ability_name_str)))),
+        &format!("healing taken from {}", ability_name_str)
+    );
+}
+
 /// Handle time elapsed - check for TimeElapsed triggers
 pub(super) fn handle_time_elapsed(
     manager: &mut TimerManager,

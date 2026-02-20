@@ -11,6 +11,7 @@ default = []
 
 [dependencies]
 baras-core = { path = "../core" }
+baras-types = { path = "../types" }
 
 # Rendering (cross-platform)
 tiny-skia = "0.11"

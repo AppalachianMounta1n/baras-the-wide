@@ -640,6 +640,8 @@ pub struct EffectListItem {
 
     // Alerts
     #[serde(default)]
+    pub is_alert: bool,
+    #[serde(default)]
     pub alert_text: Option<String>,
     #[serde(default)]
     pub alert_on: AlertTrigger,

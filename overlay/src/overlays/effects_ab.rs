@@ -11,8 +11,8 @@ use super::{Overlay, OverlayConfigUpdate, OverlayData};
 use crate::frame::OverlayFrame;
 use crate::platform::{OverlayConfig, PlatformError};
 use crate::utils::color_from_rgba;
-use crate::widgets::Header;
 use crate::widgets::colors;
+use crate::widgets::Header;
 
 /// Cache for pre-scaled icons to avoid re-scaling every frame
 type ScaledIconCache = HashMap<(u64, u32), Vec<u8>>;
@@ -66,19 +66,8 @@ impl EffectABEntry {
     }
 
     /// Format remaining time
-    pub fn format_time(&self) -> String {
-        if self.remaining_secs <= 0.0 {
-            return "0".to_string();
-        }
-        let secs = self.remaining_secs;
-        if secs >= 60.0 {
-            let mins = (secs / 60.0).floor() as u32;
-            format!("{}m", mins)
-        } else if secs >= 10.0 {
-            format!("{:.0}", secs)
-        } else {
-            format!("{:.1}", secs)
-        }
+    pub fn format_time(&self, european: bool) -> String {
+        baras_types::formatting::format_countdown_compact(self.remaining_secs, "0", european)
     }
 }
 
@@ -102,6 +91,10 @@ pub struct EffectsABConfig {
     pub show_header: bool,
     /// Title to display in header
     pub header_title: String,
+    /// Font scale multiplier (1.0 - 2.0, default 1.0)
+    pub font_scale: f32,
+    /// When true, background shrinks to fit content instead of filling the window
+    pub dynamic_background: bool,
 }
 
 impl Default for EffectsABConfig {
@@ -115,6 +108,8 @@ impl Default for EffectsABConfig {
             stack_priority: false,
             show_header: false,
             header_title: String::new(),
+            font_scale: 1.0,
+            dynamic_background: true,
         }
     }
 }
@@ -138,6 +133,7 @@ pub struct EffectsABOverlay {
     last_rendered: Vec<(u64, String, u8)>,
     /// Label for this overlay instance
     _label: String,
+    european_number_format: bool,
 }
 
 impl EffectsABOverlay {
@@ -160,6 +156,7 @@ impl EffectsABOverlay {
             icon_cache: HashMap::new(),
             last_rendered: Vec::new(),
             _label: label.to_string(),
+            european_number_format: false,
         })
     }
 
@@ -217,7 +214,13 @@ impl EffectsABOverlay {
             .effects
             .iter()
             .take(max_display)
-            .map(|e| (e.effect_id, e.format_time(), e.stacks))
+            .map(|e| {
+                (
+                    e.effect_id,
+                    e.format_time(self.european_number_format),
+                    e.stacks,
+                )
+            })
             .collect();
 
         // Skip render if nothing changed
@@ -228,7 +231,8 @@ impl EffectsABOverlay {
 
         let padding = self.frame.scaled(BASE_PADDING);
         let spacing = self.frame.scaled(BASE_SPACING);
-        let font_size = self.frame.scaled(BASE_FONT_SIZE);
+        let font_scale = self.config.font_scale.clamp(1.0, 2.0);
+        let font_size = self.frame.scaled(BASE_FONT_SIZE * font_scale);
         let icon_size = self.frame.scaled(self.config.icon_size as f32);
         let scale = self.frame.scale_factor();
         let header_font_size = font_size * 1.4;
@@ -240,7 +244,30 @@ impl EffectsABOverlay {
             0.0
         };
 
-        self.frame.begin_frame();
+        // Count visible entries for dynamic background
+        let num_visible = self.data.effects.iter().take(max_display).count();
+
+        // Compute content height for dynamic background
+        let content_height = if num_visible == 0 {
+            if self.config.show_header {
+                padding * 2.0 + header_space
+            } else {
+                0.0
+            }
+        } else {
+            let mut h = padding * 2.0 + header_space + icon_size;
+            if self.config.show_effect_names {
+                let name_font_size = font_size * 0.85;
+                h += name_font_size + 2.0;
+            }
+            h
+        };
+
+        if self.config.dynamic_background {
+            self.frame.begin_frame_with_content_height(content_height);
+        } else {
+            self.frame.begin_frame();
+        }
 
         // Render header if enabled
         if self.config.show_header && !self.config.header_title.is_empty() {
@@ -312,15 +339,8 @@ impl EffectsABOverlay {
                 let name_x = x + (icon_size - name_width) / 2.0;
                 let name_y = y + icon_size + name_font_size + 2.0;
 
-                self.frame.draw_text(
-                    &name,
-                    name_x + 1.0,
-                    name_y + 1.0,
-                    name_font_size,
-                    colors::text_shadow(),
-                );
                 self.frame
-                    .draw_text(&name, name_x, name_y, name_font_size, colors::white());
+                    .draw_text_glowed(&name, name_x, name_y, name_font_size, colors::white());
                 text_y_offset = name_font_size + 2.0;
             }
 
@@ -332,19 +352,12 @@ impl EffectsABOverlay {
                 let source_x = x + (icon_size - source_width) / 2.0;
                 let source_y = y + icon_size + source_font_size + 2.0 + text_y_offset;
 
-                self.frame.draw_text(
-                    &source,
-                    source_x + 1.0,
-                    source_y + 1.0,
-                    source_font_size,
-                    colors::text_shadow(),
-                );
-                self.frame.draw_text(
+                self.frame.draw_text_glowed(
                     &source,
                     source_x,
                     source_y,
                     source_font_size,
-                    colors::label_dim(),
+                    colors::white(),
                 );
             }
 
@@ -364,7 +377,13 @@ impl EffectsABOverlay {
             .effects
             .iter()
             .take(max_display)
-            .map(|e| (e.effect_id, e.format_time(), e.stacks))
+            .map(|e| {
+                (
+                    e.effect_id,
+                    e.format_time(self.european_number_format),
+                    e.stacks,
+                )
+            })
             .collect();
 
         // Skip render if nothing changed
@@ -375,7 +394,8 @@ impl EffectsABOverlay {
 
         let padding = self.frame.scaled(BASE_PADDING);
         let row_spacing = self.frame.scaled(BASE_SPACING);
-        let font_size = self.frame.scaled(BASE_FONT_SIZE);
+        let font_scale = self.config.font_scale.clamp(1.0, 2.0);
+        let font_size = self.frame.scaled(BASE_FONT_SIZE * font_scale);
         let icon_size = self.frame.scaled(self.config.icon_size as f32);
         let row_height = icon_size + row_spacing;
         let scale = self.frame.scale_factor();
@@ -388,7 +408,25 @@ impl EffectsABOverlay {
             0.0
         };
 
-        self.frame.begin_frame();
+        // Count visible entries for dynamic background
+        let num_visible = self.data.effects.iter().take(max_display).count();
+
+        // Compute content height for dynamic background
+        let content_height = if num_visible == 0 {
+            if self.config.show_header {
+                padding * 2.0 + header_space
+            } else {
+                0.0
+            }
+        } else {
+            padding * 2.0 + header_space + num_visible as f32 * row_height
+        };
+
+        if self.config.dynamic_background {
+            self.frame.begin_frame_with_content_height(content_height);
+        } else {
+            self.frame.begin_frame();
+        }
 
         // Render header if enabled
         if self.config.show_header && !self.config.header_title.is_empty() {
@@ -445,28 +483,11 @@ impl EffectsABOverlay {
             self.frame
                 .stroke_rounded_rect(x, y, icon_size, icon_size, 3.0, 1.0, colors::white());
 
-            // Stack count in corner
-            if effect.stacks >= 1 {
-                let stack_text = format!("{}", effect.stacks);
-                let stack_font_size = font_size * 0.9;
-                let stack_x =
-                    x + icon_size - self.frame.measure_text(&stack_text, stack_font_size).0 - 2.0;
-                let stack_y = y + stack_font_size + 2.0;
-
-                self.frame.draw_text(
-                    &stack_text,
-                    stack_x + 1.0,
-                    stack_y + 1.0,
-                    stack_font_size,
-                    colors::text_shadow(),
-                );
-                self.frame.draw_text(
-                    &stack_text,
-                    stack_x,
-                    stack_y,
-                    stack_font_size,
-                    colors::effect_buff(),
-                );
+            // Stack priority vs normal mode
+            if self.config.stack_priority && effect.stacks >= 1 {
+                self.draw_stack_priority(effect, x, y, icon_size, font_size);
+            } else {
+                self.draw_normal_mode(effect, x, y, icon_size, font_size);
             }
 
             // Text to the right of icon
@@ -476,38 +497,43 @@ impl EffectsABOverlay {
             if self.config.show_effect_names {
                 // Effect name on top
                 let name_y = text_y - font_size * 0.3;
-                self.frame
-                    .draw_text(&effect.name, text_x, name_y, font_size, colors::white());
+                self.frame.draw_text_glowed(
+                    &effect.name,
+                    text_x,
+                    name_y,
+                    font_size,
+                    colors::white(),
+                );
 
                 // Countdown below
                 if self.config.show_countdown && effect.total_secs > 0.0 {
-                    let time_text = effect.format_time();
+                    let time_text = effect.format_time(self.european_number_format);
                     let time_y = name_y + font_size + 2.0;
-                    self.frame.draw_text(
+                    self.frame.draw_text_glowed(
                         &time_text,
                         text_x,
                         time_y,
                         font_size * 0.9,
-                        colors::label_dim(),
+                        colors::white(),
                     );
 
                     // Source name below countdown
                     if effect.display_source && !effect.source_name.is_empty() {
                         let source_font_size = font_size * 0.8;
-                        self.frame.draw_text(
+                        self.frame.draw_text_glowed(
                             &effect.source_name,
                             text_x,
                             time_y + font_size * 0.9 + 2.0,
                             source_font_size,
-                            colors::label_dim(),
+                            colors::white(),
                         );
                     }
                 }
             } else {
                 // Just countdown centered
                 if self.config.show_countdown && effect.total_secs > 0.0 {
-                    let time_text = effect.format_time();
-                    self.frame.draw_text(
+                    let time_text = effect.format_time(self.european_number_format);
+                    self.frame.draw_text_glowed(
                         &time_text,
                         text_x,
                         text_y + font_size / 3.0,
@@ -518,12 +544,12 @@ impl EffectsABOverlay {
                     // Source name below countdown
                     if effect.display_source && !effect.source_name.is_empty() {
                         let source_font_size = font_size * 0.8;
-                        self.frame.draw_text(
+                        self.frame.draw_text_glowed(
                             &effect.source_name,
                             text_x,
                             text_y + font_size / 3.0 + font_size + 2.0,
                             source_font_size,
-                            colors::label_dim(),
+                            colors::white(),
                         );
                     }
                 }
@@ -592,15 +618,7 @@ impl EffectsABOverlay {
         let text_x = x + (icon_size - text_width) / 2.0;
         let text_y = y + icon_size / 2.0 + stack_font_size / 3.0;
 
-        // Shadow
-        self.frame.draw_text(
-            &stack_text,
-            text_x + 1.0,
-            text_y + 1.0,
-            stack_font_size,
-            colors::text_shadow(),
-        );
-        self.frame.draw_text(
+        self.frame.draw_text_glowed(
             &stack_text,
             text_x,
             text_y,
@@ -610,25 +628,18 @@ impl EffectsABOverlay {
 
         // Timer small in top-right corner
         if self.config.show_countdown && effect.total_secs > 0.0 {
-            let time_text = effect.format_time();
-            let time_font_size = font_size * 0.8;
+            let time_text = effect.format_time(self.european_number_format);
+            let time_font_size = font_size * 0.9;
             let time_x =
                 x + icon_size - self.frame.measure_text(&time_text, time_font_size).0 - 2.0;
             let time_y = y + time_font_size + 2.0;
 
-            self.frame.draw_text(
-                &time_text,
-                time_x + 1.0,
-                time_y + 1.0,
-                time_font_size,
-                colors::text_shadow(),
-            );
-            self.frame.draw_text(
+            self.frame.draw_text_glowed(
                 &time_text,
                 time_x,
                 time_y,
                 time_font_size,
-                colors::label_dim(),
+                colors::icon_countdown(),
             );
         }
     }
@@ -643,43 +654,34 @@ impl EffectsABOverlay {
         font_size: f32,
     ) {
         if self.config.show_countdown && effect.total_secs > 0.0 {
-            let time_text = effect.format_time();
+            let time_text = effect.format_time(self.european_number_format);
             let text_width = self.frame.measure_text(&time_text, font_size).0;
             let text_x = x + (icon_size - text_width) / 2.0;
-            let text_y = y + icon_size / 2.0 + font_size / 3.0;
+            let text_y = y + icon_size / 2.0 + font_size * 0.4;
 
-            self.frame.draw_text(
+            self.frame.draw_text_glowed(
                 &time_text,
-                text_x + 1.0,
-                text_y + 1.0,
+                text_x,
+                text_y,
                 font_size,
-                colors::text_shadow(),
+                colors::icon_countdown(),
             );
-            self.frame
-                .draw_text(&time_text, text_x, text_y, font_size, colors::white());
         }
 
         // Stack count in bottom-right corner
         if effect.stacks >= 1 {
             let stack_text = format!("{}", effect.stacks);
-            let stack_font_size = font_size * 1.3;
+            let stack_font_size = font_size * 1.4;
             let stack_x =
                 x + icon_size - self.frame.measure_text(&stack_text, stack_font_size).0 - 2.0;
-            let stack_y = y + icon_size - 2.0;
+            let stack_y = y + icon_size - 3.0;
 
-            self.frame.draw_text(
-                &stack_text,
-                stack_x + 1.0,
-                stack_y + 1.0,
-                stack_font_size,
-                colors::text_shadow(),
-            );
-            self.frame.draw_text(
+            self.frame.draw_text_glowed(
                 &stack_text,
                 stack_x,
                 stack_y,
                 stack_font_size,
-                colors::white(),
+                colors::icon_countdown(),
             );
         }
     }
@@ -764,15 +766,8 @@ impl EffectsABOverlay {
                 let name_x = x + (icon_size - name_width) / 2.0;
                 let name_y = y + icon_size + name_font_size + 2.0;
 
-                self.frame.draw_text(
-                    name,
-                    name_x + 1.0,
-                    name_y + 1.0,
-                    name_font_size,
-                    colors::text_shadow(),
-                );
                 self.frame
-                    .draw_text(name, name_x, name_y, name_font_size, colors::white());
+                    .draw_text_glowed(name, name_x, name_y, name_font_size, colors::white());
             }
 
             x += icon_size + spacing;
@@ -843,24 +838,17 @@ impl EffectsABOverlay {
             // Stack count in corner
             if *stacks >= 1 {
                 let stack_text = format!("{}", stacks);
-                let stack_font_size = font_size * 0.9;
+                let stack_font_size = font_size * 1.0;
                 let stack_x =
                     x + icon_size - self.frame.measure_text(&stack_text, stack_font_size).0 - 2.0;
                 let stack_y = y + stack_font_size + 2.0;
 
-                self.frame.draw_text(
-                    &stack_text,
-                    stack_x + 1.0,
-                    stack_y + 1.0,
-                    stack_font_size,
-                    colors::text_shadow(),
-                );
-                self.frame.draw_text(
+                self.frame.draw_text_glowed(
                     &stack_text,
                     stack_x,
                     stack_y,
                     stack_font_size,
-                    colors::effect_buff(),
+                    colors::icon_countdown(),
                 );
             }
 
@@ -872,22 +860,22 @@ impl EffectsABOverlay {
                 // Effect name on top
                 let name_y = text_y - font_size * 0.3;
                 self.frame
-                    .draw_text("Effect", text_x, name_y, font_size, colors::white());
+                    .draw_text_glowed("Effect", text_x, name_y, font_size, colors::white());
 
                 // Countdown below
                 if self.config.show_countdown {
                     let time_y = name_y + font_size + 2.0;
-                    self.frame.draw_text(
+                    self.frame.draw_text_glowed(
                         time_text,
                         text_x,
                         time_y,
                         font_size * 0.9,
-                        colors::label_dim(),
+                        colors::white(),
                     );
                 }
             } else if self.config.show_countdown {
                 // Just countdown centered
-                self.frame.draw_text(
+                self.frame.draw_text_glowed(
                     time_text,
                     text_x,
                     text_y + font_size / 3.0,
@@ -918,14 +906,7 @@ impl EffectsABOverlay {
         let text_x = x + (icon_size - text_width) / 2.0;
         let text_y = y + icon_size / 2.0 + stack_font_size / 3.0;
 
-        self.frame.draw_text(
-            &stack_text,
-            text_x + 1.0,
-            text_y + 1.0,
-            stack_font_size,
-            colors::text_shadow(),
-        );
-        self.frame.draw_text(
+        self.frame.draw_text_glowed(
             &stack_text,
             text_x,
             text_y,
@@ -935,23 +916,16 @@ impl EffectsABOverlay {
 
         // Timer small in top-right corner
         if self.config.show_countdown {
-            let time_font_size = font_size * 0.8;
+            let time_font_size = font_size * 0.9;
             let time_x = x + icon_size - self.frame.measure_text(time_text, time_font_size).0 - 2.0;
             let time_y = y + time_font_size + 2.0;
 
-            self.frame.draw_text(
-                time_text,
-                time_x + 1.0,
-                time_y + 1.0,
-                time_font_size,
-                colors::text_shadow(),
-            );
-            self.frame.draw_text(
+            self.frame.draw_text_glowed(
                 time_text,
                 time_x,
                 time_y,
                 time_font_size,
-                colors::label_dim(),
+                colors::icon_countdown(),
             );
         }
     }
@@ -969,40 +943,31 @@ impl EffectsABOverlay {
         if self.config.show_countdown {
             let text_width = self.frame.measure_text(time_text, font_size).0;
             let text_x = x + (icon_size - text_width) / 2.0;
-            let text_y = y + icon_size / 2.0 + font_size / 3.0;
+            let text_y = y + icon_size / 2.0 + font_size * 0.4;
 
-            self.frame.draw_text(
+            self.frame.draw_text_glowed(
                 time_text,
-                text_x + 1.0,
-                text_y + 1.0,
+                text_x,
+                text_y,
                 font_size,
-                colors::text_shadow(),
+                colors::icon_countdown(),
             );
-            self.frame
-                .draw_text(time_text, text_x, text_y, font_size, colors::white());
         }
 
         // Stack count in bottom-right corner
         if stacks >= 1 {
             let stack_text = format!("{}", stacks);
-            let stack_font_size = font_size * 1.3;
+            let stack_font_size = font_size * 1.4;
             let stack_x =
                 x + icon_size - self.frame.measure_text(&stack_text, stack_font_size).0 - 2.0;
-            let stack_y = y + icon_size - 2.0;
+            let stack_y = y + icon_size - 3.0;
 
-            self.frame.draw_text(
-                &stack_text,
-                stack_x + 1.0,
-                stack_y + 1.0,
-                stack_font_size,
-                colors::text_shadow(),
-            );
-            self.frame.draw_text(
+            self.frame.draw_text_glowed(
                 &stack_text,
                 stack_x,
                 stack_y,
                 stack_font_size,
-                colors::white(),
+                colors::icon_countdown(),
             );
         }
     }
@@ -1059,10 +1024,11 @@ impl Overlay for EffectsABOverlay {
 
     fn update_config(&mut self, config: OverlayConfigUpdate) {
         match config {
-            OverlayConfigUpdate::EffectsA(cfg, alpha)
-            | OverlayConfigUpdate::EffectsB(cfg, alpha) => {
+            OverlayConfigUpdate::EffectsA(cfg, alpha, european)
+            | OverlayConfigUpdate::EffectsB(cfg, alpha, european) => {
                 self.set_config(cfg);
                 self.set_background_alpha(alpha);
+                self.european_number_format = european;
             }
             _ => {}
         }

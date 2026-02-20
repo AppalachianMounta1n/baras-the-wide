@@ -162,6 +162,7 @@ fn ChallengeRow(
             // Expanded content
             if expanded {
                 {
+                    let all_challenges_for_save = all_challenges.clone();
                     let boss_id_save = boss_id.clone();
                     let file_path_save = file_path.clone();
                     let boss_id_delete = boss_id.clone();
@@ -174,6 +175,12 @@ fn ChallengeRow(
                                 encounter_data: encounter_data,
                                 on_dirty: move |dirty: bool| is_dirty.set(dirty),
                                 on_save: move |updated: ChallengeDefinition| {
+                                    // Update parent state synchronously so props refresh and dirty indicator clears
+                                    let mut current = all_challenges_for_save.clone();
+                                    if let Some(idx) = current.iter().position(|c| c.id == updated.id) {
+                                        current[idx] = updated.clone();
+                                        on_change.call(current);
+                                    }
                                     let boss_id = boss_id_save.clone();
                                     let file_path = file_path_save.clone();
                                     let item = EncounterItem::Challenge(updated);

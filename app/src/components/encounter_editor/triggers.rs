@@ -382,6 +382,7 @@ pub fn SimpleTriggerEditor(
                         "effect_applied" => TimerTrigger::EffectApplied { effects: vec![], source: EntityFilter::default(), target: EntityFilter::default() },
                         "effect_removed" => TimerTrigger::EffectRemoved { effects: vec![], source: EntityFilter::default(), target: EntityFilter::default() },
                         "damage_taken" => TimerTrigger::DamageTaken { abilities: vec![], source: EntityFilter::default(), target: EntityFilter::default() },
+                        "healing_taken" => TimerTrigger::HealingTaken { abilities: vec![], source: EntityFilter::default(), target: EntityFilter::default() },
                         "timer_expires" => TimerTrigger::TimerExpires { timer_id: String::new() },
                         "timer_started" => TimerTrigger::TimerStarted { timer_id: String::new() },
                         "phase_entered" => TimerTrigger::PhaseEntered { phase_id: String::new() },
@@ -405,6 +406,7 @@ pub fn SimpleTriggerEditor(
                 option { value: "effect_applied", "Effect Applied" }
                 option { value: "effect_removed", "Effect Removed" }
                 option { value: "damage_taken", "Damage Taken" }
+                option { value: "healing_taken", "Healing Taken" }
                 option { value: "timer_expires", "Timer Expires" }
                 option { value: "timer_started", "Timer Started" }
                 option { value: "phase_entered", "Phase Entered" }
@@ -577,6 +579,45 @@ pub fn SimpleTriggerEditor(
                                 value: target,
                                 options: EntityFilter::target_options(),
                                 on_change: move |f| on_change.call(TimerTrigger::DamageTaken {
+                                    abilities: abilities_for_target.clone(),
+                                    source: source_for_target.clone(),
+                                    target: f,
+                                })
+                            }
+                        }
+                    },
+                    TimerTrigger::HealingTaken { abilities, source, target } => {
+                        let source_for_abilities = source.clone();
+                        let target_for_abilities = target.clone();
+                        let abilities_for_source = abilities.clone();
+                        let target_for_source = target.clone();
+                        let abilities_for_target = abilities.clone();
+                        let source_for_target = source.clone();
+                        rsx! {
+                            AbilitySelectorEditor {
+                                label: "Abilities",
+                                selectors: abilities,
+                                on_change: move |sels| on_change.call(TimerTrigger::HealingTaken {
+                                    abilities: sels,
+                                    source: source_for_abilities.clone(),
+                                    target: target_for_abilities.clone(),
+                                })
+                            }
+                            EntityFilterDropdown {
+                                label: "Source",
+                                value: source,
+                                options: EntityFilter::source_options(),
+                                on_change: move |f| on_change.call(TimerTrigger::HealingTaken {
+                                    abilities: abilities_for_source.clone(),
+                                    source: f,
+                                    target: target_for_source.clone(),
+                                })
+                            }
+                            EntityFilterDropdown {
+                                label: "Target",
+                                value: target,
+                                options: EntityFilter::target_options(),
+                                on_change: move |f| on_change.call(TimerTrigger::HealingTaken {
                                     abilities: abilities_for_target.clone(),
                                     source: source_for_target.clone(),
                                     target: f,
@@ -1208,6 +1249,7 @@ fn SimplePhaseTriggerEditor(
                         "effect_applied" => PhaseTrigger::EffectApplied { effects: vec![], source: EntityFilter::default(), target: EntityFilter::default() },
                         "effect_removed" => PhaseTrigger::EffectRemoved { effects: vec![], source: EntityFilter::default(), target: EntityFilter::default() },
                         "damage_taken" => PhaseTrigger::DamageTaken { abilities: vec![], source: EntityFilter::default(), target: EntityFilter::default() },
+                        "healing_taken" => PhaseTrigger::HealingTaken { abilities: vec![], source: EntityFilter::default(), target: EntityFilter::default() },
                         "counter_reaches" => PhaseTrigger::CounterReaches {
                             counter_id: String::new(),
                             value: 1,
@@ -1233,6 +1275,7 @@ fn SimplePhaseTriggerEditor(
                 option { value: "effect_applied", "Effect Applied" }
                 option { value: "effect_removed", "Effect Removed" }
                 option { value: "damage_taken", "Damage Taken" }
+                option { value: "healing_taken", "Healing Taken" }
                 option { value: "counter_reaches", "Counter Reaches" }
                 option { value: "time_elapsed", "Time Elapsed" }
                 option { value: "npc_appears", "NPC Appears" }
@@ -1476,6 +1519,45 @@ fn SimplePhaseTriggerEditor(
                             }
                         }
                     },
+                    PhaseTrigger::HealingTaken { abilities, source, target } => {
+                        let source_for_abilities = source.clone();
+                        let target_for_abilities = target.clone();
+                        let abilities_for_source = abilities.clone();
+                        let target_for_source = target.clone();
+                        let abilities_for_target = abilities.clone();
+                        let source_for_target = source.clone();
+                        rsx! {
+                            AbilitySelectorEditor {
+                                label: "Abilities",
+                                selectors: abilities,
+                                on_change: move |sels| on_change.call(PhaseTrigger::HealingTaken {
+                                    abilities: sels,
+                                    source: source_for_abilities.clone(),
+                                    target: target_for_abilities.clone(),
+                                })
+                            }
+                            EntityFilterDropdown {
+                                label: "Source",
+                                value: source,
+                                options: EntityFilter::source_options(),
+                                on_change: move |f| on_change.call(PhaseTrigger::HealingTaken {
+                                    abilities: abilities_for_source.clone(),
+                                    source: f,
+                                    target: target_for_source.clone(),
+                                })
+                            }
+                            EntityFilterDropdown {
+                                label: "Target",
+                                value: target,
+                                options: EntityFilter::target_options(),
+                                on_change: move |f| on_change.call(PhaseTrigger::HealingTaken {
+                                    abilities: abilities_for_target.clone(),
+                                    source: source_for_target.clone(),
+                                    target: f,
+                                })
+                            }
+                        }
+                    },
                     PhaseTrigger::CounterReaches { counter_id, value } => {
                         let available_counters = encounter_data.counter_ids();
                         rsx! {
@@ -1615,6 +1697,11 @@ pub fn CounterTriggerEditor(
                             source: EntityFilter::default(),
                             target: EntityFilter::default(),
                         },
+                        "healing_taken" => CounterTrigger::HealingTaken {
+                            abilities: vec![],
+                            source: EntityFilter::default(),
+                            target: EntityFilter::default(),
+                        },
                         "timer_expires" => CounterTrigger::TimerExpires {
                             timer_id: String::new(),
                         },
@@ -1653,6 +1740,7 @@ pub fn CounterTriggerEditor(
                 option { value: "effect_applied", "Effect Applied" }
                 option { value: "effect_removed", "Effect Removed" }
                 option { value: "damage_taken", "Damage Taken" }
+                option { value: "healing_taken", "Healing Taken" }
                 option { value: "timer_expires", "Timer Expires" }
                 option { value: "timer_started", "Timer Started" }
                 option { value: "phase_entered", "Phase Entered" }
@@ -1823,6 +1911,46 @@ pub fn CounterTriggerEditor(
                                 value: target,
                                 options: EntityFilter::target_options(),
                                 on_change: move |f| on_change.call(CounterTrigger::DamageTaken {
+                                    abilities: abilities_for_target.clone(),
+                                    source: source_for_target.clone(),
+                                    target: f,
+                                })
+                            }
+                        }
+                    },
+
+                    CounterTrigger::HealingTaken { abilities, source, target } => {
+                        let source_for_abilities = source.clone();
+                        let target_for_abilities = target.clone();
+                        let abilities_for_source = abilities.clone();
+                        let target_for_source = target.clone();
+                        let abilities_for_target = abilities.clone();
+                        let source_for_target = source.clone();
+                        rsx! {
+                            AbilitySelectorEditor {
+                                label: "Abilities",
+                                selectors: abilities,
+                                on_change: move |sels| on_change.call(CounterTrigger::HealingTaken {
+                                    abilities: sels,
+                                    source: source_for_abilities.clone(),
+                                    target: target_for_abilities.clone(),
+                                })
+                            }
+                            EntityFilterDropdown {
+                                label: "Source",
+                                value: source,
+                                options: EntityFilter::source_options(),
+                                on_change: move |f| on_change.call(CounterTrigger::HealingTaken {
+                                    abilities: abilities_for_source.clone(),
+                                    source: f,
+                                    target: target_for_source.clone(),
+                                })
+                            }
+                            EntityFilterDropdown {
+                                label: "Target",
+                                value: target,
+                                options: EntityFilter::target_options(),
+                                on_change: move |f| on_change.call(CounterTrigger::HealingTaken {
                                     abilities: abilities_for_target.clone(),
                                     source: source_for_target.clone(),
                                     target: f,

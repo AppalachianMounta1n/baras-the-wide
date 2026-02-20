@@ -11,7 +11,6 @@
 #![allow(clippy::too_many_arguments)]
 use crate::manager::OverlayWindow;
 use crate::platform::{OverlayConfig, PlatformError};
-use crate::utils::color_from_rgba;
 use crate::widgets::colors;
 use tiny_skia::Color;
 
@@ -93,6 +92,21 @@ impl OverlayFrame {
     /// Call this at the start of render(), then draw your content,
     /// then call `end_frame()`.
     pub fn begin_frame(&mut self) {
+        let height = self.window.height() as f32;
+        self.begin_frame_with_content_height(height);
+    }
+
+    /// Begin a new frame with the background sized to the given content height
+    /// instead of the full window height.
+    ///
+    /// Use this when the overlay knows its actual content height and wants the
+    /// background to only cover the content area. The rest of the window remains
+    /// fully transparent, giving the visual effect of auto-sizing without
+    /// actually resizing the window.
+    ///
+    /// In move mode, the background always covers the full window so the user
+    /// can see the true window bounds for dragging/resizing.
+    pub fn begin_frame_with_content_height(&mut self, content_height: f32) {
         let width = self.window.width() as f32;
         let height = self.window.height() as f32;
         let corner_radius = self.scaled(6.0);
@@ -110,10 +124,17 @@ impl OverlayFrame {
         };
 
         // Draw background if there's any alpha to show
+        // In move mode: always fill the full window so the user can see the bounds
+        // In normal mode: only fill to the content height
         if alpha > 0 {
             let bg_color = Color::from_rgba8(30, 30, 30, alpha);
+            let bg_height = if in_move_mode {
+                height
+            } else {
+                content_height.min(height)
+            };
             self.window
-                .fill_rounded_rect(0.0, 0.0, width, height, corner_radius, bg_color);
+                .fill_rounded_rect(0.0, 0.0, width, bg_height, corner_radius, bg_color);
         }
 
         // Draw border only in move mode (interactive AND drag enabled)
@@ -130,13 +151,13 @@ impl OverlayFrame {
             );
 
             // Draw overlay label centered in move mode
-            if let Some(ref label) = self.label {
+            if let Some(label) = self.label.clone() {
                 let font_size = self.scaled(12.0).max(10.0);
                 let label_color = Color::from_rgba8(180, 180, 180, 200);
-                let (text_width, text_height) = self.window.measure_text(label, font_size);
+                let (text_width, text_height) = self.window.measure_text(&label, font_size);
                 let x = (width - text_width) / 2.0;
                 let y = (height + text_height) / 2.0; // baseline-centered
-                self.window.draw_text(label, x, y, font_size, label_color);
+                self.draw_text_glowed(&label, x, y, font_size, label_color);
             }
         }
     }
@@ -185,11 +206,6 @@ impl OverlayFrame {
     // Drawing helpers (delegate to window)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// Draw text at the specified position
-    pub fn draw_text(&mut self, text: &str, x: f32, y: f32, font_size: f32, color: Color) {
-        self.window.draw_text(text, x, y, font_size, color);
-    }
-
     /// Draw text with bold/italic styling
     pub fn draw_text_styled(
         &mut self,
@@ -234,10 +250,9 @@ impl OverlayFrame {
         self.draw_text_styled(text, x, y, font_size, color, bold, italic);
     }
 
-    /// Draw text with color from RGBA array
-    pub fn draw_text_rgba(&mut self, text: &str, x: f32, y: f32, font_size: f32, rgba: [u8; 4]) {
-        self.window
-            .draw_text(text, x, y, font_size, color_from_rgba(rgba));
+    /// Draw text with a full surrounding dark glow (non-styled convenience method).
+    pub fn draw_text_glowed(&mut self, text: &str, x: f32, y: f32, font_size: f32, color: Color) {
+        self.draw_text_with_glow(text, x, y, font_size, color, false, false);
     }
 
     /// Measure text dimensions

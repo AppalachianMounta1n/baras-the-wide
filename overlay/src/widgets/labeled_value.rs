@@ -17,6 +17,8 @@ pub struct LabeledValue {
     pub value: String,
     pub label_color: Color,
     pub value_color: Color,
+    pub label_bold: bool,
+    pub value_bold: bool,
 }
 
 impl LabeledValue {
@@ -26,6 +28,8 @@ impl LabeledValue {
             value: value.into(),
             label_color: colors::label_dim(),
             value_color: colors::white(),
+            label_bold: true,
+            value_bold: true,
         }
     }
 
@@ -36,6 +40,16 @@ impl LabeledValue {
 
     pub fn with_value_color(mut self, color: Color) -> Self {
         self.value_color = color;
+        self
+    }
+
+    pub fn with_label_bold(mut self, bold: bool) -> Self {
+        self.label_bold = bold;
+        self
+    }
+
+    pub fn with_value_bold(mut self, bold: bool) -> Self {
+        self.value_bold = bold;
         self
     }
 
@@ -50,20 +64,29 @@ impl LabeledValue {
     pub fn render(&self, frame: &mut OverlayFrame, x: f32, y: f32, width: f32, font_size: f32) {
         let shadow = colors::text_shadow();
 
-        // Draw label on left (shadow + bold for readability)
+        // Draw label on left (shadow for readability)
         frame.draw_text_styled(
             &self.label,
             x + SHADOW_OFFSET,
             y + SHADOW_OFFSET,
             font_size,
             shadow,
-            true,
+            self.label_bold,
             false,
         );
-        frame.draw_text_styled(&self.label, x, y, font_size, self.label_color, true, false);
+        frame.draw_text_styled(
+            &self.label,
+            x,
+            y,
+            font_size,
+            self.label_color,
+            self.label_bold,
+            false,
+        );
 
-        // Draw value on right (right-aligned, shadow + bold for readability)
-        let (text_width, _) = frame.measure_text(&self.value, font_size);
+        // Draw value on right (right-aligned, shadow for readability)
+        let (text_width, _) =
+            frame.measure_text_styled(&self.value, font_size, self.value_bold, false);
         let value_x = x + width - text_width;
         frame.draw_text_styled(
             &self.value,
@@ -71,7 +94,7 @@ impl LabeledValue {
             y + SHADOW_OFFSET,
             font_size,
             shadow,
-            true,
+            self.value_bold,
             false,
         );
         frame.draw_text_styled(
@@ -80,7 +103,64 @@ impl LabeledValue {
             y,
             font_size,
             self.value_color,
-            true,
+            self.value_bold,
+            false,
+        );
+    }
+
+    /// Render with separate font sizes for label and value.
+    /// Value is right-aligned, label is left-aligned.
+    pub fn render_scaled(
+        &self,
+        frame: &mut OverlayFrame,
+        x: f32,
+        y: f32,
+        width: f32,
+        label_font_size: f32,
+        value_font_size: f32,
+    ) {
+        let shadow = colors::text_shadow();
+
+        // Draw label on left
+        frame.draw_text_styled(
+            &self.label,
+            x + SHADOW_OFFSET,
+            y + SHADOW_OFFSET,
+            label_font_size,
+            shadow,
+            self.label_bold,
+            false,
+        );
+        frame.draw_text_styled(
+            &self.label,
+            x,
+            y,
+            label_font_size,
+            self.label_color,
+            self.label_bold,
+            false,
+        );
+
+        // Draw value on right (right-aligned)
+        let (text_width, _) =
+            frame.measure_text_styled(&self.value, value_font_size, self.value_bold, false);
+        let value_x = x + width - text_width;
+        frame.draw_text_styled(
+            &self.value,
+            value_x + SHADOW_OFFSET,
+            y + SHADOW_OFFSET,
+            value_font_size,
+            shadow,
+            self.value_bold,
+            false,
+        );
+        frame.draw_text_styled(
+            &self.value,
+            value_x,
+            y,
+            value_font_size,
+            self.value_color,
+            self.value_bold,
             false,
         );
     }

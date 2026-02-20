@@ -1,8 +1,12 @@
 //! Common utility functions for overlay rendering
 //!
 //! These are shared across different overlay types.
+//! Number formatting is delegated to `baras_types::formatting` for consistency.
 
 use tiny_skia::Color;
+
+// Re-export formatting functions from baras-types for convenience
+pub use baras_types::formatting;
 
 /// Convert [u8; 4] RGBA array to tiny_skia Color
 #[inline]
@@ -21,25 +25,26 @@ pub fn truncate_name(name: &str, max_chars: usize) -> String {
 }
 
 /// Format a duration in seconds as MM:SS
+///
+/// Delegates to [`baras_types::formatting::format_duration_u64`].
 pub fn format_time(secs: u64) -> String {
-    format!("{}:{:02}", secs / 60, secs % 60)
+    formatting::format_duration_u64(secs)
 }
 
 /// Format a duration in seconds as compact M:SS string
+///
+/// Delegates to [`baras_types::formatting::format_duration_f32`].
 pub fn format_duration_short(secs: f32) -> String {
-    let total_secs = secs.round() as u64;
-    format!("{}:{:02}", total_secs / 60, total_secs % 60)
+    formatting::format_duration_f32(secs)
 }
 
-/// Format a large number with K/M suffix for compact display
+/// Format a large number with K/M suffix for compact display.
+///
+/// This is a convenience wrapper that passes `european = false`.
+/// Overlays should use [`formatting::format_compact`] directly with their
+/// `european_number_format` field for locale-aware formatting.
 pub fn format_number(n: i64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.2}M", n as f64 / 1_000_000.0)
-    } else if n >= 10_000 {
-        format!("{:.2}K", n as f64 / 1_000.0)
-    } else {
-        format!("{}", n)
-    }
+    formatting::format_compact(n, false)
 }
 
 #[cfg(test)]
@@ -63,9 +68,12 @@ mod tests {
 
     #[test]
     fn test_format_number() {
+        // Now standardized to K at 1,000+ threshold
         assert_eq!(format_number(500), "500");
-        assert_eq!(format_number(9999), "9999");
-        assert_eq!(format_number(10000), "10.0K");
-        assert_eq!(format_number(1500000), "1.5M");
+        assert_eq!(format_number(999), "999");
+        assert_eq!(format_number(1000), "1.00K");
+        assert_eq!(format_number(9999), "9.99K");
+        assert_eq!(format_number(10000), "10.00K");
+        assert_eq!(format_number(1500000), "1.50M");
     }
 }

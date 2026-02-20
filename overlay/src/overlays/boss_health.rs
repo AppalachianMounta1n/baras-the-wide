@@ -8,7 +8,8 @@ use baras_core::context::BossHealthConfig;
 use super::{Overlay, OverlayConfigUpdate, OverlayData};
 use crate::frame::OverlayFrame;
 use crate::platform::{OverlayConfig, PlatformError};
-use crate::utils::{color_from_rgba, format_number};
+use baras_types::formatting;
+use crate::utils::color_from_rgba;
 use crate::widgets::ProgressBar;
 use crate::widgets::colors;
 
@@ -42,6 +43,7 @@ pub struct BossHealthOverlay {
     frame: OverlayFrame,
     config: BossHealthConfig,
     data: BossHealthData,
+    european_number_format: bool,
 }
 
 impl BossHealthOverlay {
@@ -59,6 +61,7 @@ impl BossHealthOverlay {
             frame,
             config,
             data: BossHealthData::default(),
+            european_number_format: false,
         })
     }
 
@@ -122,12 +125,43 @@ impl BossHealthOverlay {
         }
     }
 
+    /// Pre-compute the total content height for all visible entries.
+    /// This allows drawing the background only to the content area.
+    fn compute_content_height(&self, entries: &[OverlayHealthEntry], compression: f32) -> f32 {
+        let padding = self.frame.scaled(BASE_PADDING);
+        let bar_height = self.frame.scaled(BASE_BAR_HEIGHT) * compression;
+        let label_height = self.frame.scaled(BASE_LABEL_HEIGHT) * compression;
+        let entry_spacing = self.frame.scaled(BASE_ENTRY_SPACING) * compression;
+        let label_bar_gap = self.frame.scaled(BASE_LABEL_BAR_GAP) * compression;
+        let label_font_size =
+            self.frame.scaled(BASE_LABEL_FONT_SIZE) * compression * self.config.font_scale.clamp(1.0, 2.0);
+
+        let mut y = padding;
+
+        for entry in entries {
+            // Label + gap + bar
+            y += label_height + label_bar_gap + bar_height;
+
+            // Target line if shown
+            if self.config.show_target && entry.target_name.is_some() {
+                let target_font_size = label_font_size * 0.85;
+                y += target_font_size + 2.0;
+            }
+
+            y += entry_spacing;
+        }
+
+        // Replace the trailing entry_spacing with bottom padding
+        if !entries.is_empty() {
+            y = y - entry_spacing + padding;
+        }
+
+        y
+    }
+
     /// Render the overlay
     pub fn render(&mut self) {
         let width = self.frame.width() as f32;
-
-        // Begin frame (clear, background, border)
-        self.frame.begin_frame();
 
         // Filter out dead bosses (0% health) and collect living ones
         let entries: Vec<_> = self
@@ -141,6 +175,11 @@ impl BossHealthOverlay {
 
         // Nothing to render if no living bosses
         if entries.is_empty() {
+            if self.config.dynamic_background {
+                self.frame.begin_frame_with_content_height(0.0);
+            } else {
+                self.frame.begin_frame();
+            }
             self.frame.end_frame();
             return;
         }
@@ -152,14 +191,25 @@ impl BossHealthOverlay {
         // Calculate compression factor based on entry count
         let compression = self.compression_factor(entries.len(), has_targets);
 
+        // Pre-compute content height, then begin frame with content-aware background
+        let content_height = self.compute_content_height(&entries, compression);
+        if self.config.dynamic_background {
+            self.frame.begin_frame_with_content_height(content_height);
+        } else {
+            self.frame.begin_frame();
+        }
+
+        // Clamp font_scale to sensible range
+        let font_scale = self.config.font_scale.clamp(1.0, 2.0);
+
         // Apply compression to entry-specific dimensions
         let padding = self.frame.scaled(BASE_PADDING);
         let bar_height = self.frame.scaled(BASE_BAR_HEIGHT) * compression;
         let label_height = self.frame.scaled(BASE_LABEL_HEIGHT) * compression;
         let entry_spacing = self.frame.scaled(BASE_ENTRY_SPACING) * compression;
         let label_bar_gap = self.frame.scaled(BASE_LABEL_BAR_GAP) * compression;
-        let font_size = self.frame.scaled(BASE_FONT_SIZE) * compression;
-        let label_font_size = self.frame.scaled(BASE_LABEL_FONT_SIZE) * compression;
+        let font_size = self.frame.scaled(BASE_FONT_SIZE) * compression * font_scale;
+        let label_font_size = self.frame.scaled(BASE_LABEL_FONT_SIZE) * compression * font_scale;
 
         let bar_color = color_from_rgba(self.config.bar_color);
         let font_color = color_from_rgba(self.config.font_color);
@@ -178,18 +228,16 @@ impl BossHealthOverlay {
 
             // Draw boss name above bar (y is baseline, so offset by font size)
             let name_y = y + actual_font_size;
-            // Shadow for readability
-            self.frame.draw_text(&entry.name, padding + 1.0, name_y + 1.0, actual_font_size, colors::text_shadow());
-            self.frame.draw_text(&entry.name, padding, name_y, actual_font_size, font_color);
+            self.frame.draw_text_glowed(&entry.name, padding, name_y, actual_font_size, font_color);
 
             y += label_height + label_bar_gap;
 
             // Format health text for inside bar: "(1.5M/2.0M)"
-            let health_text = format_number(entry.current as i64);
+            let health_text = formatting::format_compact(entry.current as i64, self.european_number_format);
 
             // Format percentage for right side
             let percent_text = if self.config.show_percent {
-                format!("{:.1}%", entry.percent())
+                formatting::format_pct(entry.percent() as f64, self.european_number_format)
             } else {
                 String::new()
             };
@@ -222,9 +270,7 @@ impl BossHealthOverlay {
                 let (text_width, _) = self.frame.measure_text(&target_text, target_font_size);
                 let target_x = padding + content_width - text_width;
                 let target_y = y + target_font_size + 1.0;
-                // Shadow for readability
-                self.frame.draw_text(&target_text, target_x + 1.0, target_y + 1.0, target_font_size, colors::text_shadow());
-                self.frame.draw_text(&target_text, target_x, target_y, target_font_size, font_color);
+                self.frame.draw_text_glowed(&target_text, target_x, target_y, target_font_size, font_color);
                 y += target_font_size + 2.0;
             }
 
@@ -251,9 +297,10 @@ impl Overlay for BossHealthOverlay {
     }
 
     fn update_config(&mut self, config: OverlayConfigUpdate) {
-        if let OverlayConfigUpdate::BossHealth(boss_config, alpha) = config {
+        if let OverlayConfigUpdate::BossHealth(boss_config, alpha, european) = config {
             self.set_config(boss_config);
             self.set_background_alpha(alpha);
+            self.european_number_format = european;
         }
     }
 

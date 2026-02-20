@@ -112,36 +112,39 @@ pub enum OverlayData {
 }
 
 /// Configuration updates that can be sent to overlays
+///
+/// Each variant carries the overlay-specific config, background alpha (`u8`),
+/// and `european_number_format` (`bool`) for number display formatting.
 #[derive(Debug, Clone)]
 pub enum OverlayConfigUpdate {
-    /// Appearance config for metric overlays (+ alpha, show_empty, stack_bottom, scale, show_class_icons)
-    Metric(OverlayAppearanceConfig, u8, bool, bool, f32, bool),
-    /// Config for personal overlay (+ background alpha)
-    Personal(PersonalOverlayConfig, u8),
-    /// Config for raid overlay (+ background alpha)
-    Raid(RaidOverlayConfig, u8),
-    /// Config for boss health overlay (+ background alpha)
-    BossHealth(BossHealthConfig, u8),
-    /// Config for timer A overlay (+ background alpha)
-    TimersA(TimerOverlayConfig, u8),
-    /// Config for timer B overlay (+ background alpha)
-    TimersB(TimerOverlayConfig, u8),
-    /// Config for effects overlay (+ background alpha) - legacy
-    Effects(TimerOverlayConfig, u8),
-    /// Config for challenge overlay (+ background alpha)
-    Challenge(ChallengeOverlayConfig, u8),
-    /// Config for alerts overlay (+ background alpha)
-    Alerts(AlertsOverlayConfig, u8),
-    /// Config for Effects A overlay (+ background alpha)
-    EffectsA(EffectsABConfig, u8),
-    /// Config for Effects B overlay (+ background alpha)
-    EffectsB(EffectsABConfig, u8),
-    /// Config for cooldown overlay (+ background alpha)
-    Cooldowns(CooldownConfig, u8),
-    /// Config for DOT tracker overlay (+ background alpha)
-    DotTracker(DotTrackerConfig, u8),
-    /// Config for notes overlay (+ background alpha)
-    Notes(NotesConfig, u8),
+    /// Appearance config for metric overlays (+ alpha, show_empty, stack_bottom, scale, show_class_icons, font_scale, dynamic_background, european)
+    Metric(OverlayAppearanceConfig, u8, bool, bool, f32, bool, f32, bool, bool),
+    /// Config for personal overlay (+ background alpha, european)
+    Personal(PersonalOverlayConfig, u8, bool),
+    /// Config for raid overlay (+ background alpha, european)
+    Raid(RaidOverlayConfig, u8, bool),
+    /// Config for boss health overlay (+ background alpha, european)
+    BossHealth(BossHealthConfig, u8, bool),
+    /// Config for timer A overlay (+ background alpha, european)
+    TimersA(TimerOverlayConfig, u8, bool),
+    /// Config for timer B overlay (+ background alpha, european)
+    TimersB(TimerOverlayConfig, u8, bool),
+    /// Config for effects overlay (+ background alpha, european) - legacy
+    Effects(TimerOverlayConfig, u8, bool),
+    /// Config for challenge overlay (+ background alpha, european)
+    Challenge(ChallengeOverlayConfig, u8, bool),
+    /// Config for alerts overlay (+ background alpha, european)
+    Alerts(AlertsOverlayConfig, u8, bool),
+    /// Config for Effects A overlay (+ background alpha, european)
+    EffectsA(EffectsABConfig, u8, bool),
+    /// Config for Effects B overlay (+ background alpha, european)
+    EffectsB(EffectsABConfig, u8, bool),
+    /// Config for cooldown overlay (+ background alpha, european)
+    Cooldowns(CooldownConfig, u8, bool),
+    /// Config for DOT tracker overlay (+ background alpha, european)
+    DotTracker(DotTrackerConfig, u8, bool),
+    /// Config for notes overlay (+ background alpha, european)
+    Notes(NotesConfig, u8, bool),
 }
 
 /// Position information for an overlay

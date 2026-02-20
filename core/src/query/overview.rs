@@ -265,4 +265,104 @@ impl EncounterQuery<'_> {
         }
         Ok(results)
     }
+
+    /// Query final health state of all NPC instances in the encounter.
+    /// Partitions by target_id (unique instance), sorted by max_hp DESC, limited to 36.
+    ///
+    /// Uses FIRST appearance for max_hp (avoids SWTOR combat log bug where AoE events
+    /// can report incorrect max_hp from other entities).
+    pub async fn query_npc_health(
+        &self,
+        time_range: Option<&TimeRange>,
+    ) -> Result<Vec<NpcHealthRow>, String> {
+        let time_filter = time_range
+            .map(|tr| format!("AND {}", tr.sql_filter()))
+            .unwrap_or_default();
+
+        // Death/damage events can trail slightly after combat exit; give a 2s buffer
+        let death_time_filter = time_range
+            .map(|tr| {
+                format!(
+                    "AND {}",
+                    TimeRange::new(tr.start, tr.end + 2.0).sql_filter()
+                )
+            })
+            .unwrap_or_default();
+
+        let batches = self
+            .sql(&format!(
+                r#"
+            WITH first_hp AS (
+                SELECT target_id, target_name, target_max_hp,
+                       ROW_NUMBER() OVER (PARTITION BY target_id ORDER BY line_number ASC) as rn
+                FROM events
+                WHERE target_entity_type = 'Npc' AND target_max_hp > 0
+                  AND effect_id != {targetset} {time_filter}
+            ),
+            last_hp AS (
+                SELECT target_id, target_hp,
+                       ROW_NUMBER() OVER (PARTITION BY target_id ORDER BY line_number DESC) as rn
+                FROM events
+                WHERE target_entity_type = 'Npc' AND target_max_hp > 0
+                  AND effect_id != {targetset} {death_time_filter}
+            ),
+            first_seen AS (
+                SELECT target_id, MIN(combat_time_secs) as first_seen_secs
+                FROM events
+                WHERE target_entity_type = 'Npc'
+                  AND effect_id != {targetset} {time_filter}
+                GROUP BY target_id
+            ),
+            deaths AS (
+                SELECT target_id, MIN(combat_time_secs) as death_time_secs
+                FROM events
+                WHERE target_entity_type = 'Npc' AND effect_id = {death_id} {death_time_filter}
+                GROUP BY target_id
+            )
+            SELECT fh.target_name,
+                   CAST(COALESCE(fs.first_seen_secs, 0) AS FLOAT) as first_seen_secs,
+                   CAST(d.death_time_secs AS FLOAT) as death_time_secs,
+                   CAST(lh.target_hp AS BIGINT) as final_hp,
+                   CAST(fh.target_max_hp AS BIGINT) as max_hp
+            FROM first_hp fh
+            JOIN last_hp lh ON fh.target_id = lh.target_id AND lh.rn = 1
+            LEFT JOIN first_seen fs ON fh.target_id = fs.target_id
+            LEFT JOIN deaths d ON fh.target_id = d.target_id
+            WHERE fh.rn = 1
+            ORDER BY fh.target_max_hp DESC, fh.target_name ASC
+            "#,
+                targetset = effect_id::TARGETSET,
+                death_id = effect_id::DEATH,
+            ))
+            .await?;
+
+        let mut results = Vec::new();
+        for batch in &batches {
+            let names = col_strings(batch, 0)?;
+            let first_seens = col_f32(batch, 1)?;
+            let death_times = col_opt_f32(batch, 2)?;
+            let hps = col_i64(batch, 3)?;
+            let max_hps = col_i64(batch, 4)?;
+
+            for i in 0..batch.num_rows() {
+                let max_hp = max_hps[i];
+                // If the NPC has a death record, final HP is 0 regardless of last event
+                let final_hp = if death_times[i].is_some() { 0 } else { hps[i].max(0) };
+                let pct = if max_hp > 0 {
+                    (final_hp as f32 / max_hp as f32) * 100.0
+                } else {
+                    0.0
+                };
+                results.push(NpcHealthRow {
+                    name: names[i].clone(),
+                    first_seen_secs: first_seens[i],
+                    death_time_secs: death_times[i],
+                    max_hp,
+                    final_hp,
+                    final_hp_pct: pct,
+                });
+            }
+        }
+        Ok(results)
+    }
 }

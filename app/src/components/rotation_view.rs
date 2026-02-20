@@ -8,6 +8,7 @@ use dioxus::prelude::*;
 use crate::api;
 use crate::api::{RotationAnalysis, TimeRange};
 use crate::components::ability_icon::AbilityIcon;
+use baras_types::formatting;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct RotationViewProps {
@@ -17,10 +18,17 @@ pub struct RotationViewProps {
     /// Optional callback to update the parent's time range (e.g. from context menu)
     #[props(default)]
     pub on_range_change: Option<EventHandler<TimeRange>>,
+    /// European number format (swaps `.` and `,`)
+    #[props(default)]
+    pub european: bool,
 }
 
 #[component]
 pub fn RotationView(props: RotationViewProps) -> Element {
+    let eu = props.european;
+    let format_number = move |value: f64| formatting::format_compact_f64(value, eu);
+    let format_pct = move |count: i64, total: i64| formatting::format_pct_ratio(count, total, eu);
+
     let mut available_abilities = use_signal(|| Vec::<(i64, String)>::new());
     let mut selected_anchor = use_signal(|| None::<i64>);
     let mut rotation = use_signal(|| None::<RotationAnalysis>);
@@ -174,7 +182,7 @@ pub fn RotationView(props: RotationViewProps) -> Element {
                                         }
                                     }
                                     span { class: "cycle-stat duration",
-                                        "{cycle.duration_secs:.1}s"
+                                        "{formatting::format_decimal(cycle.duration_secs, 1, eu)}s"
                                     }
                                 }
                                 div { class: "rotation-slots",
@@ -223,7 +231,7 @@ pub fn RotationView(props: RotationViewProps) -> Element {
                                             }
                                             // GCD gap timing
                                             match slot.gcd_gap {
-                                                Some(gap) => rsx! { span { class: "gcd-gap-time", "{gap:.3}" } },
+                                                Some(gap) => rsx! { span { class: "gcd-gap-time", "{formatting::format_decimal(gap, 3, eu)}" } },
                                                 None => rsx! { span { class: "gcd-gap-time", visibility: "hidden", "0.000" } },
                                             }
                                         }
@@ -276,19 +284,4 @@ pub fn RotationView(props: RotationViewProps) -> Element {
     }
 }
 
-fn format_number(value: f64) -> String {
-    if value >= 1_000_000.0 {
-        format!("{:.2}M", value / 1_000_000.0)
-    } else if value >= 1_000.0 {
-        format!("{:.1}K", value / 1_000.0)
-    } else {
-        format!("{:.0}", value)
-    }
-}
 
-fn format_pct(count: i64, total: i64) -> String {
-    if total == 0 {
-        return "0%".to_string();
-    }
-    format!("{:.1}%", count as f64 / total as f64 * 100.0)
-}
